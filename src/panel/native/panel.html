@@ -62,13 +62,37 @@
   #model-select, #effort-select, #preset-select { flex: none; max-width: 110px; background: var(--input-bg); color: var(--fg);
                    border: 1px solid var(--border); border-radius: 2px; padding: 2px 4px; font-size: 12px; }
 
-  #attach-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 4px; }
+  /* Draft-attachment rail — mirrors the official AttachmentRail (ui-attachment):
+     64×64 rounded tiles in a scrollbar-less horizontal rail, hover-revealed
+     remove, click to zoom. The previous 22px chip + "image.png" label was
+     impossible to tell apart once more than one image was attached. */
+  #attach-row { display: flex; gap: 10px; padding: 4px 0 6px; overflow-x: auto; overflow-y: hidden;
+                scrollbar-width: none; }
+  #attach-row::-webkit-scrollbar { display: none; }
   #attach-row[hidden] { display: none; } /* explicit display overrides [hidden]; re-assert */
-  .attach-chip { display: flex; align-items: center; gap: 4px; max-width: 180px; border: 1px solid var(--border);
-                 border-radius: 3px; padding: 2px 4px; background: var(--input-bg); font-size: 11px; }
-  .attach-chip img { width: 22px; height: 22px; object-fit: cover; border-radius: 2px; flex: none; }
-  .attach-chip .aname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .attach-chip .ax { cursor: pointer; color: var(--err); font-weight: 700; padding: 0 2px; }
+  .attach-item { position: relative; flex: 0 0 64px; width: 64px; height: 64px; }
+  .attach-thumb { display: block; width: 64px; height: 64px; padding: 0; overflow: hidden; cursor: zoom-in;
+                  border: 1px solid var(--border); border-radius: 16px; background: var(--input-bg); }
+  .attach-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .attach-x { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; padding: 0; display: grid;
+              place-items: center; font-size: 12px; line-height: 1; cursor: pointer; border: none;
+              border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; opacity: 0;
+              transition: opacity .2s ease-in-out; }
+  .attach-item:hover .attach-x, .attach-x:focus-visible { opacity: 1; }
+  @media (pointer: coarse) { .attach-x { opacity: 1; } }
+
+  /* Full-size preview — the official ImageLightbox shape. */
+  #lightbox { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; }
+  #lightbox[hidden] { display: none; }
+  #lightbox .lb-mask { position: absolute; inset: 0; background: rgba(0,0,0,.62); }
+  #lightbox .lb-img { position: relative; max-width: 100%; max-height: calc(100vh - 64px); object-fit: contain;
+                      border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+  #lightbox .lb-close { position: fixed; top: 12px; right: 12px; width: 28px; height: 28px; padding: 0;
+                        display: grid; place-items: center; font-size: 14px; cursor: pointer;
+                        border: 1px solid var(--border); border-radius: 999px; background: var(--input-bg);
+                        color: var(--fg); }
+  #lightbox .lb-cap { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center;
+                      color: var(--muted); font-size: 11px; }
 
   #messages { flex: 1; overflow-y: auto; padding: 8px 10px; }
   #history-sentinel { height: 1px; }
@@ -98,9 +122,9 @@
   /* Transcript images: what the user actually sent, shown in the bubble the
      way the official conversation view does (the log only stores a ref, so the
      bytes arrive via session.attachment and patch into place). */
-  .u-images { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 4px; }
-  .u-image { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
-             background: var(--input-bg); }
+  .u-images { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin: 2px 0 4px; }
+  .u-image { position: relative; border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+             background: var(--input-bg); cursor: zoom-in; }
   .u-image img { display: block; max-width: 220px; max-height: 160px; object-fit: contain; }
   .u-image-ph { width: 120px; height: 68px; display: flex; align-items: center; justify-content: center;
                 color: var(--muted); font-size: 11px; }
@@ -1498,6 +1522,7 @@
       ph.className = "u-image-ph";
       if (failed) {
         ph.textContent = "🖼 图片读取失败";
+        ph.title = (cached && cached.error) || "";
       } else {
         ph.textContent = "🖼 加载中…";
         ph.setAttribute("data-attachment", a.attachmentId);
@@ -1512,6 +1537,12 @@
       span.textContent = cap;
       cell.appendChild(span);
     }
+    // Click to zoom: resolved at click time so it works both for bytes we
+    // already hold and for ones patched in after the attachment reply.
+    cell.onclick = function () {
+      var im = cell.querySelector("img");
+      if (im) openLightbox(im.src, imageLabel(a));
+    };
     return cell;
   }
 
@@ -1932,7 +1963,7 @@
         delete imageWaiters[msg.requestId];
         if (!attId) break;
         if (msg.data) imageCache[attId] = { data: msg.data, mediaType: msg.mediaType || "image/png" };
-        else imageCache[attId] = { failed: true };
+        else imageCache[attId] = { failed: true, error: msg.error || "" };
         // Patch every placeholder already on screen, then rebuild so cells
         // rendered later (e.g. after scrolling) pick the bytes up as well.
         var waiting = messagesEl.querySelectorAll("[data-attachment]");
@@ -1946,6 +1977,7 @@
             holder.replaceChild(real, waiting[wi]);
           } else {
             waiting[wi].textContent = "🖼 图片读取失败";
+            waiting[wi].title = msg.error || "";
           }
         }
         scheduleRender();
@@ -3138,25 +3170,85 @@
 
   /* ---------- image attachments (Ctrl+V paste) ---------- */
   var attachments = [];
+  /**
+   * Draft rail, mirroring the official AttachmentRail: 64×64 rounded tiles in a
+   * horizontal rail, hover-revealed remove (always on for coarse pointers), and
+   * a click that opens the full-size lightbox. Captions live in the tooltip —
+   * the point is to RECOGNIZE the picture, which a 22px chip never allowed.
+   */
   function renderAttachments() {
     attachEl.innerHTML = "";
     if (!attachments.length) { attachEl.hidden = true; return; }
     attachEl.hidden = false;
     attachments.forEach(function (a, i) {
-      var chip = document.createElement("div");
-      chip.className = "attach-chip";
+      var item = document.createElement("div");
+      item.className = "attach-item";
+      var src = "data:" + a.mediaType + ";base64," + a.data;
+      var caption = a.name || (a.mediaType.replace("image/", "") + " 图片");
+      var thumb = document.createElement("button");
+      thumb.type = "button";
+      thumb.className = "attach-thumb";
+      thumb.title = caption + " · 点击放大";
       var img = document.createElement("img");
-      img.src = "data:" + a.mediaType + ";base64," + a.data;
-      var name = document.createElement("span");
-      name.className = "aname";
-      name.textContent = a.name || (a.mediaType.replace("image/", "") + " 图片");
-      var x = document.createElement("span");
-      x.className = "ax";
+      img.src = src;
+      thumb.appendChild(img);
+      thumb.onclick = function () { openLightbox(src, caption); };
+      var x = document.createElement("button");
+      x.type = "button";
+      x.className = "attach-x";
       x.textContent = "×";
-      x.onclick = function (idx) { return function () { attachments.splice(idx, 1); renderAttachments(); }; }(i);
-      chip.appendChild(img); chip.appendChild(name); chip.appendChild(x);
-      attachEl.appendChild(chip);
+      x.title = "移除这张图";
+      x.onclick = function (idx) {
+        return function (ev) {
+          if (ev) ev.stopPropagation();
+          attachments.splice(idx, 1);
+          renderAttachments();
+        };
+      }(i);
+      item.appendChild(thumb);
+      item.appendChild(x);
+      attachEl.appendChild(item);
     });
+  }
+
+  /* ---------- full-size preview (official ImageLightbox) ---------- */
+  var lightboxEl = null;
+  function openLightbox(src, caption) {
+    if (!src) return;
+    if (!lightboxEl) {
+      lightboxEl = document.createElement("div");
+      lightboxEl.id = "lightbox";
+      lightboxEl.hidden = true;
+      var mask = document.createElement("div");
+      mask.className = "lb-mask";
+      var lbImg = document.createElement("img");
+      lbImg.className = "lb-img";
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "lb-close";
+      close.textContent = "✕";
+      close.title = "关闭（Esc）";
+      var cap = document.createElement("div");
+      cap.className = "lb-cap";
+      lightboxEl.appendChild(mask);
+      lightboxEl.appendChild(lbImg);
+      lightboxEl.appendChild(close);
+      lightboxEl.appendChild(cap);
+      document.body.appendChild(lightboxEl);
+      mask.onclick = function () { closeLightbox(); };
+      close.onclick = function () { closeLightbox(); };
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape" && lightboxEl && !lightboxEl.hidden) closeLightbox();
+      });
+    }
+    lightboxEl.querySelector(".lb-img").src = src;
+    lightboxEl.querySelector(".lb-cap").textContent = caption || "";
+    lightboxEl.hidden = false;
+  }
+  function closeLightbox() {
+    if (!lightboxEl || lightboxEl.hidden) return;
+    lightboxEl.hidden = true;
+    lightboxEl.querySelector(".lb-img").src = "";
   }
   inputEl.addEventListener("paste", function (e) {
     var items = e.clipboardData && e.clipboardData.items;
@@ -3173,6 +3265,9 @@
           var result = String(reader.result || "");
           var comma = result.indexOf(",");
           if (comma < 0) return;
+          // Attach as-is: admission is the harness's call, so the request (and
+          // the harness's own refusal log) always happens exactly as it would
+          // without this panel.
           attachments.push({ mediaType: mt, data: result.slice(comma + 1), name: f.name || "" });
           renderAttachments();
         }; })(file, it.type);

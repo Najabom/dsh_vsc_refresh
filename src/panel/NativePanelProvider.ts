@@ -34,24 +34,63 @@ const OFFICIAL_PRESET_COPY: Record<string, { name: string; description: string }
 };
 
 /**
- * Localized copy for a refused model switch.
- *
- * The harness rejects `session.selectModel` whenever the session already holds
- * image content (pending or historical) and the target model's
- * `inputModalities` exclude `image` — dsh-host-apiproxy `sessions.selectModel`
- * returns `model-unavailable` for that case. It is a core policy, not a bridge
- * defect, so its raw English RpcErrorResult must never be shown verbatim: the
- * bare `model-unavailable: Model "…" does not accept image input…` line reads
- * like our bug and gets the bridge blamed for the harness's rule.
+ * Chinese copy for the harness's attachment-admission refusals
+ * (dsh-attachment `ATTACHMENT_REASONS`). On the wire these arrive as
+ * `attachment-error` with `details.reason`; their English text is what reached
+ * users as a bare red warning that looked like a defect in this extension.
  */
-function describeModelSwitchFailure(error: unknown): string {
-  if (error instanceof RpcErrorResult && error.rpcError.code === "model-unavailable") {
-    return "切换模型失败：该模型不接受图像输入，而本会话已包含图片（DSH 本体的限制，不是桥接的问题）。请改选支持图像输入的模型。";
-  }
+/**
+ * Chinese copy for the harness's attachment-admission refusals
+ * (dsh-attachment `ATTACHMENT_REASONS`). On the wire these arrive as
+ * `attachment-error` with `details.reason`; their English text is what reached
+ * users as a bare red warning that looked like a defect in this extension.
+ *
+ * WORDS ONLY: the request still travels to the harness and the harness still
+ * refuses it, so core keeps behaving — and logging — exactly as before. No
+ * limit is duplicated here: quoting this deployment's numbers would be the
+ * bridge re-modelling a core fact that the deployment config owns.
+ */
+const ATTACHMENT_REASON_COPY: Record<string, string> = {
+  IMAGE_DIMENSION_TOO_LARGE: "图片单边像素超过本体上限，请先裁剪或缩小后再发。",
+  IMAGE_TOO_MANY_PIXELS: "图片总像素超过本体上限，请先缩小后再发。",
+  IMAGE_TOO_LARGE: "单张图片体积超过本体上限，请压缩后再发。",
+  TOO_MANY_IMAGES: "单条消息的图片数量超过本体上限，请分批发送。",
+  IMAGES_TOO_LARGE: "单条消息的图片总体积超过本体上限，请分批发送。",
+  UNSUPPORTED_IMAGE_TYPE: "本部署不接受这种图片格式。",
+  IMAGE_TYPE_MISMATCH: "图片实际格式与声明的类型不一致，请重新复制粘贴。",
+  INVALID_IMAGE: "图片已损坏或格式无法识别，请重新复制粘贴。",
+  INVALID_IMAGE_BASE64: "图片数据不完整，请重新复制粘贴。",
+  INVALID_ATTACHMENT_REF: "这个图片引用无效（会话记录里查不到）。",
+  ATTACHMENT_NOT_FOUND: "这张图片在本体里已不存在（可能已被清理）。",
+  ATTACHMENT_NOT_REFERENCED: "这张图片不属于当前会话，本体拒绝读取。",
+  ATTACHMENT_CORRUPT: "本体里的这张图片已损坏，无法读取。",
+  ATTACHMENT_READ_FAILED: "本体读取这张图片失败。",
+  ATTACHMENT_WRITE_FAILED: "本体保存这张图片失败（磁盘或权限问题）。",
+};
+
+/**
+ * Turn any request failure into Chinese panel copy — presentation only.
+ *
+ * The harness answers refusals with English code+message pairs
+ * (`attachment-error` with a `details.reason`, `model-unavailable`, …). Shown
+ * verbatim they read like a defect in this extension, so every harness refusal
+ * is translated AND explicitly attributed to DSH core; an unknown refusal keeps
+ * its code for support while still naming the source. Local (VS Code / fs)
+ * failures just get the Chinese prefix.
+ */
+function describeHarnessFailure(prefix: string, error: unknown): string {
   if (error instanceof RpcErrorResult) {
-    return `切换模型失败：${error.rpcError.message}（${error.rpcError.code}）`;
+    const { code, message, details } = error.rpcError;
+    const reason = typeof details.reason === "string" ? details.reason : undefined;
+    if (code === "attachment-error" && reason && ATTACHMENT_REASON_COPY[reason]) {
+      return `${prefix}：${ATTACHMENT_REASON_COPY[reason]}（DSH 本体限制，不是本扩展的问题）`;
+    }
+    if (code === "model-unavailable") {
+      return `${prefix}：该模型不接受图像输入，而本会话已包含图片（DSH 本体的限制，不是本扩展的问题）。请改选支持图像输入的模型。`;
+    }
+    return `${prefix}：DSH 本体拒绝了这次请求（${code}）。原文：${message}`;
   }
-  return `切换模型失败：${(error as Error).message}`;
+  return `${prefix}：${(error as Error).message}`;
 }
 
 /**
@@ -260,7 +299,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         this.postPermissions();
       }
     } catch (error) {
-      this.post({ type: "error", message: `会话列表失败: ${(error as Error).message}` });
+      this.post({ type: "error", message: describeHarnessFailure("会话列表失败", error) });
     }
   }
 
@@ -327,7 +366,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           await this.client.selectModel(this.activeSessionId, message.provider, message.model, message.reasoningEffort);
           await this.postModels();
         } catch (error) {
-          this.post({ type: "error", message: describeModelSwitchFailure(error) });
+          this.post({ type: "error", message: describeHarnessFailure("切换模型失败", error) });
         }
         break;
       }
@@ -356,7 +395,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             type: "attachment",
             requestId: message.requestId,
             attachmentId: message.attachmentId,
-            error: (error as Error).message,
+            error: describeHarnessFailure("读取图片失败", error),
           });
         }
         break;
@@ -373,7 +412,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           this.activeSessionId = sessionId;
           await this.refresh();
         } catch (error) {
-          this.post({ type: "error", message: `新建会话失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("新建会话失败", error) });
         }
         break;
       }
@@ -384,14 +423,14 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           if (this.activeSessionId === message.sessionId) this.activeSessionId = null;
           await this.refresh();
         } catch (error) {
-          this.post({ type: "error", message: `删除会话失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("删除会话失败", error) });
         }
         break;
       }
       case "copyText":
         void vscode.env.clipboard.writeText(message.text).then(
           () => undefined,
-          (error) => this.post({ type: "error", message: `复制失败: ${(error as Error).message}` })
+          (error) => this.post({ type: "error", message: describeHarnessFailure("复制失败", error) })
         );
         break;
       case "askPick": {
@@ -416,7 +455,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         try {
           await sendAsk(this.client, context, instruction);
         } catch (error) {
-          this.post({ type: "error", message: `发送失败 — ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("发送失败", error) });
         }
         break;
       }
@@ -435,7 +474,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             outcome: message.outcome,
           });
         } catch (error) {
-          this.post({ type: "error", message: `审批应答失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("审批应答失败", error) });
         }
         break;
       }
@@ -450,7 +489,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             answer: { answers: message.answers },
           });
         } catch (error) {
-          this.post({ type: "error", message: `选择题应答失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("选择题应答失败", error) });
         }
         break;
       }
@@ -470,7 +509,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             this.post({ type: "error", message: `切换权限失败: host 未提供 /permission 命令` });
           }
         } catch (error) {
-          this.post({ type: "error", message: `切换权限失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("切换权限失败", error) });
         }
         break;
       }
@@ -484,7 +523,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           .showTextDocument(vscode.Uri.file(abs), { preview: true })
           .then(
             () => undefined,
-            (error) => this.post({ type: "error", message: `打开文件失败: ${(error as Error).message}` })
+            (error) => this.post({ type: "error", message: describeHarnessFailure("打开文件失败", error) })
           );
         break;
       }
@@ -493,10 +532,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           const uri = vscode.Uri.parse(message.url);
           void vscode.env.openExternal(uri).then(
             () => undefined,
-            (error) => this.post({ type: "error", message: `打开链接失败: ${(error as Error).message}` })
+            (error) => this.post({ type: "error", message: describeHarnessFailure("打开链接失败", error) })
           );
         } catch (error) {
-          this.post({ type: "error", message: `打开链接失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("打开链接失败", error) });
         }
         break;
       }
@@ -510,7 +549,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         try {
           await this.client.updateQueue(this.activeSessionId, message.itemId, action);
         } catch (error) {
-          this.post({ type: "error", message: `队列操作失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("队列操作失败", error) });
         }
         break;
       }
@@ -531,7 +570,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             sessionId = created.sessionId;
             this.activeSessionId = sessionId;
           } catch (error) {
-            this.post({ type: "error", message: `新建会话失败: ${(error as Error).message}` });
+            this.post({ type: "error", message: describeHarnessFailure("新建会话失败", error) });
             return;
           }
         }
@@ -547,7 +586,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             });
             await this.refresh();
           } catch (error) {
-            this.post({ type: "error", message: `命令执行失败: ${(error as Error).message}` });
+            this.post({ type: "error", message: describeHarnessFailure("命令执行失败", error) });
           }
           return;
         }
@@ -556,7 +595,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           this.post({ type: "running", sessionId, running: true });
           await this.refresh();
         } catch (error) {
-          this.post({ type: "error", message: `发送失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeHarnessFailure("发送失败", error) });
         }
         break;
       }
@@ -569,7 +608,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             await this.client.cancel(this.activeSessionId);
             this.post({ type: "running", sessionId: this.activeSessionId, running: false });
           } catch (error) {
-            this.post({ type: "error", message: `停止失败: ${(error as Error).message}` });
+            this.post({ type: "error", message: describeHarnessFailure("停止失败", error) });
           }
         }
         break;
@@ -654,7 +693,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         toolDiffs: Object.keys(toolDiffs).length > 0 ? toolDiffs : undefined,
       });
     } catch (error) {
-      this.post({ type: "error", message: `读取历史失败: ${(error as Error).message}` });
+      this.post({ type: "error", message: describeHarnessFailure("读取历史失败", error) });
     }
   }
 
@@ -1046,7 +1085,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           this.postSettingsSaved("已保存");
           await this.postSettingsData();
         } catch (error) {
-          this.postSettingsError(`保存失败: ${(error as Error).message}`);
+          this.postSettingsError(describeHarnessFailure("保存失败", error));
         }
         break;
       }
@@ -1059,7 +1098,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       const value = await this.client.settingsDescribe();
       this.settingsPanel?.webview.postMessage({ type: "settingsData", value });
     } catch (error) {
-      this.postSettingsError(`读取配置失败: ${(error as Error).message}`);
+      this.postSettingsError(describeHarnessFailure("读取配置失败", error));
     }
   }
 
@@ -1069,7 +1108,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       const value = await this.client.agentPresetList();
       this.settingsPanel?.webview.postMessage({ type: "settingsAgentPresets", value });
     } catch (error) {
-      this.postSettingsError(`读取预设失败: ${(error as Error).message}`);
+      this.postSettingsError(describeHarnessFailure("读取预设失败", error));
     }
   }
 
