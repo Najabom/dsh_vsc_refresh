@@ -85,7 +85,10 @@ export async function sendAsk(client: HarnessClient, contextBlock: string, instr
 /** Pick the most recently updated non-blank session; create one if none exists. */
 export async function targetSession(client: HarnessClient): Promise<string> {
   const { items } = await client.listSessions();
-  const usable = items.filter((item) => !item.blank);
+  // Only top-level user sessions are queue targets: subagent children
+  // (origin: "subagent") belong to their parent conversation (official
+  // sessionVisible contract) and must not swallow queued messages.
+  const usable = items.filter((item) => !item.blank && item.origin !== "subagent");
   if (usable.length > 0) {
     usable.sort((a, b) => b.updatedAt - a.updatedAt);
     return usable[0].sessionId;

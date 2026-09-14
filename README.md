@@ -6,7 +6,7 @@ Read this in: **English** · [简体中文](README.zh.md)
 
 ---
 
-![version](https://img.shields.io/badge/version-0.2.4-2ea44f)
+![version](https://img.shields.io/badge/version-0.2.5-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

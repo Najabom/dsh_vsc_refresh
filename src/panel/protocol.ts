@@ -98,7 +98,21 @@ export type HostMessage =
       /** Agent-preset roster for the new-session mode picker (id → display copy). */
       presets: { id: string; name?: string; description?: string; isDefault?: boolean }[];
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      /** One resolved transcript image (session.attachment round-trip). */
+      type: "attachment";
+      requestId: number;
+      attachmentId: string;
+      mediaType?: string;
+      /** base64 payload; absent when `error` is set. */
+      data?: string;
+      width?: number;
+      height?: number;
+      bytes?: number;
+      name?: string;
+      error?: string;
+    };
 
 /** Webview → host messages. */
 export type WebviewMessage =
@@ -136,6 +150,13 @@ export type WebviewMessage =
   | { type: "getPermissions" }
   | { type: "selectPermission"; permission: string }
   | { type: "openExternal"; url: string }
+  | {
+      /** Lazy fetch of one logged image's bytes (harness session.attachment). */
+      type: "getAttachment";
+      requestId: number;
+      sessionId: string;
+      attachmentId: string;
+    }
   | { type: "openSettings" };
 
 export interface PanelSession {

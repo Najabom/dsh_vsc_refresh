@@ -91,10 +91,28 @@ export interface SessionSummary {
   };
 }
 
-/** session.prompt content part (text only for the bridge; images later). */
+/** session.prompt content part: text and raster images both ride the same
+ *  typed content array (images carry inline base64 on the wire; the harness
+ *  admits them into its durable attachment store and the log keeps a ref). */
 export type PromptContentPart =
   | { type: "text"; text: string }
   | { type: "image"; mediaType: string; data: string; name?: string };
+
+/** Durable image reference as it appears in a logged content block. */
+export interface ImageAttachmentRef {
+  attachmentId: string;
+  mediaType: string;
+  bytes: number;
+  width: number;
+  height: number;
+  name?: string;
+}
+
+/** session.attachment value: the ref plus the decoded base64 payload. */
+export interface SessionAttachmentValue {
+  attachment: ImageAttachmentRef;
+  data: string;
+}
 
 /** Canonical endpoint names (wire paths use dot notation). */
 export const METHODS = {
@@ -107,6 +125,7 @@ export const METHODS = {
   sessionModels: "session.models",
   sessionSelectModel: "session.selectModel",
   sessionUpdateQueue: "session.updateQueue",
+  sessionAttachment: "session.attachment",
   workspaceList: "workspace.list",
   workspaceCreate: "workspace.create",
   workspaceArchiveSession: "workspace.archiveSession",

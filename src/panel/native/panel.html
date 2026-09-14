@@ -88,10 +88,25 @@
   .turn-diff .td-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .msg { margin: 6px 0; line-height: 1.55; word-wrap: break-word; }
-  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user { display: flex; justify-content: flex-end; flex-wrap: wrap; }
+  /* The image row claims a full line of its own, so pasted images sit ABOVE
+     the text bubble instead of sharing the row with it. */
+  .msg.user .u-images { flex: 1 1 100%; }
   .msg.user .body { max-width: 92%; background: var(--input-bg); border: 1px solid var(--border);
                     border-radius: 6px; padding: 6px 10px; white-space: pre-wrap; }
   .msg.assistant .body { white-space: pre-wrap; }
+  /* Transcript images: what the user actually sent, shown in the bubble the
+     way the official conversation view does (the log only stores a ref, so the
+     bytes arrive via session.attachment and patch into place). */
+  .u-images { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 4px; }
+  .u-image { position: relative; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+             background: var(--input-bg); }
+  .u-image img { display: block; max-width: 220px; max-height: 160px; object-fit: contain; }
+  .u-image-ph { width: 120px; height: 68px; display: flex; align-items: center; justify-content: center;
+                color: var(--muted); font-size: 11px; }
+  .u-image-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 1px 4px; font-size: 10px;
+                 color: var(--muted); background: rgba(0,0,0,.45); overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
   .msg .body pre { margin: 4px 0; padding: 6px 8px; background: var(--input-bg); border-radius: 3px;
     white-space: pre-wrap; word-break: break-all; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
   .msg .body code { word-break: break-all; }
@@ -464,10 +479,14 @@
     todoOpen: false,         // task-bar expanded?
     hasMore: false,          // older history pages available
     loadingOlder: false,     // a loadOlder request is in flight
-    turnStart: 0, firstTokenAt: 0, turnOutput: 0,
+    firstTokenTime: 0, turnOutput: 0,
     diffByCall: {},          // callId -> {added, deleted} (bridge-computed "+N-M")
+    // Live-timing anchors are DURABLE EVENT TIMES (epoch ms), never a
+    // performance.now() sampled when the panel processed the frame. History
+    // replay re-applies turn/start and its chunks synchronously, so a
+    // processing-time clock collapses every measurement to ~0 and restarts
+    // the live counter at zero on each session switch.
     turnStartTime: 0,        // epoch ms of the current turn/start event
-    turnStartPerf: 0,        // performance.now() at the current turn/start
     activeRound: null,       // {kind:"tool", callId} | {kind:"assistant"} | null
     nextItemId: 1            // stable per-item ids (reasoning fold state, etc.)
   };
@@ -503,6 +522,21 @@
   function textBlocksOf(message) {
     return blocksOf(message).filter(function (b) { return b && b.type === "text"; })
       .map(function (b) { return b.text; }).join("");
+  }
+  /**
+   * Durable image refs on one message's content array
+   * ({type:"image", attachment:{attachmentId, mediaType, width, height, …}}).
+   * The log stores ONLY the ref — the bytes are fetched lazily per ref through
+   * the harness's own session.attachment RPC (see requestImage).
+   */
+  function imageBlocksOf(message) {
+    return blocksOf(message).filter(function (b) {
+      return b && b.type === "image" && b.attachment && b.attachment.attachmentId;
+    }).map(function (b) {
+      var a = b.attachment;
+      return { attachmentId: String(a.attachmentId), mediaType: String(a.mediaType || "image/png"),
+               name: a.name ? String(a.name) : "", width: a.width, height: a.height, bytes: a.bytes, data: "" };
+    });
   }
   function contentBlocks(message) {
     return blocksOf(message).filter(function (b) {
@@ -559,9 +593,13 @@
     }
     scheduleRender();
   }
-  function ensureAssistant() {
+  /** `evTime` is the triggering event's durable time (epoch ms): the reply
+   *  round's live clock anchors there so a replay reproduces the real value
+   *  instead of restarting at zero. */
+  function ensureAssistant(evTime) {
     if (!state.curAssistant) {
-      state.curAssistant = { kind: "assistant", blocks: [], done: false, streaming: true, startPerf: performance.now() };
+      state.curAssistant = { kind: "assistant", blocks: [], done: false, streaming: true,
+                             startTime: typeof evTime === "number" ? evTime : Date.now() };
       state.items.push(state.curAssistant);
     }
   }
@@ -593,22 +631,22 @@
       case "turn/start":
         finalizeStream();
         state.lastTurn = typeof d.turn === "number" ? d.turn : state.lastTurn + 1;
-        state.turnStart = performance.now(); state.firstTokenAt = 0; state.turnOutput = 0;
+        state.firstTokenTime = 0; state.turnOutput = 0;
         state.turnStartTime = typeof ev.time === "number" ? ev.time : Date.now();
-        state.turnStartPerf = performance.now();
         state.activeRound = null;
         // A new round is user-visible content: unfreeze even if the user was
         // reading history, or the whole new round would never render.
         if (suspended) { suspended = false; forceBottom = true; }
         state.items.push({ kind: "turn", turn: state.lastTurn, done: false,
-                           startTime: state.turnStartTime, startPerf: state.turnStartPerf });
+                           startTime: state.turnStartTime });
         break;
       case "user/message": {
         // user/message carries content at data.content (assistant/message wraps
         // it under data.message) — accept either shape.
         var msg = d.message || d;
         var u = textBlocksOf(msg);
-        if (u) {
+        var imgs = imageBlocksOf(msg);
+        if (u || imgs.length) {
           // Update the newest PENDING user bubble wherever it sits in the
           // list. send() optimistically inserts a pending bubble, and a
           // history replay right after prompt can push a turn item past it —
@@ -617,14 +655,20 @@
           for (var ui = state.items.length - 1; ui >= 0; ui--) {
             if (state.items[ui].kind === "user" && state.items[ui].pending) { pend = state.items[ui]; break; }
           }
-          if (pend) { pend.text = u; pend.pending = false; pend.turn = d.turn; pend.version = (pend.version || 0) + 1; }
-          else state.items.push({ kind: "user", text: u, turn: d.turn });
+          if (pend) {
+            if (u) pend.text = u;
+            if (imgs.length) pend.images = mergeImageRefs(pend.images, imgs);
+            pend.pending = false; pend.turn = d.turn; pend.version = (pend.version || 0) + 1;
+          } else {
+            state.items.push({ kind: "user", text: u, turn: d.turn,
+                               images: imgs.length ? imgs : undefined });
+          }
         }
         break;
       }
       case "assistant/chunk": {
         var chunk = d.chunk || {};
-        ensureAssistant();
+        ensureAssistant(ev.time);
         if (chunk.type === "block-start") {
           state.openBlocks[chunk.index] = { type: chunk.blockType || "text", text: "" };
         } else if (chunk.type === "usage") {
@@ -634,9 +678,9 @@
           // a transition from tool→assistant starts a fresh reply round.
           if (state.activeRound === null || state.activeRound.kind !== "assistant") {
             state.activeRound = { kind: "assistant" };
-            if (state.curAssistant) state.curAssistant.startPerf = performance.now();
+            if (state.curAssistant) state.curAssistant.startTime = typeof ev.time === "number" ? ev.time : Date.now();
           }
-          if (!state.firstTokenAt) state.firstTokenAt = performance.now();
+          if (!state.firstTokenTime) state.firstTokenTime = typeof ev.time === "number" ? ev.time : Date.now();
           var b = state.openBlocks[chunk.index] || (state.openBlocks[chunk.index] = { type: chunk.type === "reasoning-delta" ? "reasoning" : "text", text: "" });
           if (chunk.text) b.text += chunk.text;
           syncAssistantFromBlocks();
@@ -645,7 +689,7 @@
         break;
       }
       case "assistant/message": {
-        ensureAssistant();
+        ensureAssistant(ev.time);
         var finMsg = state.curAssistant;
         finMsg.blocks = contentBlocks(d.message);
         finMsg.done = true;
@@ -662,7 +706,7 @@
         state.items.push({ kind: "tool", callId: callId, name: d.name || "tool",
                            argsText: prettyArgs(d.arguments), status: "running", resultText: "",
                            turn: typeof d.turn === "number" ? d.turn : state.lastTurn,
-                           startedPerf: performance.now(),
+                           startTime: typeof ev.time === "number" ? ev.time : Date.now(),
                            diff: state.diffByCall[callId] || null });
         break;
       }
@@ -778,7 +822,9 @@
         case "user/message": {
           var msg = d.message || d;
           var u = textBlocksOf(msg);
-          if (u) out.push({ kind: "user", text: u, turn: d.turn });
+          var himgs = imageBlocksOf(msg);
+          if (u || himgs.length) out.push({ kind: "user", text: u, turn: d.turn,
+                                            images: himgs.length ? himgs : undefined });
           break;
         }
         case "assistant/message": {
@@ -1238,8 +1284,8 @@
       if (!ltx) {
         var lt = document.createElement("span");
         lt.className = "live-timer";
-        lt.dataset.start = String(item.startPerf || 0);
-        lt.textContent = item.startPerf ? fmtLive(performance.now() - item.startPerf) : fmtLive(0);
+        lt.dataset.start = String(item.startTime || 0);
+        lt.textContent = item.startTime ? fmtLive(Date.now() - item.startTime) : fmtLive(0);
         el.appendChild(lt);
       }
     } else if (ltx) {
@@ -1295,8 +1341,8 @@
     if (item.status === "running" && state.activeRound && state.activeRound.kind === "tool" && state.activeRound.callId === item.callId) {
       var tlt = document.createElement("span");
       tlt.className = "live-timer";
-      tlt.dataset.start = String(item.startedPerf || 0);
-      tlt.textContent = fmtLive(0);
+      tlt.dataset.start = String(item.startTime || 0);
+      tlt.textContent = item.startTime ? fmtLive(Date.now() - item.startTime) : fmtLive(0);
       sum.appendChild(tlt);
     }
     // Never auto-open: only the user's own click expands a tool card.
@@ -1388,7 +1434,7 @@
   }
   /** Rebuild-free tick: only the currently rendered live timers move. */
   function tickLive() {
-    var now = performance.now();
+    var now = Date.now();
     if (!state.running) {
       // Turn is over: no live timer may remain anywhere. Safety net for any
       // render path that failed to remove one — the tick wipes them directly
@@ -1402,13 +1448,91 @@
       var st = parseFloat(els[i].getAttribute("data-start") || "0");
       if (st > 0) els[i].textContent = fmtLive(now - st);
     }
-    if (state.running && state.turnStartPerf) {
+    if (state.running && state.turnStartTime) {
       var seg = document.getElementById("live-status");
       var sst = seg ? parseFloat(seg.getAttribute("data-start") || "0") : 0;
       if (seg && sst > 0) seg.textContent = fmtLive(now - sst);
     }
   }
   setInterval(tickLive, 250);
+
+  /* ---------- transcript images (lazy, harness session.attachment) ---------- */
+  // attachmentId -> {pending:true} | {data, mediaType} | {failed:true}
+  var imageCache = {};
+  var imageWaiters = {};   // requestId -> attachmentId
+  var imageReqSeq = 1;
+
+  /** Ask the host to resolve one ref's bytes (it calls session.attachment). */
+  function requestImage(attachmentId) {
+    if (!attachmentId || imageCache[attachmentId]) return;
+    imageCache[attachmentId] = { pending: true };
+    var reqId = imageReqSeq++;
+    imageWaiters[reqId] = attachmentId;
+    post({ type: "getAttachment", requestId: reqId, sessionId: state.activeSessionId, attachmentId: attachmentId });
+  }
+
+  /** Chip caption: file name, pixel size and byte size when the log carries them. */
+  function imageLabel(a) {
+    var bits = [];
+    if (a.name) bits.push(a.name);
+    if (a.width && a.height) bits.push(a.width + "×" + a.height);
+    if (a.bytes) bits.push(a.bytes >= 1024 ? Math.round(a.bytes / 1024) + " KB" : a.bytes + " B");
+    return bits.join(" · ");
+  }
+
+  /** One thumbnail: the real <img> when the bytes are known, otherwise a
+   *  placeholder marked with data-attachment for the reply to patch in place. */
+  function imageCell(a) {
+    var cell = document.createElement("div");
+    cell.className = "u-image";
+    cell.title = imageLabel(a);
+    var cached = a.attachmentId ? imageCache[a.attachmentId] : null;
+    var src = a.data || (cached && cached.data);
+    if (src) {
+      var img = document.createElement("img");
+      img.src = "data:" + ((cached && cached.mediaType) || a.mediaType) + ";base64," + src;
+      cell.appendChild(img);
+    } else {
+      var failed = !!(cached && cached.failed);
+      var ph = document.createElement("div");
+      ph.className = "u-image-ph";
+      if (failed) {
+        ph.textContent = "🖼 图片读取失败";
+      } else {
+        ph.textContent = "🖼 加载中…";
+        ph.setAttribute("data-attachment", a.attachmentId);
+        requestImage(a.attachmentId);
+      }
+      cell.appendChild(ph);
+    }
+    var cap = imageLabel(a);
+    if (cap) {
+      var span = document.createElement("span");
+      span.className = "u-image-cap";
+      span.textContent = cap;
+      cell.appendChild(span);
+    }
+    return cell;
+  }
+
+  function userImagesEl(images) {
+    var wrap = document.createElement("div");
+    wrap.className = "u-images";
+    images.forEach(function (a) { wrap.appendChild(imageCell(a)); });
+    return wrap;
+  }
+
+  /** When the replayed refs line up 1:1 with the bytes the user just pasted,
+   *  keep those bytes: the message you sent never needs an attachment fetch. */
+  function mergeImageRefs(local, refs) {
+    if (!local || local.length !== refs.length) return refs;
+    return refs.map(function (r, i) {
+      if (!local[i] || !local[i].data) return r;
+      return { attachmentId: r.attachmentId, mediaType: r.mediaType || local[i].mediaType,
+               name: r.name || local[i].name, width: r.width, height: r.height,
+               bytes: r.bytes, data: local[i].data };
+    });
+  }
 
   function renderItem(item) {
     var el = document.createElement("div");
@@ -1424,11 +1548,11 @@
         var label = "— 第 " + item.turn + " 轮";
         if (!item.done) {
           label += " · 进行中";
-          if (item.startPerf) {
-            // Seed the live timer with its real elapsed: streaming rebuilds
-            // recreate the element constantly, so a hard-coded "0.0s" would
-            // keep flashing back to zero instead of counting up.
-            label += "<span class='live-timer' data-start='" + item.startPerf + "'>" + fmtLive(performance.now() - item.startPerf) + "</span>";
+          if (item.startTime && state.running) {
+            // Seed the live timer with its real elapsed from the durable
+            // turn/start time: streaming rebuilds, history replays and session
+            // switches never flash it back to "0.0s".
+            label += "<span class='live-timer' data-start='" + item.startTime + "'>" + fmtLive(Date.now() - item.startTime) + "</span>";
           }
           var ltd = aggregateTurnDiff(state.items, item.turn);
           if (ltd && (ltd.added || ltd.deleted)) label += " · " + diffChipHtml(ltd);
@@ -1501,10 +1625,13 @@
           });
           setTimeout(function () { ta.focus(); ta.select(); }, 0);
         } else {
-          var ub = document.createElement("div");
-          ub.className = "body";
-          ub.innerHTML = renderMd(item.text);
-          el.appendChild(ub);
+          if (item.images && item.images.length) el.appendChild(userImagesEl(item.images));
+          if (item.text) {
+            var ub = document.createElement("div");
+            ub.className = "body";
+            ub.innerHTML = renderMd(item.text);
+            el.appendChild(ub);
+          }
           var ua = document.createElement("div");
           ua.className = "msg-actions";
           if (item.turn === state.lastTurn && state.running) {
@@ -1513,11 +1640,13 @@
             ed.onclick = function () { item.editing = true; scheduleRender(); };
             ua.appendChild(ed);
           }
-          var cp = document.createElement("button");
-          cp.textContent = "⧉ 复制";
-          cp.onclick = function () { post({ type: "copyText", text: item.text }); };
-          ua.appendChild(cp);
-          el.appendChild(ua);
+          if (item.text) {
+            var cp = document.createElement("button");
+            cp.textContent = "⧉ 复制";
+            cp.onclick = function () { post({ type: "copyText", text: item.text }); };
+            ua.appendChild(cp);
+          }
+          if (ua.childNodes.length) el.appendChild(ua);
         }
         break;
       }
@@ -1550,8 +1679,8 @@
         if (item.streaming && state.activeRound && state.activeRound.kind === "assistant") {
           var lt = document.createElement("span");
           lt.className = "live-timer";
-          lt.dataset.start = String(item.startPerf || 0);
-          lt.textContent = item.startPerf ? fmtLive(performance.now() - item.startPerf) : fmtLive(0);
+          lt.dataset.start = String(item.startTime || 0);
+          lt.textContent = item.startTime ? fmtLive(Date.now() - item.startTime) : fmtLive(0);
           el.appendChild(lt);
         }
         if (!item.streaming && item.blocks.some(function (b) { return b.type === "text"; })) {
@@ -1595,8 +1724,8 @@
         if (item.status === "running" && state.activeRound && state.activeRound.kind === "tool" && state.activeRound.callId === item.callId) {
           var tlt = document.createElement("span");
           tlt.className = "live-timer";
-          tlt.dataset.start = String(item.startedPerf || 0);
-          tlt.textContent = fmtLive(0);
+          tlt.dataset.start = String(item.startTime || 0);
+          tlt.textContent = item.startTime ? fmtLive(Date.now() - item.startTime) : fmtLive(0);
           sum.appendChild(tlt);
         }
         det.appendChild(sum);
@@ -1778,7 +1907,13 @@
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; renderQueue();
           state.todos = []; renderTodos();   // host re-pushes via todos message
-          state.diffByCall = {}; state.activeRound = null; state.turnStartPerf = 0;
+          state.diffByCall = {}; state.activeRound = null;
+          // Clear EVERY live-timing field: leaving any of them behind made the
+          // bottom bar blend this session's clock with the previous session's.
+          state.turnStartTime = 0; state.firstTokenTime = 0; state.turnOutput = 0;
+          // Seed the running flag from the newly active row, so the live strip
+          // belongs to the session on screen from the very first frame.
+          state.running = !!(act && act.running);
           suspended = false;
           forceBottom = true;
         }
@@ -1789,6 +1924,30 @@
           renderTodos();
         }
         updateHeader();
+        scheduleRender();
+        break;
+      }
+      case "attachment": {
+        var attId = msg.attachmentId || imageWaiters[msg.requestId];
+        delete imageWaiters[msg.requestId];
+        if (!attId) break;
+        if (msg.data) imageCache[attId] = { data: msg.data, mediaType: msg.mediaType || "image/png" };
+        else imageCache[attId] = { failed: true };
+        // Patch every placeholder already on screen, then rebuild so cells
+        // rendered later (e.g. after scrolling) pick the bytes up as well.
+        var waiting = messagesEl.querySelectorAll("[data-attachment]");
+        for (var wi = 0; wi < waiting.length; wi++) {
+          if (waiting[wi].getAttribute("data-attachment") !== attId) continue;
+          var holder = waiting[wi].parentNode;
+          waiting[wi].removeAttribute("data-attachment");
+          if (msg.data) {
+            var real = document.createElement("img");
+            real.src = "data:" + (msg.mediaType || "image/png") + ";base64," + msg.data;
+            holder.replaceChild(real, waiting[wi]);
+          } else {
+            waiting[wi].textContent = "🖼 图片读取失败";
+          }
+        }
         scheduleRender();
         break;
       }
@@ -1877,7 +2036,8 @@
         if (!state.running) {
           state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
           state.curAssistant = null; state.openBlocks = [];
-          state.diffByCall = {}; state.activeRound = null; state.turnStartPerf = 0;
+          state.diffByCall = {}; state.activeRound = null;
+          state.turnStartTime = 0; state.firstTokenTime = 0; state.turnOutput = 0;
           state.dirtySync = false;
         }
         // NOTE: do NOT clear state.queue here — send() triggers a history
@@ -2845,13 +3005,16 @@
       // Live task clock (the value that will stay in history as 总计时) plus
       // the running turn's accumulated "+N-M" — both tick/jump without a full
       // rebuild via tickLive().
-      var ts = state.turnStartPerf ? Math.max(0, performance.now() - state.turnStartPerf) : 0;
-      live.push("<span id='live-status' data-start='" + (state.turnStartPerf || 0) + "'>" + fmtLive(ts) + "</span>");
+      var ts = state.turnStartTime ? Math.max(0, Date.now() - state.turnStartTime) : 0;
+      live.push("<span id='live-status' data-start='" + (state.turnStartTime || 0) + "'>" + fmtLive(ts) + "</span>");
       var td = turnDiffLive();
       if (td) live.push(diffChipHtml(td));
-      if (state.firstTokenAt) {
-        live.push("首 token " + ((state.firstTokenAt - state.turnStart) / 1000).toFixed(1) + "s");
-        var elapsed = (performance.now() - state.firstTokenAt) / 1000;
+      if (state.firstTokenTime) {
+        // Both stamps are durable event times, so the first-token figure stays
+        // truthful across history replays instead of collapsing to 0.0s.
+        var ttft = Math.max(0, state.firstTokenTime - state.turnStartTime) / 1000;
+        live.push("首 token " + ttft.toFixed(1) + "s");
+        var elapsed = (Date.now() - state.firstTokenTime) / 1000;
         if (elapsed > 0.3 && state.turnOutput > 0) live.push(fmtTps(state.turnOutput / elapsed) + " tok/s");
       }
       liveHtml = live.join(" · ");
@@ -3035,7 +3198,13 @@
     }
     hideMenu();
     if (text) {
-      state.items.push({ kind: "user", text: text, pending: true, turn: state.lastTurn });
+      // Carry the pasted bytes on the optimistic bubble so the image shows the
+      // moment you hit send (your own message never needs a ref round-trip).
+      var localImages = attachments.map(function (a) {
+        return { attachmentId: "", mediaType: a.mediaType, name: a.name || "", data: a.data };
+      });
+      state.items.push({ kind: "user", text: text, pending: true, turn: state.lastTurn,
+                         images: localImages.length ? localImages : undefined });
       scheduleRender();
     }
     post({ type: "send", text: text, attachments: attachments.slice(), mode: "queue" });

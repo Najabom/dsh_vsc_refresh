@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { METHODS, type ClientRequest, type ServerResponse, type RpcError, type HostDescription, type HistoryPage, type ModelCatalog, type PromptContentPart, type QueueAction, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type WorkspaceView } from "./protocol";
+import { METHODS, type ClientRequest, type ServerResponse, type RpcError, type HostDescription, type HistoryPage, type ModelCatalog, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type WorkspaceView } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -94,6 +94,16 @@ export class HarnessClient {
 
   cancel(sessionId: string): Promise<{ accepted: true }> {
     return this.call<{ accepted: true }>(METHODS.sessionCancel, { sessionId });
+  }
+
+  /**
+   * Resolve one logged image ref into its bytes (base64). The harness only
+   * serves attachments the named session's log actually references, so a
+   * foreign or stale id fails with `attachment-error` instead of leaking
+   * another session's image.
+   */
+  sessionAttachment(sessionId: string, attachmentId: string): Promise<SessionAttachmentValue> {
+    return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, { sessionId, attachmentId });
   }
 
   models(sessionId: string): Promise<ModelCatalog> {

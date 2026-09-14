@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { HarnessClient } from "../harness/client";
+import { HarnessClient, RpcErrorResult } from "../harness/client";
 import type { PromptContentPart, QueueAction } from "../harness/protocol";
 import type { HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
@@ -32,6 +32,27 @@ const OFFICIAL_PRESET_COPY: Record<string, { name: string; description: string }
     description: "用于创建自定义 Agent preset：具备标准模式的全部能力，并提供运行时检查、插件实验和 preset 创作指导。",
   },
 };
+
+/**
+ * Localized copy for a refused model switch.
+ *
+ * The harness rejects `session.selectModel` whenever the session already holds
+ * image content (pending or historical) and the target model's
+ * `inputModalities` exclude `image` — dsh-host-apiproxy `sessions.selectModel`
+ * returns `model-unavailable` for that case. It is a core policy, not a bridge
+ * defect, so its raw English RpcErrorResult must never be shown verbatim: the
+ * bare `model-unavailable: Model "…" does not accept image input…` line reads
+ * like our bug and gets the bridge blamed for the harness's rule.
+ */
+function describeModelSwitchFailure(error: unknown): string {
+  if (error instanceof RpcErrorResult && error.rpcError.code === "model-unavailable") {
+    return "切换模型失败：该模型不接受图像输入，而本会话已包含图片（DSH 本体的限制，不是桥接的问题）。请改选支持图像输入的模型。";
+  }
+  if (error instanceof RpcErrorResult) {
+    return `切换模型失败：${error.rpcError.message}（${error.rpcError.code}）`;
+  }
+  return `切换模型失败：${(error as Error).message}`;
+}
 
 /**
  * Phase 1 — native sidebar chat panel.
@@ -193,8 +214,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       ]);
       const archived = new Set(workspaces.archivedSessionIds);
       const { items } = list;
+      // Mirror the official client's session visibility contract
+      // (dsh-client-ui-workspace `sessionVisible`): subagent children carry
+      // `origin: "subagent"` and are surfaced under their parent conversation
+      // via subagent.list, never as standalone sidebar rows. Archived and
+      // blank rows are excluded the same way.
       let sessions = items
-        .filter((item) => !item.blank && !archived.has(item.sessionId))
+        .filter((item) => !item.blank && item.origin !== "subagent" && !archived.has(item.sessionId))
         .map((item) => ({
           sessionId: item.sessionId,
           running: item.running,
@@ -301,7 +327,37 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           await this.client.selectModel(this.activeSessionId, message.provider, message.model, message.reasoningEffort);
           await this.postModels();
         } catch (error) {
-          this.post({ type: "error", message: `切换模型失败: ${(error as Error).message}` });
+          this.post({ type: "error", message: describeModelSwitchFailure(error) });
+        }
+        break;
+      }
+      case "getAttachment": {
+        // Transcript images are stored as refs in the log; bytes come back
+        // through the harness's own session.attachment RPC (which refuses ids
+        // the named session never referenced). Failures degrade to a labeled
+        // placeholder rather than an empty box.
+        const sessionId = message.sessionId || this.activeSessionId;
+        try {
+          if (!sessionId) throw new Error("没有活动会话");
+          const value = await this.client.sessionAttachment(sessionId, message.attachmentId);
+          this.post({
+            type: "attachment",
+            requestId: message.requestId,
+            attachmentId: message.attachmentId,
+            mediaType: value.attachment.mediaType,
+            data: value.data,
+            width: value.attachment.width,
+            height: value.attachment.height,
+            bytes: value.attachment.bytes,
+            name: value.attachment.name,
+          });
+        } catch (error) {
+          this.post({
+            type: "attachment",
+            requestId: message.requestId,
+            attachmentId: message.attachmentId,
+            error: (error as Error).message,
+          });
         }
         break;
       }
