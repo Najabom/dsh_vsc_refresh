@@ -11,10 +11,11 @@
 | 文件/目录 | 职责 |
 |---|---|
 | `NativePanelProvider.ts` | 原生侧边栏面板（webview 宿主） |
+| `renderer.ts` | 面板消息渲染/嵌入辅助 |
 | `embed.ts` | 嵌入 DSH Web GUI 的高级视图 |
 | `protocol.ts` | 面板 ↔ 宿主消息协议 |
 | `media/` | webview 内嵌资源（shell.html、图标） |
-| `native/` | 原生面板本体（`panel.html`，渲染逻辑核心） |
+| `native/` | 原生面板本体（`panel.html` 主面板、`settings.html` 设置页） |
 
 ## 放这里 ✅
 

@@ -16,3 +16,7 @@ scratch/
 # Private workspace docs (never commit): plans, incident postmortems,
 # upstream tracking, anything meant only for the maintainer.
 internal/
+
+# Fork-local archive snapshot of the whole diff vs the upstream release
+# (redundant with git history).
+dsh-0.1.7-compat.patch

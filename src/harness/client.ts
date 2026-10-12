@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { METHODS, type ClientRequest, type ServerResponse, type RpcError, type HostDescription, type HistoryPage, type ModelCatalog, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type WorkspaceView } from "./protocol";
+import { METHODS, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -10,19 +10,20 @@ export class RpcErrorResult extends Error {
 }
 
 /**
- * Thin RPC client for a running DSH web harness.
- * Implements the same protocol the browser frontend uses — no DSH-internal
- * packages, ~80 lines, works from any Node ≥ 18 host (fetch is global).
+ * Thin RPC client for a running DSH web harness (0.1.7 typert gateway).
+ * Implements the same wire contract the browser frontend uses — no DSH-internal
+ * packages, works from any Node ≥ 18 host (fetch is global). Every call wraps
+ * its descriptor-named arguments in `payload.args`.
  */
 export class HarnessClient {
   constructor(public readonly base: string) {}
 
-  async call<T>(method: string, payload: unknown, signal?: AbortSignal): Promise<T> {
+  async call<T>(method: string, args: unknown, signal?: AbortSignal): Promise<T> {
     const request: ClientRequest = {
       type: "client-request",
       rpcId: randomUUID(),
       method,
-      payload,
+      payload: { args },
     };
     let res: Response;
     try {
@@ -36,64 +37,90 @@ export class HarnessClient {
       throw new Error(`dsh api ${method}: transport failed (${(error as Error).message})`);
     }
     if (!res.ok) throw new Error(`dsh api ${method}: HTTP ${res.status}`);
-    const body = (await res.json()) as ServerResponse;
+    let body: ServerResponse;
+    try {
+      body = (await res.json()) as ServerResponse;
+    } catch {
+      throw new Error(`dsh api ${method}: response was not JSON (harness restarting or wrong service?)`);
+    }
+    if (!body || body.type !== "server-response" || !body.result) {
+      throw new Error(`dsh api ${method}: malformed server response`);
+    }
     if (!body.result.ok) throw new RpcErrorResult(body.result.error);
     return body.result.value as T;
   }
 
-  describe(signal?: AbortSignal): Promise<HostDescription> {
-    return this.call<HostDescription>(METHODS.hostDescribe, {}, signal);
+  /** Cheap liveness probe: a session/list read within a timeout. (0.1.7 has no
+   *  host.describe; session/list is the registry read the web GUI opens with.)
+   *  Tri-state so callers can tell a STOCK instance we cannot drive (401: it
+   *  wants browser-session auth that only our overlay-bypassed spawn skips)
+   *  apart from "nothing is listening". */
+  async probe(timeoutMs = 1500): Promise<"alive" | "unauthorized" | "down"> {
+    try {
+      const res = await fetch(`${this.base}/api/${METHODS.sessionList}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "client-request", rpcId: randomUUID(), method: METHODS.sessionList, payload: { args: { _request: {} } } }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status === 401 || res.status === 403) return "unauthorized";
+      if (!res.ok) return "down";
+      const body = (await res.json().catch(() => null)) as { result?: { ok?: boolean } } | null;
+      return body?.result?.ok ? "alive" : "down";
+    } catch {
+      return "down";
+    }
+  }
+
+  async isAlive(timeoutMs = 1500): Promise<boolean> {
+    return (await this.probe(timeoutMs)) === "alive";
   }
 
   listSessions(signal?: AbortSignal): Promise<{ items: SessionSummary[] }> {
-    return this.call<{ items: SessionSummary[] }>(METHODS.sessionList, {}, signal);
+    return this.call<{ items: SessionSummary[] }>(METHODS.sessionList, { _request: {} }, signal);
   }
 
-  prompt(sessionId: string, content: PromptContentPart[], mode: "queue" | "steer" = "queue"): Promise<{ accepted: true }> {
-    return this.call<{ accepted: true }>(METHODS.sessionPrompt, { sessionId, mode, content });
-  }
-
-  /** One history page: raw events + hasMore. Tail page (beforeSeq absent)
-   *  additionally carries the projections block (values.todos = current todo
-   *  list or null after a turn/start reset — the same source the web GUI's
-   *  task bar renders from). */
-  history(
+  /** One history page: records with beforeSeq < seq <= throughSeq. The tail
+   *  page omits beforeSeq; throughSeq never exceeds the session cursor
+   *  (session/list projections.asOfSeq). */
+  page(
     sessionId: string,
+    throughSeq: number,
     beforeSeq?: number,
     maxMessages = 30,
     signal?: AbortSignal
-  ): Promise<HistoryPage> {
-    return this.call(
-      METHODS.sessionHistory,
-      { sessionId, beforeSeq, maxMessages },
+  ): Promise<SessionPageValue> {
+    return this.call<SessionPageValue>(
+      METHODS.sessionPage,
+      {
+        request: {
+          address: { kind: "session", sessionId },
+          throughSeq,
+          ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+          maxMessages,
+        },
+      },
       signal
     );
   }
 
-  createSession(opts?: { workspaceId?: string; agentPreset?: string }): Promise<{ sessionId: string }> {
-    const payload: Record<string, string> = {};
-    if (opts?.workspaceId) payload.workspaceId = opts.workspaceId;
-    if (opts?.agentPreset) payload.agentPreset = opts.agentPreset;
-    return this.call<{ sessionId: string }>(METHODS.sessionCreate, payload);
+  createSession(opts?: { cwd?: string; agentPreset?: string }): Promise<{ sessionId: string; agentPreset?: string }> {
+    return this.call<{ sessionId: string; agentPreset?: string }>(METHODS.sessionCreate, {
+      request: {
+        ...(opts?.cwd ? { cwd: opts.cwd } : {}),
+        ...(opts?.agentPreset ? { agentPreset: opts.agentPreset } : {}),
+      },
+    });
   }
 
-  /** Register (or idempotently resolve) a directory as a DSH workspace. */
-  workspaceCreate(path: string): Promise<{ workspace: WorkspaceView; created: boolean }> {
-    return this.call<{ workspace: WorkspaceView; created: boolean }>(METHODS.workspaceCreate, { path });
-  }
-
-  /** All registered workspaces, for path→workspaceId lookups. */
-  workspaceList(): Promise<{ items: WorkspaceView[]; archivedSessionIds: string[] }> {
-    return this.call<{ items: WorkspaceView[]; archivedSessionIds: string[] }>(METHODS.workspaceList, {});
-  }
-
-  /** Archive a session (DSH's delete: hides it from session/workspace lists). */
-  archiveSession(sessionId: string): Promise<{ archivedSessionIds: string[] }> {
-    return this.call<{ archivedSessionIds: string[] }>(METHODS.workspaceArchiveSession, { sessionId });
+  prompt(sessionId: string, content: PromptContentPart[], mode: "queue" | "steer" = "queue"): Promise<{ accepted: true }> {
+    return this.call<{ accepted: true }>(METHODS.sessionPrompt, {
+      request: { requestId: randomUUID(), sessionId, mode, content },
+    });
   }
 
   cancel(sessionId: string): Promise<{ accepted: true }> {
-    return this.call<{ accepted: true }>(METHODS.sessionCancel, { sessionId });
+    return this.call<{ accepted: true }>(METHODS.sessionCancel, { request: { sessionId } });
   }
 
   /**
@@ -103,74 +130,45 @@ export class HarnessClient {
    * another session's image.
    */
   sessionAttachment(sessionId: string, attachmentId: string): Promise<SessionAttachmentValue> {
-    return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, { sessionId, attachmentId });
-  }
-
-  models(sessionId: string): Promise<ModelCatalog> {
-    return this.call<ModelCatalog>(METHODS.sessionModels, { sessionId });
-  }
-
-  selectModel(sessionId: string, provider: string, model: string, reasoningEffort?: string): Promise<{ selected: { provider: string; model: string } }> {
-    return this.call<{ selected: { provider: string; model: string } }>(
-      METHODS.sessionSelectModel,
-      { sessionId, provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }
-    );
-  }
-
-  /**
-   * Answer a server-request frame (approval/requested, question/requested).
-   * The rpcId MUST be the envelope id echoed from the frame — the harness
-   * routes the client-response by it. Wire: POST /api/respond with a
-   * client-response body; the HTTP response is an RpcReceipt
-   * ({accepted:true} | {accepted:false, reason}).
-   */
-  respond(rpcId: string, value: unknown, signal?: AbortSignal): Promise<{ accepted: boolean; reason?: string }> {
-    const request = {
-      type: "client-response" as const,
-      rpcId,
-      result: { ok: true as const, value },
-    };
-    return fetch(`${this.base}/api/respond`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-      signal,
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(`dsh api respond: HTTP ${res.status}`);
-      const body = (await res.json()) as { accepted: boolean; reason?: string };
-      return body;
+    return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, {
+      request: { sessionId, attachmentId },
     });
   }
 
-  /** Available agent presets (agentPreset.list) — feeds the panel's ＋
-   *  new-session mode picker (标准 / PTC / 极简 / 创造 + user presets).
-   *  Entry fields mirror the host schema: id/trust/isDefault/name/description/broken. */
-  agentPresetList(signal?: AbortSignal): Promise<{
-    presets: {
-      id: string;
-      trust: "system" | "user";
-      isDefault: boolean;
-      name?: string;
-      description?: string;
-      broken?: string;
-    }[];
-    authorable: boolean;
-    hasDocument: boolean;
-  }> {
-    return this.call(METHODS.agentPresetList, {}, signal);
+  /** Model catalog (session/modelCatalog, no session argument). */
+  models(): Promise<ModelCatalog> {
+    return this.call<ModelCatalog>(METHODS.sessionModelCatalog, {});
+  }
+
+  selectModel(sessionId: string, provider: string, model: string, reasoningEffort?: string): Promise<{ selected: ModelSelection }> {
+    return this.call<{ selected: ModelSelection }>(METHODS.sessionSelectModel, {
+      request: { sessionId, provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) },
+    });
+  }
+
+  /** Archive a session (DSH's delete: hides it from session/workspace lists).
+   *  The value is the complete archived set after the write. Running work is
+   *  stopped first (stopActivity) — the harness otherwise refuses an active
+   *  session with `workspace/session-active` instead of archiving it. */
+  archiveSession(sessionId: string): Promise<{ archivedSessionIds: string[] }> {
+    return this.call<{ archivedSessionIds: string[] }>(METHODS.workspaceArchiveSession, {
+      request: { sessionId, stopActivity: true },
+    });
   }
 
   updateQueue(sessionId: string, itemId: string, action: QueueAction): Promise<{ accepted: true }> {
-    return this.call<{ accepted: true }>(METHODS.sessionUpdateQueue, { sessionId, itemId, action });
+    return this.call<{ accepted: true }>(METHODS.sessionUpdateQueue, {
+      request: { sessionId, itemId, action },
+    });
   }
 
-  /** Slash-command catalog for a session (wire: commands/list, endpoint form). */
+  /** Slash-command catalog for a session (wire: commands/list, args by name). */
   commandList(
     sessionId: string
   ): Promise<{ name: string; description?: string; input?: { hint?: string; images?: boolean } }[]> {
     return this.call<{ name: string; description?: string; input?: { hint?: string; images?: boolean } }[]>(
       METHODS.commandsList,
-      { args: { agentId: sessionId } }
+      { agentId: sessionId }
     );
   }
 
@@ -181,17 +179,46 @@ export class HarnessClient {
   ): Promise<{ commandId?: string; result?: { kind: string; text?: string } } | undefined> {
     return this.call<{ commandId?: string; result?: { kind: string; text?: string } } | undefined>(
       METHODS.commandsExecute,
-      { args: { agentId: sessionId, line, images: [] } }
+      { agentId: sessionId, line, submittedAttachments: [] }
     );
   }
 
-  /** Cheap liveness probe: host.describe within a timeout. */
-  async isAlive(timeoutMs = 1500): Promise<HostDescription | null> {
-    try {
-      return await this.describe(AbortSignal.timeout(timeoutMs));
-    } catch {
-      return null;
-    }
+  /** Available agent presets (agentPresets/list) — feeds the panel's ＋
+   *  new-session mode picker (标准 / PTC / 极简 / 创造 + user presets). */
+  agentPresetList(signal?: AbortSignal): Promise<AgentPresetRoster> {
+    return this.call<AgentPresetRoster>(METHODS.agentPresetsList, {}, signal);
+  }
+
+  /** Permission preset roster (permissionPresets/catalog) — the header 权限
+   *  select's option list (0.1.7 no longer carries options in the projection). */
+  permissionCatalog(signal?: AbortSignal): Promise<PermissionCatalog> {
+    return this.call<PermissionCatalog>(METHODS.permissionCatalog, {}, signal);
+  }
+
+  /**
+   * Answer a $events waterfall (approval/request, user-questions/request).
+   * Wire: POST /api/$events/result with the mux connection's clientId and the
+   * waterfall eventId; the outcome carries the waterfall value
+   * ({kind:'result', value} | {kind:'next'} | {kind:'rejected', error}).
+   */
+  answerEvent(clientId: string, eventId: string, outcome: unknown): Promise<void> {
+    return this.call<void>(METHODS.eventsResult, { clientId, eventId, outcome });
+  }
+
+  /** Patch one namespace's user layer with a partial value (settings/update).
+   *  This is the path the official client uses to switch the default agent
+   *  preset (agent-preset-registry → {selectedDefault}). */
+  settingsUpdate(
+    ns: string,
+    patch: Record<string, unknown>,
+    expectedRevision?: number,
+    signal?: AbortSignal
+  ): Promise<SettingsNamespaceView> {
+    return this.call<SettingsNamespaceView>(
+      METHODS.settingsUpdate,
+      { ns, patch, ...(expectedRevision !== undefined ? { expectedRevision } : {}) },
+      signal
+    );
   }
 
   /** All registered settings namespaces (redacted values + schemas). */
@@ -212,5 +239,85 @@ export class HarnessClient {
       { ns, ops, ...(expectedRevision !== undefined ? { expectedRevision } : {}) },
       signal
     );
+  }
+
+  /* ---------- plugin manager ---------- */
+
+  /** Loader entries with their enablement, fiber phase and control handle. */
+  listPluginEntries(signal?: AbortSignal): Promise<PluginEntryView[]> {
+    return this.call<PluginEntryView[]>(METHODS.pluginList, {}, signal);
+  }
+
+  /** Profile bundles (the management unit: enable/remove/install). */
+  listBundles(signal?: AbortSignal): Promise<BundleView[]> {
+    return this.call<BundleView[]>(METHODS.pluginBundles, {}, signal);
+  }
+
+  /** Configured registry plus the resolved effective one. */
+  pluginRegistries(signal?: AbortSignal): Promise<PluginRegistriesView> {
+    return this.call<PluginRegistriesView>(METHODS.pluginRegistries, {}, signal);
+  }
+
+  /** Probe a spec (registry name / path / git / tarball) before installing. */
+  inspectPlugin(
+    spec: string,
+    registry?: string | null,
+    signal?: AbortSignal
+  ): Promise<PluginInspection> {
+    return this.call<PluginInspection>(
+      METHODS.pluginInspect,
+      { spec, ...(registry !== undefined ? { options: { registry } } : {}) },
+      signal
+    );
+  }
+
+  /** Install a bundle. Resolves when the operation settles; progress arrives
+   *  on the harness event stream (plugin-manager/install-state + install-log).
+   *  `enabled` installs and enables in one operation. */
+  installBundle(
+    spec: string,
+    options: { enabled?: boolean; requestId?: string; registry?: string | null; approvedBuilds?: string[] } = {}
+  ): Promise<PluginChangeResult> {
+    return this.call<PluginChangeResult>(METHODS.pluginInstall, { spec, options });
+  }
+
+  /** Cancel an in-flight install by requestId. */
+  cancelInstall(requestId: string): Promise<{ status: string }> {
+    return this.call<{ status: string }>(METHODS.pluginCancelInstall, { requestId });
+  }
+
+  /** Toggle one Loader entry by its control handle (patchId). */
+  setPluginEnabled(entryId: string, enabled: boolean, signal?: AbortSignal): Promise<PluginChangeResult> {
+    return this.call<PluginChangeResult>(METHODS.pluginSetEnabled, { id: entryId, enabled }, signal);
+  }
+
+  /** Toggle a whole bundle. */
+  setBundleEnabled(name: string, enabled: boolean, signal?: AbortSignal): Promise<PluginChangeResult> {
+    return this.call<PluginChangeResult>(METHODS.pluginBundleSetEnabled, { name, enabled }, signal);
+  }
+
+  /** Remove an installed bundle from the profile. */
+  removeBundle(name: string, signal?: AbortSignal): Promise<PluginChangeResult> {
+    return this.call<PluginChangeResult>(METHODS.pluginRemoveBundle, { name }, signal);
+  }
+
+  /** Exact plugin-version exemptions saved in this profile ("name@version" → runtimes). */
+  listVersionExemptions(signal?: AbortSignal): Promise<PluginExemptionsView> {
+    return this.call<PluginExemptionsView>(METHODS.pluginListExemptions, {}, signal);
+  }
+
+  /** Grant or revoke one exact plugin/runtime exemption (acceptRisk required for grants). */
+  setVersionExemption(
+    packageVersion: string,
+    runtimeVersion: string,
+    enabled: boolean,
+    acceptRisk?: boolean
+  ): Promise<PluginChangeResult> {
+    return this.call<PluginChangeResult>(METHODS.pluginSetExemption, {
+      packageVersion,
+      runtimeVersion,
+      enabled,
+      ...(acceptRisk === undefined ? {} : { acceptRisk }),
+    });
   }
 }

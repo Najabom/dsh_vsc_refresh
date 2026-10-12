@@ -24,15 +24,37 @@
          font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); overflow: hidden; }
 
   header { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex: none; }
+  #ws-line { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 8px;
+             font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
+  #ws-line[hidden] { display: none; }
+  #ws-label { flex: none; }
+  /* Truncate at the head (not the tail): the leaf folder is the informative part.
+     direction:rtl + unicode-bidi:plaintext keeps the path rendered LTR while the
+     ellipsis lands on the left. */
+  #ws-path { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+             direction: rtl; text-align: left; unicode-bidi: plaintext; }
   /* connection dot — compact: no text, color carries the state */
   .pill { flex: none; width: 10px; height: 10px; border-radius: 50%; font-size: 0; }
   .pill.on { background: var(--ok); }
   .pill.off { background: var(--err); }
   .pill.busy { background: #e0b94a; }
   .pill.loading { background: var(--muted); }
-  #session-select { flex: 1; min-width: 0; background: var(--input-bg); color: var(--fg);
-                    border: 1px solid var(--border); border-radius: 2px; padding: 2px 4px; font-size: 12px; }
-  #new-session { flex: none; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 2px;
+  #session-picker { flex: 1; min-width: 0; position: relative; display: flex; }
+  #session-btn { flex: 1; min-width: 0; background: var(--input-bg); color: var(--fg);
+                 border: 1px solid var(--border); border-radius: 2px; height: 28px; padding: 0 8px;
+                 font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #session-btn:hover { border-color: var(--accent); }
+  /* session picker: current workspace on top, other workspaces collapsed */
+  #session-menu { top: calc(100% + 4px); left: 0; min-width: 240px; max-width: min(420px, 92vw); }
+  #session-menu .cp-group { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #session-menu .cp-row .cp-label { flex: 1; min-width: 0; overflow: hidden;
+                                    text-overflow: ellipsis; white-space: nowrap; }
+  #session-menu .cp-row.sm-empty { color: var(--muted); cursor: default; white-space: normal; }
+  #session-menu .cp-row.sm-empty:hover { background: transparent; }
+  #session-menu .cp-row.sm-mine .cp-label { font-weight: 600; }
+  #session-menu .cp-row.sm-toggle { color: var(--fg); }
+  #new-session { flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 2px;
                  background: transparent; color: var(--fg); cursor: pointer; }
   #new-session:hover { background: var(--input-bg); }
   /* new-session mode picker: ＋ opens a dropdown of agent presets
@@ -55,10 +77,14 @@
               color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;
               font-size: 11px; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.35); white-space: pre-wrap; }
   #mode-tip[hidden] { display: none; }
-  #delete-session { flex: none; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 2px;
-                    background: transparent; color: var(--fg); cursor: pointer; font-size: 12px; line-height: 1; }
-  #delete-session:hover { background: var(--input-bg); }
-  #delete-session[data-arm="1"] { color: var(--err); border-color: var(--err); font-size: 11px; }
+  #delete-session, #delete-session-hard { flex: none; width: auto; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px;
+                    background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; line-height: 1; white-space: nowrap; }
+  #delete-session:hover { background: var(--input-bg); border-color: #e0b94a; }
+  #delete-session-hard:hover { background: var(--input-bg); border-color: var(--err); }
+  #delete-session[data-arm="1"], #delete-session-hard[data-arm="1"] { color: var(--err); border-color: var(--err); font-weight: 600; }
+  #workspace-btn { flex: none; width: auto; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px;
+                   background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; line-height: 1; white-space: nowrap; }
+  #workspace-btn:hover { background: var(--input-bg); border-color: var(--accent); }
   #model-select, #effort-select, #preset-select { flex: none; max-width: 110px; background: var(--input-bg); color: var(--fg);
                    border: 1px solid var(--border); border-radius: 2px; padding: 2px 4px; font-size: 12px; }
 
@@ -133,7 +159,8 @@
                  white-space: nowrap; }
   .msg .body pre { margin: 4px 0; padding: 6px 8px; background: var(--input-bg); border-radius: 3px;
     white-space: pre-wrap; word-break: break-all; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
-  .msg .body code { word-break: break-all; }
+  .msg .body code { word-break: break-all; color: var(--vscode-textPreformat-foreground, #ce9178); }
+  .msg .body pre code { color: inherit; }
   .reasoning { border-left: 2px solid var(--border); padding: 2px 10px; color: var(--muted); margin: 4px 0; }
   .reasoning-head { cursor: pointer; user-select: none; font-size: 12px; color: var(--muted); }
   .reasoning-head:hover { color: var(--fg); }
@@ -150,6 +177,11 @@
   .tool .dot.ok { background: var(--ok); }
   .tool .dot.err { background: var(--err); }
   .tool .tname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  /* tool-category colors (opencode-style): the fold row's name carries the tone */
+  .tool.t-exec .tname { color: #e0b94a; }
+  .tool.t-read .tname { color: #61afef; }
+  .tool.t-write .tname { color: #98c379; }
+  .tool.t-agent .tname { color: #c678dd; }
   /* tool group: consecutive internal tool calls bundled behind one fold —
      open the group, then open an individual tool to see its args/result */
   .tool-group { border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }
@@ -181,6 +213,18 @@
                 font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: middle; }
   .turn-sep .live-timer { color: var(--muted); font-weight: 400; }
   .turn-total { color: var(--muted); font-weight: 400; }
+
+  /* custom Chinese context menu (right-click) */
+  .ctx-menu { position: fixed; z-index: 1200; min-width: 140px; padding: 4px;
+              background: var(--vscode-menu-background, var(--input-bg));
+              border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 4px;
+              box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  .ctx-item { display: block; width: 100%; text-align: left; padding: 4px 10px; font-size: 12px;
+              border: none; background: transparent; color: var(--vscode-menu-foreground, var(--fg));
+              border-radius: 3px; cursor: pointer; }
+  .ctx-item:hover:not(.dis) { background: var(--vscode-menu-selectionBackground, rgba(90,120,180,.35)); }
+  .ctx-item.dis { opacity: .45; cursor: default; }
+  .ctx-sep { height: 1px; margin: 4px 2px; background: var(--border); }
 
   /* markdown tables (GFM, mirrors web GUI) */
   .md-table { overflow-x: auto; margin: 6px 0; border: 1px solid var(--border); border-radius: 3px; }
@@ -240,12 +284,20 @@
   .m-crumbs span { cursor: pointer; }
   .m-crumbs span:hover { color: var(--fg); text-decoration: underline; }
   .m-crumbs span.cur { color: var(--fg); cursor: default; }
-  #input-status { font-size: 11px; color: var(--muted); min-height: 16px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #input-status { font-size: 13px; color: var(--muted); min-height: 19px; margin-bottom: 4px;
+                  display: flex; flex-wrap: wrap; align-items: center; line-height: 19px;
+                  max-height: 80px; overflow-y: auto; }
+  /* Items wrap as whole units (item = one stat chip), never mid-text; while a turn
+     runs the live-progress chips break to their own row above the summary row
+     (see .st-brk); 4 rows max, then scroll. */
+  #input-status .st-i { flex: none; white-space: nowrap; }
+  #input-status .st-i + .st-i { margin-left: 10px; }
+  #input-status .st-brk { flex-basis: 100%; height: 0; }
   #input-row { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
   #input-row[hidden] { display: none; } /* explicit display wins over [hidden]'s default; re-assert it */
   #input { flex: none; resize: none; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
-           border-radius: 3px; padding: 6px 8px; font-family: inherit; font-size: 13px;
-           max-height: 113px; overflow-y: auto; } /* 5 lines max, then the textarea scrolls */
+           border-radius: 3px; padding: 6px 8px; font-family: inherit; font-size: 13px; line-height: 18px;
+           max-height: 260px; overflow-y: auto; } /* height rides autoGrow(): 5 lines min, 10 lines max, then scroll */
   #input:focus { outline: 1px solid var(--accent); }
   /* composer buttons live on their OWN row BELOW the textarea (mirrors the web
      composer: the input seat is one level higher, buttons sit lower) — so a
@@ -277,7 +329,7 @@
   #todo-bar { padding: 2px 8px; background: rgba(128,128,128,.06); }
   #todo-bar[hidden] { display: none; }
   #todo-toggle { cursor: pointer; user-select: none; font-size: 12px; color: var(--fg); background: none;
-                 border: none; padding: 2px 0; font-family: inherit; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+                 border: none; height: 28px; padding: 0; font-family: inherit; font-weight: 600; display: flex; align-items: center; gap: 6px; }
   #todo-toggle:hover { color: var(--accent); }
   #todo-toggle .tcount { color: var(--muted); font-weight: 400; }
   #todo-toggle .tcount b { color: #e0b94a; font-weight: 600; }
@@ -308,14 +360,14 @@
              background: var(--input-bg); padding: 4px 6px; margin-bottom: 6px; }
   .ask-choices { display: flex; flex-wrap: wrap; gap: 4px; }
   .ask-choice { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
-                border-radius: 3px; padding: 3px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
+                border-radius: 3px; height: 28px; padding: 0 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
   .ask-choice:hover { border-color: var(--accent); color: var(--accent); }
   .ask-custom-row { display: flex; gap: 4px; margin-top: 6px; }
   .ask-custom-row[hidden] { display: none; }
   #ask-custom-input { flex: 1; background: var(--input-bg); color: var(--fg); border: 1px solid var(--accent);
-                      border-radius: 3px; padding: 4px 6px; font-family: inherit; font-size: 12px; }
+                      border-radius: 3px; height: 28px; padding: 0 6px; font-family: inherit; font-size: 12px; }
   .ask-send { background: var(--accent); color: var(--bg); border: none; border-radius: 3px;
-              padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+              height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
 
   /* interaction card — approval / question (agent asked the human) */
   #interact-card { padding: 8px 10px; background: rgba(128,128,128,.05); border-top: 1px solid var(--border); }
@@ -368,7 +420,7 @@
   .in-opt .in-odesc { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-word; }
   .in-actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
   .in-btn { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px;
-            padding: 5px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+            height: 28px; padding: 0 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
   .in-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .in-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
   .in-btn.primary:hover:not(:disabled) { filter: brightness(1.15); color: var(--accent-fg); }
@@ -388,7 +440,7 @@
   /* question pagination — prev/next + "第 x/y 页" */
   .in-pagenav { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; }
   .in-nav { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
-            border-radius: 6px; padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit; }
+            border-radius: 6px; height: 28px; padding: 0 10px; font-size: 11px; cursor: pointer; font-family: inherit; }
   .in-nav:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .in-nav:disabled { opacity: .4; cursor: default; }
   .in-page { flex: 1; text-align: center; font-size: 11px; color: var(--muted); }
@@ -408,26 +460,37 @@
   .combo-popup .cp-row:hover { background: rgba(128,128,128,.12); }
   .combo-popup .cp-row.sel { color: var(--ok); font-weight: 600; }
   .combo-popup .cp-row .cp-sub { color: var(--muted); font-size: 10px; margin-left: auto; }
-  #settings-btn { flex: none; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 2px;
+  /* provider sub-heading in the model menu: the SAME model id ships under each
+     provider route (deepseek-official vs deepseek-account), so without a
+     section header every model looked duplicated in the flat list. */
+  .combo-popup .cp-group { padding: 3px 10px 2px; color: var(--muted); font-size: 10px;
+                           border-top: 1px solid var(--border); margin-top: 2px; }
+  #settings-btn { flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 2px;
                   background: transparent; color: var(--fg); cursor: pointer; font-size: 13px; line-height: 1; }
   #settings-btn:hover { background: var(--input-bg); }
   #perm-btn, #model-btn, #effort-btn { flex: none; border: 1px solid var(--border); border-radius: 3px;
                           background: var(--input-bg); color: var(--fg); cursor: pointer;
-                          font-size: 11px; padding: 3px 8px; max-width: 128px;
+                          font-size: 11px; height: 28px; padding: 0 8px; max-width: 128px;
                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #perm-btn:hover, #model-btn:hover, #effort-btn:hover { border-color: var(--accent); }
+  #perm-btn { color: var(--vscode-textLink-foreground, #3794ff); }
 </style>
 </head>
 <body>
+  <div id="ws-line" hidden><span id="ws-label">工作区</span><span id="ws-path"></span><button id="workspace-btn" title="选择工作区文件夹（默认使用当前打开的文件夹；选定后新会话在该文件夹创建）">工作区</button></div>
   <header>
     <span id="pill" class="pill off" title="DSH Bridge: 正在加载…"></span>
-    <select id="session-select" title="切换会话"></select>
+    <div id="session-picker">
+      <button id="session-btn" title="切换会话"></button>
+      <div id="session-menu" class="combo-popup" hidden></div>
+    </div>
     <button id="settings-btn" title="设置（配置 harness）">⚙</button>
     <div id="new-session-wrap">
       <button id="new-session" title="新会话（选择模式）">＋</button>
       <div id="mode-menu" hidden></div>
     </div>
-    <button id="delete-session" title="删除当前会话">🗑</button>
+    <button id="delete-session" title="归档当前会话（停止运行中的任务并从列表移除；harness 侧记录保留，等价 web 的归档）">归档</button>
+    <button id="delete-session-hard" title="彻底删除当前会话：停止任务并删除 harness 的会话历史文件（不可恢复）">彻底删除</button>
   </header>
   <main id="messages"><div id="history-sentinel"></div></main>
   <footer>
@@ -449,7 +512,7 @@
     </section>
     <section id="interact-card" hidden></section>
     <div id="input-row">
-      <textarea id="input" rows="1" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；Ctrl+V 粘图片）"></textarea>
+      <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；Ctrl+V 粘图片）"></textarea>
       <div id="composer-btns">
         <button id="perm-btn" title="权限预设" hidden></button>
         <div class="in-spacer"></div>
@@ -469,7 +532,9 @@
   "use strict";
   var vscode = acquireVsCodeApi();
   var $ = function (id) { return document.getElementById(id); };
-  var messagesEl = $("messages"), pillEl = $("pill"), selEl = $("session-select"),
+  var messagesEl = $("messages"), pillEl = $("pill"),
+      selBtnEl = $("session-btn"), selMenuEl = $("session-menu"),
+      wsLineEl = $("ws-line"), wsPathEl = $("ws-path"),
       attachEl = $("attach-row"), queueEl = $("queue-row"),
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
       permBtnEl = $("perm-btn"), modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
@@ -485,11 +550,13 @@
   var state = {
     connected: false, version: null, phase: "searching",
     sessions: [], activeSessionId: null,
+    workspace: null,         // effective workspace folder (provider-reported)
     items: [], seqs: new Set(), oldestSeq: Infinity,
     running: false, lastTurn: -1,
     dirtySync: false,       // one unfrozen render right after turn/end
     curAssistant: null, openBlocks: [],
     titles: {},
+    turnModels: {},          // turn number -> model id (from request/header)
     models: null,            // { current: {provider, model}, groups: [...] }
     presets: [],             // permission presets (projections.permissions): [{value,label}]
     permCurrent: "",         // active session's current permission value
@@ -664,10 +731,24 @@
         state.items.push({ kind: "turn", turn: state.lastTurn, done: false,
                            startTime: state.turnStartTime });
         break;
+      case "request/header": {
+        // Per-request model (durable in the log): tag the open turn so the
+        // divider and the end-of-turn summary can show which model replied.
+        var rhCfg = d.header && d.header.config;
+        if (rhCfg && typeof rhCfg.model === "string" && state.lastTurn >= 0) {
+          state.turnModels[state.lastTurn] = rhCfg.model;
+          scheduleRender();
+        }
+        break;
+      }
       case "user/message": {
         // user/message carries content at data.content (assistant/message wraps
         // it under data.message) — accept either shape.
         var msg = d.message || d;
+        // The harness injects bookkeeping as user messages — runtime-context
+        // snapshots, model-changed notices, approval-policy changes. Only
+        // real turns (source.kind === "user") belong in the transcript.
+        if (msg.source && msg.source.kind && msg.source.kind !== "user") break;
         var u = textBlocksOf(msg);
         var imgs = imageBlocksOf(msg);
         if (u || imgs.length) {
@@ -736,13 +817,18 @@
       }
       case "tool/result": {
         var msg = d.message || {};
-        var block = null;
-        (msg.content || []).forEach(function (b) { if (b && b.type === "tool-result") block = b; });
-        var callId = (block && block.toolCallId) || d.callId;
+        // v4 wire: toolCallId / isError are on the message itself, content is a
+        // plain block list. The retired v3 wrapper (content[type='tool-result'])
+        // stays as a fallback for migrated/replayed old logs.
+        var v3block = null;
+        (msg.content || []).forEach(function (b) { if (b && b.type === "tool-result") v3block = b; });
+        var callId = msg.toolCallId || d.callId || (v3block && v3block.toolCallId);
+        var isError = msg.isError === true || !!(v3block && v3block.isError);
         var tool = findTool(callId);
         if (tool) {
-          tool.status = block && block.isError ? "error" : "ok";
-          tool.resultText = summarizeResult(block && block.content);
+          tool.status = isError ? "error" : "ok";
+          var resultContent = Array.isArray(msg.content) && msg.content.length ? msg.content : (v3block && v3block.content);
+          tool.resultText = summarizeResult(resultContent);
           tool.version = (tool.version || 0) + 1;
         }
         if (state.activeRound && state.activeRound.kind === "tool" && state.activeRound.callId === String(callId)) {
@@ -806,12 +892,15 @@
   function olderItemsFrom(events) {
     var out = [];
     var curTool = null;
+    var histTurn = 0;
+    var toolsByCallId = {};
     events.forEach(function (ev) {
       if (!ev) return;
       var d = ev.data || {};
       switch (ev.type) {
         case "turn/start": {
           var tnum = typeof d.turn === "number" ? d.turn : out.length;
+          histTurn = tnum;
           // If this turn's end strip was already loaded (newer page came
           // first), mark it done right away instead of showing "进行中".
           var preDone = null;
@@ -843,8 +932,16 @@
           }
           break;
         }
+        case "request/header": {
+          var rhc = d.header && d.header.config;
+          if (rhc && typeof rhc.model === "string" && histTurn > 0) state.turnModels[histTurn] = rhc.model;
+          break;
+        }
         case "user/message": {
           var msg = d.message || d;
+          // Same as live rendering: bookkeeping user messages (runtime-context,
+          // model-selection, user-approval) stay out of the transcript.
+          if (msg.source && msg.source.kind && msg.source.kind !== "user") break;
           var u = textBlocksOf(msg);
           var himgs = imageBlocksOf(msg);
           if (u || himgs.length) out.push({ kind: "user", text: u, turn: d.turn,
@@ -862,15 +959,21 @@
                       turn: typeof d.turn === "number" ? d.turn : 0,
                       diff: state.diffByCall[String(d.callId || "")] || null };
           out.push(curTool);
+          toolsByCallId[String(d.callId || "")] = curTool;
           break;
         case "tool/result": {
-          if (!curTool) break;
           var m = d.message || {};
-          var block = null;
-          (m.content || []).forEach(function (b) { if (b && b.type === "tool-result") block = b; });
-          curTool.status = block && block.isError ? "error" : "ok";
-          curTool.resultText = summarizeResult(block && block.content);
-          curTool = null;
+          var v3b = null;
+          (m.content || []).forEach(function (b) { if (b && b.type === "tool-result") v3b = b; });
+          var rid = String(m.toolCallId || d.callId || (v3b && v3b.toolCallId) || "");
+          // Match by callId (a page boundary or interleaved calls can split the
+          // call/result pair); the last pushed tool is only a fallback.
+          var t = (rid && toolsByCallId[rid]) || curTool;
+          if (!t) break;
+          t.status = (m.isError === true || !!(v3b && v3b.isError)) ? "error" : "ok";
+          var rc = Array.isArray(m.content) && m.content.length ? m.content : (v3b && v3b.content);
+          t.resultText = summarizeResult(rc);
+          if (t === curTool) curTool = null;
           break;
         }
       }
@@ -1417,10 +1520,10 @@
     w.appendChild(del);
     return w;
   }
-  // Live format: 12.3s under a minute, 1m23s from there on.
+  // Live format: 12.3s under a minute (integer seconds keep the .0), 1m23s from there on.
   function fmtLive(ms) {
     var s = Math.max(0, ms) / 1000;
-    if (s < 60) return (Math.round(s * 10) / 10) + "s";
+    if (s < 60) return (Math.round(s * 10) / 10).toFixed(1) + "s";
     var whole = Math.floor(s);
     var sec = whole % 60;
     return Math.floor(whole / 60) + "m" + (sec < 10 ? "0" : "") + sec + "s";
@@ -1565,6 +1668,15 @@
     });
   }
 
+  /** Tool-category tone (opencode-style colors): exec=amber, write=green, read=blue, agent=purple. */
+  function toolTone(name) {
+    var n = String(name || "");
+    if (/^(bash|pwsh|run_code|shell|cmd|exec|terminal)/i.test(n)) return "t-exec";
+    if (/^(write|edit|patch|apply_patch|str_replace|insert|create|delete|rename|move|mkdir)/i.test(n)) return "t-write";
+    if (/^(read|glob|grep|search|list|ls|find|fetch|view)/i.test(n)) return "t-read";
+    if (/^(task|agent|subagent|ask|question)/i.test(n)) return "t-agent";
+    return "t-other";
+  }
   function renderItem(item) {
     var el = document.createElement("div");
     if (!item.id) item.id = state.nextItemId++;
@@ -1576,7 +1688,8 @@
         // (kind "turn-end"), not here — so the newest content shows them
         // without scrolling back up. The running turn keeps the live clock
         // and the accumulated "+N-M" so far.
-        var label = "— 第 " + item.turn + " 轮";
+        var turnModel = state.turnModels[item.turn];
+        var label = "— " + (turnModel ? esc(turnModel) + " · " : "") + "第 " + item.turn + " 轮";
         if (!item.done) {
           label += " · 进行中";
           if (item.startTime && state.running) {
@@ -1594,7 +1707,8 @@
       case "turn-end": {
         el.className = "turn-summary";
         var dur = (typeof item.elapsed === "number" && isFinite(item.elapsed)) ? fmtDur(item.elapsed) : "--";
-        var s = "<span class='check'>✓</span><span>第 " + item.turn + " 轮完成 · 用时 " + dur + "</span>";
+        var endModel = state.turnModels[item.turn];
+        var s = "<span class='check'>✓</span><span>" + (endModel ? esc(endModel) + " · " : "") + "第 " + item.turn + " 轮完成 · 用时 " + dur + "</span>";
         var td = item.totalDiff;
         if (td && (td.added || td.deleted)) {
           s += diffChipHtml(td);
@@ -1733,7 +1847,7 @@
         // clicking); summary row shows status + "⚙ name : <summary>". The
         // bundle (tool-group) wraps consecutive tool calls.
         var det = document.createElement("details");
-        det.className = "tool";
+        det.className = "tool " + toolTone(item.name);
         var dot = item.status === "running" ? "run" : item.status === "error" ? "err" : "ok";
         var sum = document.createElement("summary");
         var d = document.createElement("span");
@@ -1855,7 +1969,7 @@
       row.className = "q-item";
       var tag = document.createElement("span");
       tag.className = "qtag";
-      tag.textContent = it.placement === "steering" ? "插入中" : it.placement === "context" ? "上下文" : "排队";
+      tag.textContent = it.placement === "steering" ? "插入中" : "排队";
       var txt = document.createElement("span");
       txt.className = "qtext";
       txt.textContent = it.text || "(图片)";
@@ -1920,20 +2034,30 @@
         state.phase = msg.phase || (msg.connected ? "online" : "offline");
         state.sessions = msg.sessions || [];
         state.activeSessionId = msg.activeSessionId;
+        state.workspace = msg.workspace || null;
         // Transient errors (e.g. "harness 未连接" fired while booting) should
         // vanish once connectivity comes back.
         if (msg.connected && !wasConnected) {
           state.items = state.items.filter(function (it) { return it.kind !== "error"; });
         }
         if (state.activeSessionId && state.titles[state.activeSessionId] === undefined) {
-          state.titles[state.activeSessionId] = undefined;
+          delete state.titles[state.activeSessionId];
         }
         var act = (msg.sessions || []).find(function (x) { return x.sessionId === msg.activeSessionId; });
         state.usage = act && act.usage ? act.usage : null;
         // If the active session changed (or first state), reset the view to that session's cache
         if (msg.activeSessionId !== state.lastSessionId) {
           state.lastSessionId = msg.activeSessionId;
+          // A pending approval/question belongs to the PREVIOUS session — drop
+          // the card so its locked composer does not block the new session.
+          if (state.interact && state.interact.sessionId !== msg.activeSessionId) {
+            state.interact = null;
+            interactState = null;
+            interactEl.hidden = true;
+            unlockMainInput();
+          }
           state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.turnModels = {};
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; renderQueue();
@@ -2067,6 +2191,7 @@
         // non-streaming cases (initial load, session switch).
         if (!state.running) {
           state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.turnModels = {};
           state.curAssistant = null; state.openBlocks = [];
           state.diffByCall = {}; state.activeRound = null;
           state.turnStartTime = 0; state.firstTokenTime = 0; state.turnOutput = 0;
@@ -2090,6 +2215,9 @@
         break;
       }
       case "running": {
+        // Keep the session-list dot fresh for BACKGROUND sessions too.
+        var srow = (state.sessions || []).find(function (x) { return x.sessionId === msg.sessionId; });
+        if (srow) srow.running = msg.running;
         if (msg.sessionId === state.activeSessionId) {
           var wasRunning = state.running;
           state.running = msg.running;
@@ -2106,6 +2234,8 @@
             }
           }
           updateHeader();
+        } else if (srow) {
+          renderSessionMenu();
         }
         break;
       }
@@ -2152,9 +2282,6 @@
       case "index":
         fileIndex = { files: msg.files || [], dirs: msg.dirs || [] };
         if (menuActive) refreshMentionMenu();
-        break;
-      case "pickedFile":
-        insertMention(msg.path);
         break;
       case "ask":
         showAskCard(msg);
@@ -2417,24 +2544,120 @@
       pillEl.textContent = "";
       pillEl.title = "DSH Bridge: 正在加载…";
     }
-    selEl.innerHTML = "";
-    state.sessions.forEach(function (sess) {
-      var opt = document.createElement("option");
-      opt.value = sess.sessionId;
-      var title = state.titles[sess.sessionId] || sess.title || "";
-      var label = title ? title : ("会话 " + shortId(sess.sessionId));
-      var time = relTime(sess.updatedAt);
-      opt.textContent = time ? (label + " · " + time) : label;
-      if (sess.running) opt.textContent += " ●";
-      if (sess.sessionId === state.activeSessionId) opt.selected = true;
-      selEl.appendChild(opt);
-    });
+    // Session button label mirrors the active row; the full list (grouped by
+    // workspace) lives in the dropdown so the header stays one line tall.
+    var selLabel = s ? (state.titles[s.sessionId] || s.title || ("会话 " + shortId(s.sessionId))) : "（无会话）";
+    selBtnEl.textContent = selLabel;
+    selBtnEl.title = s && s.cwd ? (selLabel + "\n" + s.cwd) : "切换会话";
+    if (!selMenuEl.hidden) renderSessionMenu();
     cancelBtn.hidden = !state.running;
     // Composer takeover: while an interaction is pending the main input row is
     // hidden entirely (regardless of connectivity changes).
     if (inputRowEl) inputRowEl.hidden = !!state.interact;
     sendBtn.disabled = !state.connected;
+    updateWorkspaceLine();
     updateStatusLine();
+  }
+
+  /* Workspace strip above the header: mirrors state.workspace (the VS Code folder
+     or the folder picked with the 工作区 button); full path lives in the tooltip. */
+  function updateWorkspaceLine() {
+    var ws = state.workspace;
+    wsLineEl.hidden = false;
+    wsPathEl.textContent = ws || "（未打开文件夹）";
+    wsPathEl.style.fontStyle = ws ? "" : "italic";
+    wsLineEl.title = ws
+      ? ws + "\n新会话与 web GUI 的默认工作区（可用右侧「工作区」按钮更改）"
+      : "未打开文件夹，也未手选工作区";
+  }
+
+  /* ---------- session picker (grouped by workspace) ----------
+     Rows are grouped by session cwd: the CURRENT editor workspace lists first,
+     everything else hides behind "其他工作区" (click to expand), so switching
+     between the open folder's sessions doesn't wade through unrelated history. */
+  var othersOpen = false;
+  function normPath(p) {
+    if (!p) return "";
+    return String(p).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  }
+  function renderSessionMenu() {
+    selMenuEl.innerHTML = "";
+    var sessions = state.sessions || [];
+    var cur = normPath(state.workspace);
+    var title = document.createElement("div");
+    title.className = "cp-title";
+    title.textContent = cur ? "当前工作区" : "会话";
+    selMenuEl.appendChild(title);
+    var mine = [], others = [];
+    if (cur) {
+      sessions.forEach(function (sess) {
+        if (normPath(sess.cwd) === cur) mine.push(sess); else others.push(sess);
+      });
+    } else {
+      mine = sessions; // no folder open: flat list, same as before
+    }
+    if (!sessions.length) {
+      var empty = document.createElement("div");
+      empty.className = "cp-row sm-empty";
+      empty.textContent = "暂无会话";
+      selMenuEl.appendChild(empty);
+      return;
+    }
+    if (!mine.length) {
+      var none = document.createElement("div");
+      none.className = "cp-row sm-empty";
+      none.textContent = "当前工作区暂无会话";
+      selMenuEl.appendChild(none);
+    }
+    mine.forEach(function (sess) { appendSessionRow(sess, !!cur); });
+    if (!others.length) return;
+    var toggle = document.createElement("div");
+    toggle.className = "cp-row sm-toggle";
+    toggle.textContent = (othersOpen ? "▾ " : "▸ ") + "其他工作区（" + others.length + "）";
+    toggle.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      othersOpen = !othersOpen;
+      renderSessionMenu();
+    });
+    selMenuEl.appendChild(toggle);
+    if (!othersOpen) return;
+    var byCwd = new Map();
+    others.forEach(function (sess) {
+      var key = normPath(sess.cwd);
+      if (!byCwd.has(key)) byCwd.set(key, { path: sess.cwd || "", items: [] });
+      byCwd.get(key).items.push(sess);
+    });
+    byCwd.forEach(function (group) {
+      var head = document.createElement("div");
+      head.className = "cp-group";
+      head.textContent = group.path || "（未指定工作区）";
+      head.title = group.path;
+      selMenuEl.appendChild(head);
+      group.items.forEach(function (sess) { appendSessionRow(sess); });
+    });
+  }
+  function appendSessionRow(sess, bold) {
+    var row = document.createElement("div");
+    row.className = "cp-row" + (sess.sessionId === state.activeSessionId ? " sel" : "") + (bold ? " sm-mine" : "");
+    var label = document.createElement("span");
+    label.className = "cp-label";
+    var title = state.titles[sess.sessionId] || sess.title || "";
+    var text = title ? title : ("会话 " + shortId(sess.sessionId));
+    var time = relTime(sess.updatedAt);
+    label.textContent = time ? (text + " · " + time) : text;
+    row.appendChild(label);
+    if (sess.running) {
+      var dot = document.createElement("span");
+      dot.className = "cp-sub";
+      dot.textContent = "●";
+      row.appendChild(dot);
+    }
+    if (sess.cwd) row.title = sess.cwd;
+    row.addEventListener("click", function () {
+      selMenuEl.hidden = true;
+      if (sess.sessionId !== state.activeSessionId) post({ type: "selectSession", sessionId: sess.sessionId });
+    });
+    selMenuEl.appendChild(row);
   }
 
   /* ---------- ＋ new-session mode picker (agent presets) ----------
@@ -2587,7 +2810,14 @@
     t1.className = "cp-title";
     t1.textContent = "模型";
     modelMenuEl.appendChild(t1);
-    groups.forEach(function (g) {
+    groups.forEach(function (g, gi) {
+      if (groups.length > 1) {
+        var head = document.createElement("div");
+        head.className = "cp-group";
+        if (gi === 0) head.style.borderTop = "none";
+        head.textContent = g.name || g.id;
+        modelMenuEl.appendChild(head);
+      }
       g.models.forEach(function (m) {
         var sel = !!(cur && cur.provider === g.id && cur.model === m.id);
         var row = document.createElement("div");
@@ -2612,7 +2842,14 @@
   function renderEffortButton() {
     var cur = state.models && state.models.current;
     if (!cur) { effortBtnEl.hidden = true; effortBtnEl.textContent = ""; return; }
-    effortBtnEl.textContent = cur.reasoningEffort || "推理";
+    var label = cur.reasoningEffort || "推理";
+    var efforts = currentEfforts();
+    if (efforts && cur.reasoningEffort) {
+      for (var i = 0; i < efforts.length; i++) {
+        if (efforts[i].id === cur.reasoningEffort) { label = efforts[i].name || label; break; }
+      }
+    }
+    effortBtnEl.textContent = label;
     effortBtnEl.hidden = false;
     if (!effortMenuEl.hidden) renderEffortMenu();
   }
@@ -2650,21 +2887,25 @@
     // Official efforts for the current model; fall back to the current value
     // alone (still allows re-selecting it) when the harness reports none.
     var efforts = currentEfforts();
-    var opts = efforts ? efforts.map(function (e) { return e.id; }) : (curEffort ? [curEffort] : []);
-    if (curEffort && opts.indexOf(curEffort) === -1) opts = opts.concat([curEffort]);
+    var opts = efforts
+      ? efforts.map(function (e) { return { id: e.id, label: e.name || e.id }; })
+      : (curEffort ? [{ id: curEffort, label: curEffort }] : []);
+    var hasCur = false;
+    for (var oi = 0; oi < opts.length; oi++) { if (opts[oi].id === curEffort) { hasCur = true; break; } }
+    if (curEffort && !hasCur) opts = opts.concat([{ id: curEffort, label: curEffort }]);
     opts.forEach(function (e) {
       var row = document.createElement("div");
-      row.className = "cp-row" + (curEffort === e ? " sel" : "");
-      row.textContent = e;
-      if (curEffort === e) {
+      row.className = "cp-row" + (curEffort === e.id ? " sel" : "");
+      row.textContent = e.label;
+      if (curEffort === e.id) {
         var mark = document.createElement("span");
         mark.className = "cp-sub";
         mark.textContent = "✓";
         row.appendChild(mark);
       }
       row.addEventListener("click", function () {
-        if (curEffort !== e) {
-          post({ type: "selectModel", provider: cur.provider, model: cur.model, reasoningEffort: e });
+        if (curEffort !== e.id) {
+          post({ type: "selectModel", provider: cur.provider, model: cur.model, reasoningEffort: e.id });
         }
         effortMenuEl.hidden = true;
       });
@@ -2740,6 +2981,7 @@
         '<div class="in-ctx">' + (msg.reason ? esc(msg.reason) : "agent 请求执行此操作") + '</div>' +
         '<div class="in-actions">' +
         '<button class="in-btn primary" id="in-allow">允许一次</button>' +
+        (msg.escalationMode ? '<button class="in-btn" id="in-allow-always" title="将会话权限提升为 ' + esc(msg.escalationMode) + '，之后同级别操作不再询问">永久允许</button>' : "") +
         '<button class="in-btn danger" id="in-reject">拒绝</button>' +
         '</div></div>';
     } else {
@@ -2771,6 +3013,12 @@
     // wire the buttons
     var allowBtn = $("in-allow");
     if (allowBtn) allowBtn.addEventListener("click", function () { answerInteraction({ outcome: "allowed-once" }); });
+    var allowAlwaysBtn = $("in-allow-always");
+    if (allowAlwaysBtn) allowAlwaysBtn.addEventListener("click", function () {
+      // Answer this request once, then raise the session permission preset to
+      // the escalated mode so the same class of operations stops asking.
+      answerInteraction({ outcome: "allowed-once", remember: "session", mode: msg.escalationMode });
+    });
     var rejectBtn = $("in-reject");
     if (rejectBtn) rejectBtn.addEventListener("click", function () { answerInteraction({ outcome: "rejected" }); });
     var submitBtn = $("in-submit");
@@ -2938,7 +3186,10 @@
     var st = interactState;
     if (!st) return;
     if (ans.outcome) {
-      post({ type: "respondApproval", rpcId: st.rpcId, sessionId: st.sessionId, approvalId: st.approvalId, outcome: ans.outcome });
+      var approvalPayload = { type: "respondApproval", rpcId: st.rpcId, sessionId: st.sessionId, approvalId: st.approvalId, outcome: ans.outcome };
+      if (ans.remember) approvalPayload.remember = ans.remember;
+      if (ans.mode) approvalPayload.mode = ans.mode;
+      post(approvalPayload);
     } else if (ans.submit) {
       var answers = [];
       // build from the message's questions (keep original order)
@@ -2970,10 +3221,10 @@
   }
 
   /* ---------- metrics line under the input (mirrors the DSH web StatsLine) ---------- */
-  // Compact duration: 45.2s under a minute, 2m42s from there on.
+  // Compact duration: 45.2s under a minute (integer seconds keep the .0), 2m42s from there on.
   function fmtDur(ms) {
     var s = (ms || 0) / 1e3;
-    if (s < 60) return (Math.round(s * 10) / 10) + "s";
+    if (s < 60) return (Math.round(s * 10) / 10).toFixed(1) + "s";
     var whole = Math.round(s);
     return Math.floor(whole / 60) + "m" + (whole % 60) + "s";
   }
@@ -3007,7 +3258,7 @@
           "<circle cx='7' cy='7' r='" + R + "' fill='none' stroke='var(--border)' stroke-width='2'/>" +
           "<circle cx='7' cy='7' r='" + R + "' fill='none' stroke='" + col + "' stroke-width='2' stroke-linecap='round' " +
           "stroke-dasharray='" + (frac * C).toFixed(2) + " " + C.toFixed(2) + "' transform='rotate(-90 7 7)'/>" +
-          "</svg>" + pct + "%</span>";
+          "</svg>" + pct + "% · " + fmtTok(used) + "</span>";
       }
     }
     var st = act && act.stats;
@@ -3030,8 +3281,7 @@
       }
       groups.push("输入 " + fmtTok(billed) + " tok · 输出 " + fmtTok(u.outputTokens || 0) + " tok");
     }
-    var line = groups.join(" | ");
-    var liveHtml = "";
+    var livePre = "", liveSpeed = "";
     if (state.running) {
       var live = [];
       // Live task clock (the value that will stay in history as 总计时) plus
@@ -3047,22 +3297,39 @@
         var ttft = Math.max(0, state.firstTokenTime - state.turnStartTime) / 1000;
         live.push("首 token " + ttft.toFixed(1) + "s");
         var elapsed = (Date.now() - state.firstTokenTime) / 1000;
-        if (elapsed > 0.3 && state.turnOutput > 0) live.push(fmtTps(state.turnOutput / elapsed) + " tok/s");
+        if (elapsed > 0.3 && state.turnOutput > 0) liveSpeed = fmtTps(state.turnOutput / elapsed) + " tok/s";
       }
-      liveHtml = live.join(" · ");
+      livePre = live.join(" · ");
     }
     var parts = [];
-    if (ring) parts.push(ring);
-    if (liveHtml) parts.push(liveHtml);
-    if (line) parts.push(esc(line));
-    statusEl.innerHTML = parts.join("&nbsp;|&nbsp;");
+    if (livePre) parts.push("<span class='st-i'>" + livePre + "</span>");
+    // The context-usage ring heads the summary row (never alone on its own
+    // line); the row breaks after the live-progress line while a turn runs.
+    var tail = [];
+    if (ring) tail.push("<span class='st-i'>" + ring + "</span>");
+    if (liveSpeed) tail.push("<span class='st-i'>" + liveSpeed + "</span>");
+    groups.forEach(function (g) { tail.push("<span class='st-i'>" + esc(g) + "</span>"); });
+    if (tail.length && parts.length) parts.push("<span class='st-brk' aria-hidden='true'></span>");
+    statusEl.innerHTML = parts.join("") + tail.join("");
   }
 
   /* ---------- input ---------- */
   var history = [], historyIndex = -1, historyDraft = ""; // CLI-style ↑/↓ history
+  var INPUT_MIN_LINES = 5, INPUT_MAX_LINES = 10;
   function autoGrow() {
     inputEl.style.height = "auto";
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 113) + "px"; // 5-line cap
+    // Size from the textarea's own computed box (line-height/padding/border):
+    // starts at 5 lines, grows with the text up to 10 lines, then scrolls.
+    var cs = getComputedStyle(inputEl);
+    var line = parseFloat(cs.lineHeight);
+    if (!isFinite(line) || line <= 0) line = (parseFloat(cs.fontSize) || 13) * 1.4;
+    var bt = parseFloat(cs.borderTopWidth) || 0, bb = parseFloat(cs.borderBottomWidth) || 0;
+    // border-box: the box adds padding+border on top of the text; scrollHeight
+    // already includes padding, so only the borders are added back here.
+    var box = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) + bt + bb;
+    var min = line * INPUT_MIN_LINES + box;
+    var max = line * INPUT_MAX_LINES + box;
+    inputEl.style.height = Math.max(min, Math.min(inputEl.scrollHeight + bt + bb, max)) + "px";
     // The footer grows upward; if the message area was pinned to the bottom,
     // keep it pinned so the newest content (incl. turn summaries) stays visible.
     if (scrollPos()) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -3152,18 +3419,23 @@
   settingsBtnEl.addEventListener("click", function () { post({ type: "openSettings" }); });
   // click anywhere outside the popups closes them
   document.addEventListener("click", function (ev) {
-    if (permMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden) return;
+    if (permMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden && selMenuEl.hidden) return;
     var t = ev.target;
     if (t && t.closest &&
         (t.closest("#perm-menu") || t.closest("#perm-btn") ||
          t.closest("#model-menu") || t.closest("#model-btn") ||
-         t.closest("#effort-menu") || t.closest("#effort-btn"))) return;
+         t.closest("#effort-menu") || t.closest("#effort-btn") ||
+         t.closest("#session-menu") || t.closest("#session-btn"))) return;
     permMenuEl.hidden = true;
     modelMenuEl.hidden = true;
     effortMenuEl.hidden = true;
+    selMenuEl.hidden = true;
   });
   document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape") { permMenuEl.hidden = true; modelMenuEl.hidden = true; effortMenuEl.hidden = true; }
+    if (ev.key === "Escape") {
+      permMenuEl.hidden = true; modelMenuEl.hidden = true; effortMenuEl.hidden = true;
+      selMenuEl.hidden = true;
+    }
   });
   // Pull the permission presets once the panel is live (composer left button).
   post({ type: "getPermissions" });
@@ -3317,25 +3589,141 @@
     state.todoOpen = !state.todoOpen;
     renderTodos(); // rebuilds the list + chevron in the new state
   });
-  selEl.addEventListener("change", function () {
-    if (selEl.value) post({ type: "selectSession", sessionId: selEl.value });
+  selBtnEl.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    if (selMenuEl.hidden) { renderSessionMenu(); selMenuEl.hidden = false; }
+    else selMenuEl.hidden = true;
   });
   $("new-session").addEventListener("click", function () {
     if (modeMenuOpen) closeModeMenu(); else openModeMenu();
   });
+  $("workspace-btn").addEventListener("click", function () {
+    post({ type: "pickWorkspace" });
+  });
+  updateWorkspaceLine();
   var delBtn = $("delete-session");
   delBtn.addEventListener("click", function () {
-    if (!selEl.value) return;
+    if (!state.activeSessionId) return;
     if (delBtn.dataset.arm === "1") {
       delete delBtn.dataset.arm;
-      delBtn.textContent = "🗑";
-      post({ type: "deleteSession", sessionId: selEl.value });
+      delBtn.textContent = "归档";
+      post({ type: "deleteSession", sessionId: state.activeSessionId });
     } else {
       delBtn.dataset.arm = "1";
-      delBtn.textContent = "确认?";
-      setTimeout(function () { delete delBtn.dataset.arm; delBtn.textContent = "🗑"; }, 3000);
+      delBtn.textContent = "确认归档";
+      setTimeout(function () { delete delBtn.dataset.arm; delBtn.textContent = "归档"; }, 3000);
     }
   });
+  var hardDelBtn = $("delete-session-hard");
+  hardDelBtn.addEventListener("click", function () {
+    if (!state.activeSessionId) return;
+    if (hardDelBtn.dataset.arm === "1") {
+      delete hardDelBtn.dataset.arm;
+      hardDelBtn.textContent = "彻底删除";
+      post({ type: "deletePermanently", sessionId: state.activeSessionId });
+    } else {
+      hardDelBtn.dataset.arm = "1";
+      hardDelBtn.textContent = "确认彻底删除";
+      setTimeout(function () { delete hardDelBtn.dataset.arm; hardDelBtn.textContent = "彻底删除"; }, 3000);
+    }
+  });
+
+  /* ---------- custom context menu (Chinese; right-click copy works) ---------- */
+  var ctxMenuEl = null;
+  function hideCtxMenu() {
+    if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; }
+  }
+  function plainTextOf(node) {
+    var clone = node.cloneNode(true);
+    clone.querySelectorAll(".msg-actions, .live-timer").forEach(function (n) { n.remove(); });
+    return (clone.innerText || clone.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function conversationText() {
+    var parts = [];
+    state.items.forEach(function (it) {
+      if (it.kind === "user" && it.text) parts.push("我: " + it.text);
+      else if (it.kind === "assistant") {
+        var t = (it.blocks || []).filter(function (b) { return b.type === "text"; })
+          .map(function (b) { return b.text; }).join("\n").trim();
+        if (t) parts.push("DSH: " + t);
+      } else if (it.kind === "tool") {
+        parts.push("[工具] " + it.name + (it.resultText ? "\n" + it.resultText : ""));
+      }
+    });
+    return parts.join("\n\n");
+  }
+  function pasteIntoInput() {
+    var insert = function (text) {
+      if (!text) return;
+      var s = inputEl.selectionStart || 0, e2 = inputEl.selectionEnd || 0;
+      inputEl.setRangeText(text, s, e2, "end");
+      inputEl.dispatchEvent(new Event("input"));
+    };
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(insert).catch(function () {
+        inputEl.focus();
+        document.execCommand("paste");
+      });
+    } else {
+      inputEl.focus();
+      document.execCommand("paste");
+    }
+  }
+  function showCtxMenu(x, y, items) {
+    hideCtxMenu();
+    var menu = document.createElement("div");
+    menu.className = "ctx-menu";
+    items.forEach(function (it) {
+      if (it.sep) { var sp = document.createElement("div"); sp.className = "ctx-sep"; menu.appendChild(sp); return; }
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = it.label;
+      if (it.disabled) { b.className = "ctx-item dis"; b.disabled = true; }
+      else {
+        b.className = "ctx-item";
+        b.addEventListener("click", function () { hideCtxMenu(); it.run(); });
+      }
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    menu.style.left = Math.max(2, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + "px";
+    menu.style.top = Math.max(2, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + "px";
+    ctxMenuEl = menu;
+  }
+  document.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    var items = [];
+    if (e.target === inputEl) {
+      var hasSel = inputEl.selectionStart !== inputEl.selectionEnd;
+      items.push({ label: "剪切", disabled: !hasSel, run: function () { inputEl.focus(); document.execCommand("cut"); } });
+      items.push({ label: "复制", disabled: !hasSel, run: function () { inputEl.focus(); document.execCommand("copy"); } });
+      items.push({ label: "粘贴", run: pasteIntoInput });
+      items.push({ label: "全选", run: function () { inputEl.focus(); inputEl.select(); } });
+    } else {
+      var selText = String(window.getSelection ? window.getSelection() : "");
+      var msgEl = e.target && e.target.closest ? e.target.closest(".msg") : null;
+      items.push({ label: "复制选中内容", disabled: !selText, run: function () { post({ type: "copyText", text: selText }); } });
+      if (msgEl) items.push({ label: "复制本条消息", run: function () { post({ type: "copyText", text: plainTextOf(msgEl) }); } });
+      items.push({ sep: true });
+      items.push({ label: "复制整个对话", run: function () { post({ type: "copyText", text: conversationText() }); } });
+      items.push({ label: "全选对话", run: function () {
+        var sel = window.getSelection();
+        if (!sel) return;
+        sel.removeAllRanges();
+        var r = document.createRange();
+        r.selectNodeContents(messagesEl);
+        sel.addRange(r);
+      } });
+    }
+    showCtxMenu(e.clientX, e.clientY, items);
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (ctxMenuEl && !ctxMenuEl.contains(e.target)) hideCtxMenu();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") hideCtxMenu();
+  }, true);
+  window.addEventListener("blur", hideCtxMenu);
 
   post({ type: "ready" });
 })();

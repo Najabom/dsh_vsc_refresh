@@ -38,11 +38,12 @@ export type HostMessage =
       phase?: "searching" | "starting" | "online" | "offline";
       sessions: PanelSession[];
       activeSessionId: string | null;
+      /** Effective workspace folder (manual picker override or the open folder). */
+      workspace?: string;
     }
   | { type: "event"; sessionId: string; event: PanelEvent }
   | { type: "history"; sessionId: string; events: PanelEvent[]; hasMore: boolean; isOlder?: boolean; toolDiffs?: Record<string, ToolLineDiff> }
   | { type: "running"; sessionId: string; running: boolean }
-  | { type: "pickedFile"; path: string }
   | { type: "index"; files: string[]; dirs: string[] }
   | {
       type: "models";
@@ -71,6 +72,9 @@ export type HostMessage =
       toolName: string;
       callId?: string;
       reason?: string;
+      /** Sandbox escalation target parsed from the request reason; when set,
+       *  the card offers "永久允许" (answer once + raise the session preset). */
+      escalationMode?: string;
     }
   | {
       type: "interaction";
@@ -96,7 +100,7 @@ export type HostMessage =
   | {
       type: "agentPresets";
       /** Agent-preset roster for the new-session mode picker (id → display copy). */
-      presets: { id: string; name?: string; description?: string; isDefault?: boolean }[];
+      presets: { id: string; name?: string; description?: string; isDefault?: boolean; trust?: string; broken?: string }[];
     }
   | { type: "error"; message: string }
   | {
@@ -121,6 +125,8 @@ export type WebviewMessage =
   | { type: "newSession"; agentPreset?: string }
   | { type: "getAgentPresets" }
   | { type: "deleteSession"; sessionId: string }
+  | { type: "deletePermanently"; sessionId: string }
+  | { type: "pickWorkspace" }
   | { type: "send"; text: string; mode?: "queue" | "steer"; attachments?: { mediaType: string; data: string; name?: string }[] }
   | { type: "loadOlder"; beforeSeq: number }
   | { type: "cancel" }
@@ -140,6 +146,10 @@ export type WebviewMessage =
       sessionId: string;
       approvalId: string;
       outcome: "allowed-once" | "rejected";
+      /** "永久允许": answer allowed-once, then persist the escalated mode (see
+       *  escalationMode) as the session permission preset. */
+      remember?: string;
+      mode?: string;
     }
   | {
       type: "respondQuestion";
@@ -165,7 +175,9 @@ export interface PanelSession {
   blank: boolean;
   updatedAt: number;
   title?: string;
-  /** Current agent preset of the session (agentPreset.list/select domain). */
+  /** Session working directory — the picker groups rows by this. */
+  cwd?: string;
+  /** Current agent preset of the session (agentPresets/list domain). */
   agentPreset?: string;
   /** tokenUsage projection (aggregate over the durable log). */
   usage?: {

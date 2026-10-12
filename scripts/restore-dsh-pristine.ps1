@@ -1,97 +1,48 @@
 # restore-dsh-pristine.ps1  [-VerifyOnly]
 #
-# Restore the official @deepseek-ai/dsh installation to the byte-exact npm
-# registry release (v0.1.1-rc.1), reverting any disk patches that older
-# dsh-vsc versions applied (scripts/patch-dsh-*.ps1 — now REMOVED).
+# Verify the official @deepseek-ai/dsh installation is byte-exact to the npm
+# registry release (v0.1.7-rc.2). The extension applies its deltas at RUNTIME
+# as a per-process ESM loader overlay (src/harness/overlay/), so the installed
+# tree must stay pristine ("pure bridge": never write DSH official files).
 #
-# The extension now applies these deltas at RUNTIME as a per-process ESM
-# loader overlay (src/harness/overlay/), so the installed tree must stay
-# pristine ("pure bridge": never write DSH official files).
+# The old disk-patch scripts (scripts/patch-dsh-*.ps1) and their reversal
+# paths are RETIRED: the only remaining in-memory delta patches
+# dsh-client-connection/lib/index.js (browser-auth bypass) at load time and
+# never touches disk. This script therefore only verifies.
 #
-# What it reverts (same 4 deltas the old scripts applied, in reverse):
-#   1. dsh-host-apiproxy/lib/index.js     host.describe schema + impl clientCount
-#   2. dsh-subprocess-local/lib/index.js  spawn windowsHide
-#   3. dsh-sandbox-windows-acl/lib/types-*.js  hidden console (2 sites)
-#
-# Every restored file is verified against the recorded pristine SHA256.
-# -VerifyOnly: check only, never write (exit 1 if any file is not pristine).
+# -VerifyOnly is implied (kept for CLI compatibility).
 $ErrorActionPreference = "Stop"
 
-$VerifyOnly = $args -contains "-VerifyOnly"
 $dshRoot = Join-Path $env:APPDATA "npm\node_modules\@deepseek-ai\dsh"
 $subRoot = Join-Path $dshRoot "node_modules\@deepseek-ai"
-$expectedDshVersion = "0.1.1-rc.1"
+$expectedDshVersion = "0.1.7-rc.2"
 
 # relative path under $subRoot -> pristine SHA256 of the npm release file
 $pristine = @{
-  "dsh-host-apiproxy\lib\index.js"          = "B37CD0EED0A20D625788608374C51B50AD367A8B42EB4D484F3542DB18114EC9"
-  "dsh-subprocess-local\lib\index.js"       = "F3A11B8AD2D3E01CA9943E9EC919465D8D4525E60FDD6904DA0D4494FE00C247"
-  "dsh-sandbox-windows-acl\lib\types-CNjZgO4h.js" = "D75087768CC528FEC521C8E93259FF3B37A9FB4D3C627F132EA76F23FB4B4F54"
+  "dsh-client-connection\lib\index.js" = "3950F524AED44E28240140A254CD928EA40EBA8E2D04CC8FD04F92A687F5C91D"
 }
 
 function Get-Sha256([string]$path) {
   return (Get-FileHash $path -Algorithm SHA256).Hash
 }
 
-$changed = 0
 $failed = 0
 
 foreach ($rel in $pristine.Keys) {
   $file = Join-Path $subRoot $rel
   $label = $rel
   if (-not (Test-Path $file)) {
-    Write-Host "[skip] $label : file not found: $file"
+    Write-Host "[FAIL] $label : file not found: $file" -ForegroundColor Red
+    $failed++
     continue
   }
 
   $hashNow = Get-Sha256 $file
   if ($hashNow -eq $pristine[$rel]) {
-    Write-Host "[ok]   $label : already pristine ($hashNow)"
-    continue
-  }
-
-  if ($VerifyOnly) {
-    Write-Host "[FAIL] $label : NOT pristine (sha256 $hashNow)" -ForegroundColor Red
-    $failed++
-    continue
-  }
-
-  $text = [System.IO.File]::ReadAllText($file)
-  $before = $text
-
-  switch -Regex ($rel) {
-    "dsh-host-apiproxy" {
-      # 1a. schema: drop the clientCount zod line next to attachedSessions
-      $text = [regex]::Replace($text, '\tclientCount: z\$1\.number\(\)\.int\(\)\.nonnegative\(\),\r?\n', '')
-      # 1b. impl: drop the clientCount muxQueues.size line next to attachedSessions
-      $text = [regex]::Replace($text, '\t\t\t\t\tclientCount: muxQueues\.size,\r?\n', '')
-    }
-    "dsh-subprocess-local" {
-      # 2. spawn options: remove the injected comma + windowsHide line
-      $text = [regex]::Replace($text, ',\r?\n\t\twindowsHide: platform === "win32"', '')
-    }
-    "dsh-sandbox-windows-acl" {
-      # 3. both STARTUPINFO sites: dwFlags 257 + wShowWindow 0 -> dwFlags 256
-      $text = [regex]::Replace($text, '(\t\tdwFlags: 257,)(\r?\n)(\t\twShowWindow: 0,)(\r?\n)', {
-        param($m)
-        "`t`tdwFlags: 256," + $m.Groups[2].Value
-      })
-    }
-  }
-
-  if ($text -eq $before) {
-    Write-Host "[FAIL] $label : patched markers not found for reversal — manual review needed" -ForegroundColor Red
-    $failed++
-    continue
-  }
-
-  [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
-  $hashAfter = Get-Sha256 $file
-  if ($hashAfter -eq $pristine[$rel]) {
-    Write-Host "[RESTORED] $label : byte-identical to npm release ($hashAfter)"
-    $changed++
+    Write-Host "[ok]   $label : pristine ($hashNow)"
   } else {
-    Write-Host "[FAIL] $label : post-restore sha256 mismatch ($hashAfter)" -ForegroundColor Red
+    Write-Host "[FAIL] $label : NOT pristine (sha256 $hashNow)" -ForegroundColor Red
+    Write-Host "       the overlay never writes to disk — reinstall dsh: npm i -g @deepseek-ai/dsh@$expectedDshVersion" -ForegroundColor Red
     $failed++
   }
 }
@@ -106,6 +57,5 @@ if (Test-Path $pkg) {
 }
 
 Write-Host ""
-Write-Host "summary: $changed restored, $failed failed, remaining files pristine-checked"
 if ($failed -gt 0) { exit 1 }
-if ($changed -gt 0) { Write-Host "official DSH body is now pristine — the runtime overlay (src/harness/overlay) provides the patches in-memory" }
+Write-Host "official DSH body is pristine — the runtime overlay (src/harness/overlay) provides the patch in-memory"

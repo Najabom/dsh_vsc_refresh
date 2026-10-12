@@ -2,11 +2,10 @@
  * Official-install integrity reference for the runtime overlay.
  *
  * The installed @deepseek-ai/dsh tree must stay byte-identical to the npm
- * release (v0.1.1-rc.1). These SHA256 values were computed from the tarballs
- * pulled straight from the npm registry and are what
- * scripts/restore-dsh-pristine.ps1 restores/verifies against. When upstream
- * ships a new version, update this table + the script + internal/runtime-overlay.md
- * together (see "upgrade checkpoints" there).
+ * release (v0.1.7-rc.2). These SHA256 values were computed from the files of
+ * the npm release and are what scripts/restore-dsh-pristine.ps1 verifies
+ * against. When upstream ships a new version, update this table + the script
+ * + internal/runtime-overlay.md together (see "upgrade checkpoints" there).
  */
 
 import { createHash } from "node:crypto";
@@ -14,9 +13,7 @@ import { readFileSync } from "node:fs";
 
 /** relative path under the dsh package's node_modules/@deepseek-ai -> pristine SHA256 */
 export const PRISTINE_SHA256: Record<string, string> = {
-  "dsh-host-apiproxy/lib/index.js": "B37CD0EED0A20D625788608374C51B50AD367A8B42EB4D484F3542DB18114EC9",
-  "dsh-subprocess-local/lib/index.js": "F3A11B8AD2D3E01CA9943E9EC919465D8D4525E60FDD6904DA0D4494FE00C247",
-  "dsh-sandbox-windows-acl/lib/types-CNjZgO4h.js": "D75087768CC528FEC521C8E93259FF3B37A9FB4D3C627F132EA76F23FB4B4F54",
+  "dsh-client-connection/lib/index.js": "3950F524AED44E28240140A254CD928EA40EBA8E2D04CC8FD04F92A687F5C91D",
 };
 
 export interface PristineReport {

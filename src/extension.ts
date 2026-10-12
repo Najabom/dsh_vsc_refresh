@@ -8,11 +8,15 @@ import { renderEmbedHtml } from "./panel/embed";
 import { DshStatusBar } from "./status";
 import { HarnessClient } from "./harness/client";
 import { configuredBase, discover, portOf } from "./harness/discover";
-import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord, HARNESS_PID_FILE } from "./harness/launcher";
+import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
+import { ensureWorkspaceAcl, repairWorkspaceAclElevated } from "./harness/workspaceAcl";
+import { checkForUpdate, installedDshVersion, installDsh, runDshUpdate, DSH_PACKAGE, type UpdateInfo } from "./harness/updater";
+import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
 import { HarnessEventStream } from "./events/eventStream";
 import { ChangeTracker } from "./editor/changeTracker";
+import { FollowEdits } from "./editor/followEdits";
 import { buildSelectionContext } from "./editor/askSelection";
-import { reviewFiles } from "./editor/diff";
+import { cleanupTempDirs, reviewFiles } from "./editor/diff";
 import type { PanelEvent } from "./panel/protocol";
 
 const POLL_MS = 1000;
@@ -21,14 +25,20 @@ const RIGHT_VIEW = "dsh.sidebar.right";
 const MAX_SPAWN_FAILURES = 3; // consecutive auto-spawn failures before giving up this session
 const OFFLINE_RECHECK_MS = 15000; // slow poll while down-but-not-our-job (user may start one manually)
 const DISCONNECT_RECHECK_MS = 3000; // grace before probing after the event stream drops
+// A freshly installed DSH boots cold (npm replaced the whole tree): the 0.2.0
+// cold boot took ~45s while warm boots settle in ~15s. The post-update
+// restart+verify path therefore waits much longer than the normal startup
+// path before it is allowed to call the update a failure.
+const RESTART_BOOT_TIMEOUT_MS = 90000;
+const VERIFY_RETRY_WINDOW_MS = 45000; // extra retry window for the gateway routes after the port answers
 
-// Module-level handoff for deactivate(): the exit path runs outside activate's
-// closure, so it needs its own reference to the connected client to ask the
-// harness "how many clients are attached?" before deciding whether to stop an
-// instance we spawned.
-let exitClient: HarnessClient | null = null;
+/** Set on deactivate: stops every lifecycle callback from spawning or probing
+ *  after the extension is going away (a late timer would otherwise spawn a
+ *  detached orphan nobody could ever stop). */
+let shuttingDown = false;
 
 export function activate(context: vscode.ExtensionContext): void {
+  shuttingDown = false;
   const log = vscode.window.createOutputChannel("DSH Bridge");
   const status = new DshStatusBar();
   const makeLog = (message: string): void => {
@@ -36,15 +46,31 @@ export function activate(context: vscode.ExtensionContext): void {
     console.log("[dsh-vsc]", message); // lands in the exthost log for headless diagnosis
   };
   const tracker = new ChangeTracker();
+  const followEdits = new FollowEdits(makeLog);
   const panelListeners = new Set<(sessionId: string, event: PanelEvent) => void>();
   let client: HarnessClient | null = null;
   let stream: HarnessEventStream | null = null;
+  let updatingDsh = false; // an update flow owns the harness lifecycle right now
+  let streamOpenWaiter: ((ok: boolean) => void) | null = null; // armed around harness restarts
   // Lifecycle state. `autoStarted` is gone: the watch loop owns auto-start.
   let connecting = false; // a spawn+wait is in flight; prevents double work
   let userStopped = false; // `dsh.stop` asked us not to respawn; cleared by start / reload
   let autoRetryDisabled = false; // too many consecutive spawn failures this session
   let consecutiveSpawnFailures = 0;
   let checkTimer: NodeJS.Timeout | null = null;
+  let authNoticeShown = false;
+
+  // Shutdown guard: dispose clears the pending probe so no timer fires after
+  // deactivation (deactivate() also flips shuttingDown for the async paths).
+  context.subscriptions.push({
+    dispose: () => {
+      shuttingDown = true;
+      if (checkTimer) {
+        clearTimeout(checkTimer);
+        checkTimer = null;
+      }
+    },
+  });
 
   const panel = new NativePanelProvider(context, makeLog, () => client, (cb) => panelListeners.add(cb));
 
@@ -61,6 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     status,
     tracker,
+    followEdits,
     vscode.commands.registerCommand("dsh.openSidebar", () => {
       void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`);
     }),
@@ -84,7 +111,37 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("dsh.refreshStatus", () => {
-      void refresh();
+  void refresh();
+
+  // Workspace ACL guard: the DSH workspace-write sandbox needs WRITE_OWNER on
+  // the workspace root (it stamps a Low integrity label into the SACL) — see
+  // harness/workspaceAcl.ts. Repair silently when we can; when the folder is
+  // owned by another identity offer the one-time elevated repair. Without
+  // this, every sandboxed tool call in such a workspace dies instantly with
+  // `grantWrite … Win32 5` and even plain code execution is blocked.
+  const guardWorkspaceAcl = (folders: readonly vscode.WorkspaceFolder[] | undefined): void => {
+    for (const folder of folders ?? []) {
+      void ensureWorkspaceAcl(folder.uri.fsPath, makeLog).then(async (result) => {
+        if (result !== "needs-elevation") return;
+        const choice = await vscode.window.showWarningMessage(
+          `DSH Bridge：工作区「${folder.name}」的目录权限无法自动修复（未授予当前账号完全控制，DSH 沙箱无法在其中运行代码/写文件）。`,
+          "以管理员身份修复",
+          "忽略"
+        );
+        if (choice !== "以管理员身份修复") return;
+        const fixed = await repairWorkspaceAclElevated(folder.uri.fsPath, makeLog);
+        void vscode.window.showInformationMessage(
+          fixed
+            ? `已修复工作区权限：${folder.name}`
+            : `工作区权限修复失败：${folder.name}（详见 “DSH Bridge” 输出日志）`
+        );
+      });
+    }
+  };
+  guardWorkspaceAcl(vscode.workspace.workspaceFolders);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((e) => guardWorkspaceAcl(e.added))
+  );
     }),
     vscode.commands.registerCommand("dsh.openWebView", () => openWebView(context, log)),
     vscode.commands.registerCommand("dsh.askSelection", () => {
@@ -109,10 +166,18 @@ export function activate(context: vscode.ExtensionContext): void {
         });
       })();
     }),
-    vscode.commands.registerCommand("dsh.reviewChanges", () => reviewFiles(tracker.latestFiles()))
+    vscode.commands.registerCommand("dsh.reviewChanges", () => {
+      reviewFiles(tracker.latestFiles());
+      // The review is open — drop the badge back to the online indicator.
+      status.setChanges(0);
+    })
   );
 
   void refresh();
+
+  // Update check: once per window start, delayed so the dialog does not race
+  // the harness startup sequence.
+  setTimeout(() => void offerDshUpdate(), 5000);
 
   // Dev-host autotest hook (only when launched with DSH_VSC_AUTOTEST=1): open the
   // right sidebar a few seconds after startup so resolveWebviewView runs and its
@@ -125,12 +190,18 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   async function ensureRunning(): Promise<boolean> {
-    if (connecting) return false;
+    if (shuttingDown || connecting || updatingDsh) return false;
     // Idempotent start: if something already answers, just (re)connect.
     const before = await discover();
     if (before.alive) {
       await refresh();
       return true;
+    }
+    if (before.unauthorized) {
+      // A stock harness owns the port: our spawn would only hit EADDRINUSE.
+      reportUnauthorized(before.base);
+      status.setOffline();
+      return false;
     }
     connecting = true;
     try {
@@ -138,13 +209,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const port = portOf(base);
       status.setStarting(port);
       panel.setPhase("starting");
-      // Same data root as the web GUI (~/.dsh): the extension is a shared
-      // client, so "one runs, the other watches" means ONE history. Port
-      // ownership is the natural exclusivity — the extension's own instance
-      // takes the same port the web GUI would use, so the two can never
-      // co-write the same log.
-      await startHarness(port, log);
-      await waitUntilAlive(base, START_TIMEOUT_MS);
+      // Same data root as the web GUI (~/.dsh): "one runs, the other watches"
+      // means ONE history. Port ownership is the natural exclusivity — the
+      // extension's own instance takes the same port the web GUI would use,
+      // so the two can never co-write the same log.
+      const started = await startHarness(port, log, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+      if (started) await waitUntilAlive(base, START_TIMEOUT_MS);
     } finally {
       connecting = false;
     }
@@ -161,6 +231,9 @@ export function activate(context: vscode.ExtensionContext): void {
       log.appendLine(
         `DSH 服务连续 ${MAX_SPAWN_FAILURES} 次启动失败，本次会话不再自动重试（可执行命令 dsh: Start Web Harness 手动重试）`
       );
+      // Keep watching (probe-only) so a harness the user starts manually is
+      // still discovered — without it the whole chain would go dark.
+      scheduleHarnessCheck(OFFLINE_RECHECK_MS);
     } else {
       scheduleHarnessCheck(Math.min(2000 * 2 ** (consecutiveSpawnFailures - 1), 30000));
     }
@@ -169,6 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** Debounced harness probe: reconnect if it came back, respawn if it died. */
   function scheduleHarnessCheck(delayMs: number): void {
+    if (shuttingDown) return;
     if (checkTimer) clearTimeout(checkTimer);
     checkTimer = setTimeout(() => {
       checkTimer = null;
@@ -177,10 +251,17 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   async function checkHarness(): Promise<void> {
-    if (connecting) return;
+    if (shuttingDown || connecting || updatingDsh) return;
     const d = await discover();
     if (d.alive) {
       await refresh();
+      return;
+    }
+    if (d.unauthorized) {
+      reportUnauthorized(d.base);
+      status.setOffline();
+      log.appendLine(`harness at ${d.base} demands browser-session auth (stock dsh web) — cannot be driven from the extension`);
+      scheduleHarnessCheck(OFFLINE_RECHECK_MS);
       return;
     }
     status.setOffline();
@@ -195,11 +276,21 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+  /** One clear warning when a stock (non-overlay) harness occupies the port:
+   *  we cannot drive it, and we must NOT spawn onto the same port. */
+  function reportUnauthorized(base: string): void {
+    if (authNoticeShown || shuttingDown) return;
+    authNoticeShown = true;
+    void vscode.window.showWarningMessage(
+      `DSH Bridge：${base} 已有原生 dsh web 在运行（需要浏览器鉴权，扩展无法连接）。` +
+        `请关闭它，扩展会自动启动并接管一个受管实例；或改用命令 “dsh: Start Web Harness”。`
+    );
+  }
+
   async function refresh(): Promise<void> {
     const d = await discover();
     if (d.alive) {
       client = new HarnessClient(d.base);
-      exitClient = client;
       status.setOnline(d.version ?? "?");
       log.appendLine(`harness connected at ${d.base} (version ${d.version})`);
       panel.setClient(client, d.version);
@@ -207,20 +298,44 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     client = null;
-    exitClient = null;
     panel.setClient(null);
     await checkHarness();
   }
 
+  let streamBase = "";
   function ensureStream(base: string): void {
-    if (stream) return;
+    if (stream && streamBase === base) return;
+    if (stream) {
+      // Base changed (config edit / another port): the socket is bound to the
+      // old URL — rebuild it against the new harness.
+      stream.dispose();
+      stream = null;
+    }
+    streamBase = base;
     stream = new HarnessEventStream(base);
     stream.onSessionEvent = (sessionId, event) => {
       tracker.handleEvent(sessionId, event);
+      followEdits.handleEvent(sessionId, event);
       panelListeners.forEach((cb) => cb(sessionId, event as PanelEvent));
     };
+    // Control-plane channels (0.1.7): projections, workspace archived set,
+    // host emits and answerable waterfalls all ride the same mux socket.
+    stream.onProjection = (sessionId, key, value) => panel.onProjection(sessionId, key, value);
+    stream.onWorkspace = (state) => panel.onWorkspace(state);
+    stream.onApiSession = (event, args) => panel.onApiSession(event, args);
+    stream.onWaterfall = (frame) => panel.onWaterfall(frame);
+    stream.onWaterfallCancel = (eventId) => panel.onWaterfallCancel(eventId);
+    // The panel decides which session to follow (active session switching).
+    panel.attachStream({ setFollowSession: (sessionId) => stream?.setActiveSession(sessionId) });
     stream.onError = (message) => log.appendLine(`event stream: ${message}`);
     stream.onOpen = () => {
+      // A restart watchdog (update flow) may be waiting for the WS mux to
+      // come back: resolve before anything else can race it.
+      if (streamOpenWaiter) {
+        const waiter = streamOpenWaiter;
+        streamOpenWaiter = null;
+        waiter(true);
+      }
       // Reconnected (possibly to a fresh harness we respawned): flip status online.
       void discover().then((d) => {
         if (d.alive) status.setOnline(d.version ?? "?");
@@ -242,14 +357,248 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   }
 
+  /** Restart watchdog: resolves true when the WS mux reconnects within the
+   *  window. Armed BEFORE a harness restart so the open event cannot race it. */
+  function waitForStreamOpen(timeoutMs: number): Promise<boolean> {
+    if (shuttingDown) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        streamOpenWaiter = null;
+        resolve(false);
+      }, timeoutMs);
+      streamOpenWaiter = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+    });
+  }
+
+  /** HTTP half of the post-update health check: browser-auth bypass alive and
+   *  one real RPC (session/list) through the typert wire contract. */
+  async function verifyApiCommunication(): Promise<{ ok: boolean; detail: string }> {
+    const base = configuredBase();
+    const probe = new HarnessClient(base);
+    const state = await probe.probe(3000);
+    if (state === "unauthorized") {
+      return { ok: false, detail: "API 拒绝访问（浏览器鉴权未被兼容层绕过——overlay 补丁与新版本不匹配）" };
+    }
+    if (state !== "alive") return { ok: false, detail: "API 探活失败（服务未就绪）" };
+    try {
+      await probe.listSessions();
+    } catch (error) {
+      return { ok: false, detail: `RPC 调用失败：${(error as Error).message}` };
+    }
+    return { ok: true, detail: "" };
+  }
+
+  /** The harness may accept connections slightly before its gateway routes are
+   *  ready, so a failed check is retried inside a short window instead of
+   *  failing the update right away (observed on the 0.2.0 cold boot). An
+   *  overlay/auth mismatch is definitive and stops the retry loop. */
+  async function verifyWithRetry(windowMs: number): Promise<{ ok: boolean; detail: string }> {
+    const deadline = Date.now() + windowMs;
+    let last = await verifyApiCommunication();
+    while (!last.ok && Date.now() < deadline && !last.detail.startsWith("API 拒绝访问")) {
+      log.appendLine(`communication check pending: ${last.detail} — retrying…`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      last = await verifyApiCommunication();
+    }
+    return last;
+  }
+
+  /** Start the harness and prove the extension can still talk to it: HTTP
+   *  probe + one RPC + the WS event stream coming back up. A freshly installed
+   *  version boots cold (npm replaced the whole tree), so this waits far
+   *  longer than the normal startup path before declaring failure. */
+  async function restartAndVerify(): Promise<{ ok: boolean; detail: string }> {
+    const base = configuredBase();
+    const port = portOf(base);
+    const eventsWaiter = waitForStreamOpen(RESTART_BOOT_TIMEOUT_MS); // arm before the spawn
+    status.setStarting(port);
+    panel.setPhase("starting");
+    log.appendLine(`restarting harness (${base})…`);
+    const started = await startHarness(port, log, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    if (started) await waitUntilAlive(base, RESTART_BOOT_TIMEOUT_MS);
+    await refresh();
+    const api = await verifyWithRetry(VERIFY_RETRY_WINDOW_MS);
+    if (!api.ok) return api;
+    const events = await eventsWaiter;
+    if (!events) return { ok: false, detail: "事件流（WebSocket mux）未能重新建立" };
+    return { ok: true, detail: "" };
+  }
+
+  /** Once per window: check the npm registry for a newer DSH; when one exists
+   *  ask 立即更新/暂不更新 (a skip is remembered per version). Choosing update
+   *  runs the full update → restart → communication-verification flow with an
+   *  automatic rollback offer when the new version cannot be driven. */
+  async function offerDshUpdate(): Promise<void> {
+    if (shuttingDown) return;
+    const info = await checkForUpdate(makeLog);
+    if (!info || shuttingDown) return;
+    const skipped = context.globalState.get<string>("dshVsc.skippedDshVersion");
+    if (skipped === info.latest) {
+      log.appendLine(`dsh v${info.latest} is available but was skipped before — not asking again`);
+      return;
+    }
+
+    // Interface preflight: official release notes for (installed, latest] plus
+    // a static identifier check of the new version's packages (see
+    // harness/updatePreflight.ts). A missing signal only downgrades the dialog
+    // copy — the runtime verification after an actual update stays the gate.
+    const [notesInfo, staticResult] = await Promise.all([
+      fetchReleaseNotes(info.installed, info.latest, makeLog),
+      staticInterfaceCheck(info.latest, makeLog),
+    ]);
+    if (shuttingDown) return;
+    const alerts = notesInfo ? scanInterfaceAlerts(notesInfo.notes) : null;
+    if (notesInfo) {
+      log.appendLine(
+        `release notes: interval (${info.installed}, ${info.latest}] = [${notesInfo.versions.join(", ") || "no entries"}]`
+      );
+      for (const hit of alerts?.hits ?? []) {
+        log.appendLine(`release note mention: ${hit.id} (v${hit.versions.join(", ")})`);
+      }
+    }
+    const staticFailed = staticResult.verified && !staticResult.ok;
+    const noteHits = alerts?.hits ?? [];
+    if (staticFailed || noteHits.length > 0) {
+      const parts: string[] = [];
+      if (staticFailed) parts.push(`新版本包中缺少接口：${staticResult.missing.join("、")}`);
+      if (noteHits.length > 0) {
+        parts.push(`官方通告提及：${noteHits.map((h) => `${h.id}（v${h.versions.join(", ")}）`).join("、")}`);
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `DSH 新版本 v${info.latest}（当前 v${info.installed}）接口预检未通过：${parts.join("；")}。` +
+          `建议先更新 dsh-vsc 插件适配该版本后再升级 DSH。`,
+        "暂不更新（等待插件适配）",
+        "仍要更新（自检失败自动回滚）"
+      );
+      if (choice === "仍要更新（自检失败自动回滚）") {
+        await performDshUpdate(info);
+      } else {
+        // Deliberately NOT remembered: a future plugin update is exactly the
+        // thing that changes this verdict, and the user must be asked again.
+        log.appendLine(`user deferred dsh ${info.latest} (interface preflight risk)`);
+      }
+      return;
+    }
+
+    const preflightNote =
+      staticResult.verified && alerts !== null
+        ? "接口预检通过（官方通告未提及本扩展所用接口，新版本包内接口核验存在）。"
+        : `接口预检未能完成（${staticResult.verified ? "未能获取官方通告" : "未能下载新版本包核验"}）。`;
+    const choice = await vscode.window.showInformationMessage(
+      `DSH 有新版本 v${info.latest}（当前 v${info.installed}）。${preflightNote}更新后会自动验证通信兼容性，失败可一键回滚。`,
+      "立即更新",
+      "暂不更新"
+    );
+    if (choice === "暂不更新") {
+      await context.globalState.update("dshVsc.skippedDshVersion", info.latest);
+      log.appendLine(`user chose to skip dsh ${info.latest}`);
+      return;
+    }
+    if (choice !== "立即更新" || shuttingDown) return;
+    await performDshUpdate(info);
+  }
+
+  async function performDshUpdate(info: UpdateInfo): Promise<void> {
+    if (updatingDsh || shuttingDown) return;
+    updatingDsh = true;
+    try {
+      const owned = harnessRunning();
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `DSH：正在更新到 v${info.latest}…` },
+        async (progress) => {
+          if (owned) {
+            // Never replace files under a live harness tree.
+            log.appendLine("update: stopping the owned harness before npm install");
+            await stopHarness();
+          }
+          progress.report({ message: "npm install -g @deepseek-ai/dsh@latest" });
+          const result = await runDshUpdate(makeLog);
+          if (!result.ok) {
+            void vscode.window.showErrorMessage(
+              `DSH 更新失败：${result.error ?? "未知错误"}（详见 “DSH Bridge” 输出日志）`
+            );
+            if (owned && !shuttingDown) {
+              // Put the previous version back in service.
+              const back = await restartAndVerify();
+              if (!back.ok) log.appendLine(`harness restart after failed update: ${back.detail}`);
+            }
+            return;
+          }
+          const newVersion = (await installedDshVersion()) ?? info.latest;
+          log.appendLine(`update: npm install finished, installed version is now ${newVersion}`);
+          if (!owned) {
+            void vscode.window.showInformationMessage(
+              `DSH 已更新到 v${newVersion}。当前运行中的实例不是本扩展启动的，需其自行重启后新版本才会生效。`
+            );
+            return;
+          }
+          progress.report({ message: "重启 harness 并验证通信…" });
+          const verdict = await restartAndVerify();
+          if (verdict.ok) {
+            log.appendLine(`update: communication verified on v${newVersion}`);
+            void vscode.window.showInformationMessage(
+              `DSH 已更新到 v${newVersion}，通信验证通过（API 与事件流均正常）。`
+            );
+            return;
+          }
+          const rollbackLabel = `回滚到 v${info.installed}`;
+          const choice = await vscode.window.showWarningMessage(
+            `DSH 已更新到 v${newVersion}，但通信验证失败：${verdict.detail}。` +
+              `新版本可能变更了协议或鉴权行为（扩展的兼容层尚未适配）。`,
+            rollbackLabel,
+            "保持新版本"
+          );
+          if (choice !== rollbackLabel) return;
+          log.appendLine(`update: rolling back to v${info.installed}`);
+          progress.report({ message: `回滚到 v${info.installed}…` });
+          await stopHarness();
+          const back = await installDsh(`${DSH_PACKAGE}@${info.installed}`, makeLog);
+          if (!back.ok) {
+            void vscode.window.showErrorMessage(
+              `回滚失败：${back.error ?? "未知错误"}（详见 “DSH Bridge” 输出日志）`
+            );
+            return;
+          }
+          const verdict2 = await restartAndVerify();
+          void vscode.window.showInformationMessage(
+            verdict2.ok
+              ? `已回滚到 v${info.installed}，通信恢复正常。`
+              : `已回滚到 v${info.installed}，但通信仍异常：${verdict2.detail}（详见 “DSH Bridge” 输出日志）`
+          );
+        }
+      );
+    } finally {
+      updatingDsh = false;
+      // Hand the lifecycle back to the normal watch loop (respawn/reconnect
+      // decisions if anything above left the harness down).
+      scheduleHarnessCheck(DISCONNECT_RECHECK_MS);
+    }
+  }
+
   async function waitUntilAlive(base: string, timeoutMs: number): Promise<void> {
     const probe = new HarnessClient(base);
-    const deadline = Date.now() + timeoutMs;
+    const started = Date.now();
+    const deadline = started + timeoutMs;
+    let lastNote = started;
     while (Date.now() < deadline) {
       if (await probe.isAlive(800)) return;
+      if (Date.now() - lastNote >= 10000) {
+        lastNote = Date.now();
+        log.appendLine(
+          `harness at ${base} is still booting (${Math.round((Date.now() - started) / 1000)}s elapsed)…`
+        );
+      }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
-    log.appendLine(`timed out waiting for harness at ${base}`);
+    log.appendLine(`harness at ${base} did not answer within ${timeoutMs / 1000}s (the watch loop will keep trying)`);
   }
 }
 
@@ -278,20 +627,20 @@ function logDeactivate(line: string): void {
 }
 
 /**
- * Reference-counted shutdown: only ever stop the harness THIS extension
- * spawned, and only when no other client is attached to it.
+ * Shutdown of the harness THIS extension spawned (live handle, or the pid
+ * record left by a previous session after an extension reload). A
+ * pre-existing/shared harness is never killed.
  *
- * - Shared harness (not ours): never killed — the browser GUI or the user's
- *   own `dsh web` may be using it; we only note it stays alive.
- * - Auto-started harness (ours): ask host.describe for clientCount (provided
- *   by the runtime overlay src/harness/overlay — in-memory patch, official
- *   dsh files stay pristine). If another client (e.g. a browser tab attached
- *   to our instance) is still connected, leave it running and log where its
- *   PID record lives. Otherwise (clientCount unknown because the overlay
- *   canary failed / overlay missing, or <= 1 = only us) stop it and remove
- *   the pid record, so no orphaned windowless dsh keeps running.
+ * dsh 0.1.7 removed host.describe — and with it the clientCount reference
+ * count that used to tell us "a browser tab is still attached, leave it
+ * running". With no way to ask, the owned instance (windowless, detached, no
+ * UI of its own) is stopped deterministically: an orphan would outlive its
+ * owner with nothing left to shut it down.
  */
 export function deactivate(): Promise<void> {
+  shuttingDown = true;
+  // Older temp diff dirs would otherwise accumulate one per reviewed file.
+  cleanupTempDirs();
   logDeactivate("deactivate called");
   const owned = harnessRunning();
   const record = readPidRecord();
@@ -300,41 +649,8 @@ export function deactivate(): Promise<void> {
     logDeactivate("shared or no harness — nothing to stop");
     return Promise.resolve();
   }
-  // Ask the harness how many clients are attached. clientCount is
-  // undefined when the runtime overlay is missing or its canary failed (zod
-  // strips unknown keys), so treat undefined as "no other client known" — the
-  // process is ours and windowless, an orphan is worse than stopping it.
-  const probe = exitClient ?? new HarnessClient(configuredBase());
-  let settled = false;
-  let stopDone = Promise.resolve();
-  const stopOwned = (why: string): void => {
-    if (settled) return;
-    settled = true;
-    logDeactivate(why);
-    stopDone = stopHarness().then((result) => {
-      logDeactivate(`stopHarness -> ${JSON.stringify(result)}`);
-    });
-  };
-  void probe
-    .describe(AbortSignal.timeout(2000))
-    .then((desc) => {
-      const n = desc.clientCount;
-      logDeactivate(`clientCount=${String(n)}`);
-      if (n !== undefined && n > 1) {
-        settled = true;
-        logDeactivate(`keep running (${n} clients attached) — pid record: ${HARNESS_PID_FILE}`);
-        return;
-      }
-      stopOwned(`no other client (clientCount=${String(n)}) — stopping owned instance`);
-    })
-    .catch(() => {
-      stopOwned("clientCount probe failed — stopping owned instance");
-    });
-  // Timeout fallback: can't ask, but the instance is ours — stop it.
-  // Guarded by `settled` so a late describe answer cannot double-kill.
-  setTimeout(() => stopOwned("clientCount probe timed out — stopping owned instance"), 2500);
-  // Wait for any actual stop to finish before VS Code tears down, so the
-  // taskkill lands. If the probe is still in flight, that's fine — the
-  // timeout branch will stop it; we just wait on the (possibly pending) stop.
-  return stopDone;
+  logDeactivate("stopping owned instance");
+  return stopHarness().then((result) => {
+    logDeactivate(`stopHarness -> ${JSON.stringify(result)}`);
+  });
 }

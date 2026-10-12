@@ -4,9 +4,17 @@
 
 语言：**简体中文** · [English](README.md)
 
+> **衍生说明** —— 本项目基于
+> [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc) 二次开发，由
+> [Najabom](https://github.com/Najabom) 维护。保留原项目「纯协议桥」设计，
+> 新增对 DSH 0.1.7-rc.2+ 的完整协议适配、启动时更新检查（接口预检 + 失败
+> 回滚）、Windows 沙箱工作区 ACL 自动修复、编辑器跟随 agent 编辑，以及全面
+> 的面板与交互改进。原作品 © 2026 zhibailu（MIT）。逐版本变更见
+> [CHANGELOG.md](CHANGELOG.md)。
+
 ---
 
-![version](https://img.shields.io/badge/version-0.2.6-2ea44f)
+![version](https://img.shields.io/badge/version-0.3.21-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

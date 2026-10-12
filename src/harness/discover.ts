@@ -1,20 +1,29 @@
 import * as vscode from "vscode";
+import * as fs from "node:fs";
+import { join } from "node:path";
 import { HarnessClient } from "./client";
+import { localDshPackageJson } from "./launcher";
 
 export interface DiscoveryResult {
   base: string;
   alive: boolean;
+  /** The port answers but demands browser-session auth (a stock `dsh web`
+   *  that was NOT started through this extension's overlay). */
+  unauthorized: boolean;
   version?: string;
   port: number;
 }
 
 /**
  * Resolve the harness base URL: user config → DSH_WEB_URL → default.
- * The default is 3080 — the web GUI's harness: the extension connects as a
- * SHARED client and never starts or kills it. If nothing answers at the
+ * The default is 3080 — the web GUI's harness port. The extension drives an
+ * instance it spawned itself (its overlay bypasses the browser-session auth);
+ * a stock instance answering 401 is reported as `unauthorized` instead of
+ * being silently treated as offline, so the lifecycle loop does not try to
+ * spawn a second server onto an occupied port. If nothing answers at the
  * configured URL, the lifecycle loop auto-starts the extension's own instance
  * on that same port (see extension.ts ensureRunning), records it in
- * %TEMP%\dsh-vsc-harness.pid, and reference-counts shutdown on exit.
+ * %TEMP%\dsh-vsc-harness.pid, and stops it on exit.
  */
 export function configuredBase(): string {
   const fromConfig = vscode.workspace.getConfiguration("dshVsc").get<string>("url");
@@ -36,8 +45,33 @@ export function portOf(base: string): number {
 export async function discover(): Promise<DiscoveryResult> {
   const base = configuredBase();
   const port = portOf(base);
-  const desc = await new HarnessClient(base).isAlive();
-  return desc
-    ? { base, alive: true, version: desc.version, port }
-    : { base, alive: false, port };
+  const probe = await new HarnessClient(base).probe();
+  const alive = probe === "alive";
+  return {
+    base,
+    alive,
+    unauthorized: probe === "unauthorized",
+    version: alive ? await localDshVersion() : undefined,
+    port,
+  };
+}
+
+/**
+ * Best-effort version of the dsh package the launcher resolves (the same
+ * install, wherever the npm prefix actually lives). A running harness has no
+ * version-reporting RPC in 0.1.7; this is display copy only.
+ */
+async function localDshVersion(): Promise<string | undefined> {
+  try {
+    const pkg =
+      (await localDshPackageJson()) ??
+      (process.env.APPDATA
+        ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "package.json")
+        : undefined);
+    if (!pkg) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(pkg, "utf8")) as { version?: string };
+    return typeof parsed.version === "string" ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
 }

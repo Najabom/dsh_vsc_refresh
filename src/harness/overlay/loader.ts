@@ -6,7 +6,7 @@
  * internal/runtime-overlay.md §mechanism), while exported { load, resolve } hooks
  * registered through module.register() work on Node >= 20.6.
  *
- * What it does: when the harness loads one of the three patched dsh modules,
+ * What it does: when the harness loads one of the patched dsh modules,
  * the load hook swaps in the overlaid SOURCE (official + deltas) in memory.
  * The official files on disk are never touched.
  *

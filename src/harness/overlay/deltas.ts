@@ -2,26 +2,38 @@
  * Runtime overlay patch table — the SINGLE source of truth for the dsh-vsc
  * bridge's in-memory deltas.
  *
- * These are the same textual deltas the removed disk-patch scripts
- * (scripts/patch-dsh-windowless.ps1 / patch-dsh-client-count.ps1) used to
- * write INTO the installed @deepseek-ai/dsh tree. The bridge philosophy is
- * "pure bridge": the official DSH body must stay byte-identical to the npm
- * release (see scripts/restore-dsh-pristine.ps1 + the recorded SHA256 in
- * ./pristine.ts). The loader (./loader.ts) applies these deltas to the module
- * SOURCE IN MEMORY as the harness process loads each module.
+ * The bridge philosophy is "pure bridge": the official DSH body must stay
+ * byte-identical to the npm release (see scripts/restore-dsh-pristine.ps1 +
+ * the recorded SHA256 in ./pristine.ts). The loader (./loader.ts) applies
+ * these deltas to the module SOURCE IN MEMORY as the harness process loads
+ * each module — the official files on disk are never touched.
  *
- * Delta contract (all four were verified byte-exact against the npm release,
- * see the spike notes in internal/runtime-overlay.md):
+ * Current delta (verified byte-exact against the npm release v0.1.7-rc.2):
+ *   1. dsh-client-connection/lib/index.js — browser-session auth bypass.
+ *      DSH >= 0.1.7 mints a per-process launch token and gates the whole
+ *      /api surface (HTTP RPC and the /api/remote.mux WebSocket upgrade)
+ *      behind a signed browser cookie that a programmatic client can never
+ *      obtain. The bridge keeps the Host/Origin fence (loopback-only in
+ *      practice) and replaces ONLY the cookie check on the API path; the
+ *      browser index token exchange is untouched.
+ *
+ * Retired deltas (now upstreamed — do NOT re-add; see AGENTS.md §overlay):
+ *   - dsh-host-apiproxy clientCount: the package no longer ships in v0.1.7.
+ *   - dsh-subprocess-local spawn windowsHide: upstream ships it natively
+ *     (`windowsHide: true` in the win32 job spawn options).
+ *   - dsh-sandbox-windows-acl hidden console: the STARTUPINFO patch site is
+ *     gone from the package.
+ *
+ * Delta contract:
  *   - url    : regex matched against the module's file URL (end-anchored)
  *   - marker : regex proving the patch is ALREADY in effect (idempotency)
- *   - re     : upstream anchor; group 1 = the line prefix, group 2 = its EOL,
- *              group 3 (windows-acl) = the following "hStdInput" line start
- *   - build  : (pre, eol, tail?) => replacement text
+ *   - re     : upstream anchor; group 1 = the line prefix, group 2 = its EOL
+ *   - build  : (pre, eol) => replacement text
  *
  * Safety: if `marker` hits -> already overlaid (skip). If `re` misses ->
  * upstream changed shape; the loader MUST NOT patch (canary failure, logged,
- * degraded mode — the extension already degrades gracefully: clientCount
- * becomes undefined and shutdown falls back to "stop owned instance").
+ * degraded mode — the extension then cannot reach an auth-gated harness and
+ * surfaces "harness offline" instead of silently hanging).
  */
 
 export interface Delta {
@@ -34,32 +46,11 @@ export interface Delta {
 
 export const PATCHES: Delta[] = [
   {
-    label: "host-apiproxy clientCount (response schema)",
-    url: /dsh-host-apiproxy[\\/]lib[\\/]index\.js$/,
-    marker: /clientCount: z\$1\.number\(\)\.int\(\)\.nonnegative\(\)/,
-    re: /(\tattachedSessions: z\$1\.number\(\)\.int\(\)\.nonnegative\(\),)(\r?\n)/,
-    build: (pre, eol) => pre + eol + "\tclientCount: z$1.number().int().nonnegative()," + eol,
-  },
-  {
-    label: "host-apiproxy clientCount (describe impl)",
-    url: /dsh-host-apiproxy[\\/]lib[\\/]index\.js$/,
-    marker: /clientCount: muxQueues\.size,/,
-    re: /(\t\t\t\t\tattachedSessions: ctx\.agents\.list\(\)\.length,)(\r?\n)/,
-    build: (pre, eol) => pre + eol + "\t\t\t\t\tclientCount: muxQueues.size," + eol,
-  },
-  {
-    label: "subprocess-local spawn windowsHide",
-    url: /dsh-subprocess-local[\\/]lib[\\/]index\.js$/,
-    marker: /windowsHide: platform === "win32"/,
-    re: /(\t\tdetached: platform !== "win32")(\r?\n)/,
-    build: (pre, eol) => pre + "," + eol + '\t\twindowsHide: platform === "win32"' + eol,
-  },
-  {
-    label: "windows-acl hidden console (STARTF_USESHOWWINDOW|SW_HIDE)",
-    url: /dsh-sandbox-windows-acl[\\/]lib[\\/]types-[A-Za-z0-9_-]+\.js$/,
-    marker: /wShowWindow: 0/,
-    re: /(\t\tdwFlags: 256,)(\r?\n)(\t\thStdInput)/g,
-    build: (pre, eol, tail) => "\t\tdwFlags: 257," + eol + "\t\twShowWindow: 0," + eol + (tail ?? ""),
+    label: "client-connection browser-auth bypass (loopback bridge client)",
+    url: /dsh-client-connection[\\/]lib[\\/]index\.js$/,
+    marker: /dsh-vsc-local-bridge: auth bypass/,
+    re: /(\t\treturn this\.browserAuth\.isAuthenticated\(request\) \? void 0 : 401;)(\r?\n)/,
+    build: (_pre, eol) => "\t\treturn void 0; // dsh-vsc-local-bridge: auth bypass" + eol,
   },
 ];
 

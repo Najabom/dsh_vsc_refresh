@@ -13,9 +13,9 @@ let launcher: { node: string; script: string } | null = null;
  * Runtime overlay (in-memory patch) entry: dist/overlay-register.mjs is
  * bundled by esbuild (see esbuild.js) and injected into the harness process
  * via NODE_OPTIONS=--import=<file-url>. It registers an ESM loader that
- * applies the windowless + clientCount deltas to the module SOURCE as the
- * harness loads it — the official dsh files on disk stay pristine (pure
- * bridge; see src/harness/overlay/deltas.ts + internal/runtime-overlay.md).
+ * applies the browser-auth bypass delta to the module SOURCE as the harness
+ * loads it — the official dsh files on disk stay pristine (pure bridge; see
+ * src/harness/overlay/deltas.ts + internal/runtime-overlay.md).
  */
 const OVERLAY_REGISTER = join(__dirname, "overlay-register.mjs");
 
@@ -213,6 +213,14 @@ async function resolveLauncher(): Promise<{ node: string; script: string } | nul
   }
 }
 
+/** Path of the resolved @deepseek-ai/dsh package.json (version display copy). */
+export async function localDshPackageJson(): Promise<string | undefined> {
+  const l = await resolveLauncher();
+  if (!l) return undefined;
+  const pkg = join(dirname(dirname(l.script)), "package.json");
+  return existsSync(pkg) ? pkg : undefined;
+}
+
 /**
  * Start `dsh web` as a DETACHED, WINDOWLESS background process (no console,
  * no cmd shim). Direct `node bin.js` spawn with windowsHide = CREATE_NO_WINDOW:
@@ -228,52 +236,76 @@ async function resolveLauncher(): Promise<{ node: string; script: string } | nul
  * Stop it with the `dsh.stop` command or by closing VS Code
  * (taskkill /T kills the whole tree).
  */
-export async function startHarness(port: number, log: vscode.OutputChannel): Promise<void> {
-  if (isRunning()) return;
+export async function startHarness(port: number, log: vscode.OutputChannel, cwd?: string): Promise<boolean> {
+  if (isRunning()) return true;
   const env = await resolveSpawnEnv();
   const l = await resolveLauncher();
   if (!l) {
     log.appendLine("cannot resolve node/dsh for the silent launch — PATH missing `node` or the `dsh` shim; run `dsh web` manually for now");
-    return;
+    return false;
   }
   // Runtime overlay status + official-body integrity (read-only, cheap).
   const overlay = overlayRegisterPath();
-  log.appendLine(
-    overlay
-      ? `runtime overlay: on (${overlay} — in-memory clientCount + windowless patches; official dsh files untouched)`
-      : "runtime overlay: MISSING dist/overlay-register.mjs — clientCount/windowless patches NOT applied (rebuild the extension)"
-  );
+  if (!overlay) {
+    // Without the auth bypass the spawned instance answers 401 to every call:
+    // it would occupy the port and write ~/.dsh while staying unusable. Refuse
+    // to spawn a dead harness instead.
+    log.appendLine(
+      "runtime overlay MISSING (dist/overlay-register.mjs) — refusing to start an unreachable harness; run `npm run build` and reinstall the extension"
+    );
+    return false;
+  }
+  log.appendLine(`runtime overlay: on (${overlay} — in-memory auth-bypass patch; official dsh files untouched)`);
   const subRoot = join(dirname(dirname(l.script)), "node_modules", "@deepseek-ai");
   const rep = checkDshPristine(subRoot);
   if (rep.ok) {
     log.appendLine(`dsh install integrity: pristine (${rep.pristine.length} official files byte-identical to npm release)`);
   } else {
     log.appendLine(
-      `dsh install integrity: NOT pristine — missing=[${rep.missing.join(", ")}] modified=[${rep.modified.join(", ")}] (run scripts/restore-dsh-pristine.ps1)`
+      `dsh install integrity: NOT pristine — missing=[${rep.missing.join(", ")}] modified=[${rep.modified.join(", ")}] (the overlay never writes to disk: reinstall with npm i -g @deepseek-ai/dsh@0.1.7-rc.2; verify via scripts/restore-dsh-pristine.ps1)`
     );
   }
   const args = ["web", "--no-open", "--port", String(port)];
   log.appendLine(`$ ${l.node} ${l.script} ${args.join(" ")} (direct node, windowless, detached, shared ~/.dsh)`);
+  if (cwd) log.appendLine(`harness cwd: ${cwd} (VS Code workspace folder — new sessions and the web GUI start here)`);
   log.appendLine(
     env.GITHUB_TOKEN
       ? `GITHUB_TOKEN: ${env.GITHUB_TOKEN.length} chars (${process.env.GITHUB_TOKEN ? "process env" : "Windows user env fallback"})`
       : "GITHUB_TOKEN: MISSING — dsh web will fail to boot (mcp-github config)"
   );
-  child = spawn(l.node, [l.script, ...args], {
+  const proc = spawn(l.node, [l.script, ...args], {
     shell: false,
     windowsHide: true,
     detached: true,
     stdio: "ignore",
     env,
+    // The open VS Code folder becomes the harness's default working directory,
+    // so sessions created outside the panel (e.g. the web GUI) also land in
+    // the workspace instead of the process-inherited cwd.
+    ...(cwd ? { cwd } : {}),
   });
-  writePidRecord({ pid: child.pid ?? 0, port, startedAt: new Date().toISOString(), args: [l.script, ...args] });
-  child.on("exit", (code) => {
+  child = proc;
+  writePidRecord({ pid: proc.pid ?? 0, port, startedAt: new Date().toISOString(), args: [l.script, ...args] });
+  // Exit/error handlers only clear state that still belongs to THIS process:
+  // after a stop→start (or reload→start) the old child's async exit event
+  // would otherwise wipe the new instance's handle and pid record — leaving a
+  // live orphan the extension can no longer see or stop.
+  proc.on("exit", (code) => {
     log.appendLine(`auto-started dsh web exited (code ${code})`);
-    child = undefined;
-    clearPidRecord();
+    if (child === proc) {
+      child = undefined;
+      clearPidRecord();
+    }
   });
-  child.on("error", (err) => log.appendLine(`dsh web spawn error: ${err.message}`));
-  child.unref();
+  proc.on("error", (err) => {
+    log.appendLine(`dsh web spawn error: ${err.message}`);
+    if (child === proc) {
+      child = undefined;
+      clearPidRecord();
+    }
+  });
+  proc.unref();
+  return true;
 }
 
 /** Kill the auto-started harness (and its whole process tree). Only ever
@@ -286,28 +318,56 @@ export function stopHarness(): Promise<{ killed: boolean; pid?: number; error?: 
   if (child !== undefined && child.exitCode === null) {
     pid = child.pid;
     child = undefined;
-  } else {
-    // Reload case: `child` was wiped but the pid record may still name the
-    // instance we spawned. Adopt it (if the process is still alive) so the
-    // orphan can be cleaned up.
-    const rec = readPidRecord();
-    if (rec && rec.pid > 0) {
-      try {
-        process.kill(rec.pid, 0);
-        pid = rec.pid;
-      } catch {
-        /* record is stale — process already dead */
-      }
-    }
+    if (pid === undefined) return Promise.resolve({ killed: false });
+    return killPid(pid);
   }
-  if (pid === undefined) {
+  // Reload case: `child` was wiped but the pid record may still name the
+  // instance we spawned. Adopt it (if the process is still alive) so the
+  // orphan can be cleaned up.
+  const rec = readPidRecord();
+  if (!rec || rec.pid <= 0) {
     clearPidRecord();
     return Promise.resolve({ killed: false });
   }
+  try {
+    process.kill(rec.pid, 0);
+  } catch {
+    clearPidRecord(); // record is stale — process already dead
+    return Promise.resolve({ killed: false });
+  }
+  return commandLineOf(rec.pid).then((cmdline) => {
+    if (cmdline !== null && !cmdline.includes(`--port ${rec.port}`)) {
+      // PID got reused by an unrelated process — never kill a stranger.
+      clearPidRecord();
+      return { killed: false as const };
+    }
+    return killPid(rec.pid);
+  });
+}
+
+/** taskkill one process tree, then drop the pid record. */
+function killPid(pid: number): Promise<{ killed: boolean; pid?: number; error?: string }> {
   return new Promise((resolve) => {
     execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (error) => {
       clearPidRecord();
       resolve(error ? { killed: false, pid, error: error.message } : { killed: true, pid });
     });
+  });
+}
+
+/** Live command line of a pid (null when it cannot be read — e.g. the process
+ *  already exited or CIM is unavailable). Used as the PID-reuse guard. */
+function commandLineOf(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+      { windowsHide: true },
+      (error, stdout) => {
+        if (error) return resolve(null);
+        const line = stdout.trim();
+        resolve(line.length > 0 ? line : null);
+      }
+    );
   });
 }

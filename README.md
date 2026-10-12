@@ -4,9 +4,18 @@
 
 Read this in: **English** · [简体中文](README.zh.md)
 
+> **Fork notice** — This is a community fork of
+> [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc), maintained by
+> [Najabom](https://github.com/Najabom). It keeps the original "pure bridge"
+> design and adds full protocol support for DSH 0.1.7-rc.2+, activation update
+> checks (interface preflight + rollback), Windows sandbox workspace-ACL
+> auto-repair, follow-agent-edits in the editor, and a large panel/UX overhaul.
+> Original work © 2026 zhibailu (MIT). Per-version history in
+> [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
-![version](https://img.shields.io/badge/version-0.2.6-2ea44f)
+![version](https://img.shields.io/badge/version-0.3.21-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

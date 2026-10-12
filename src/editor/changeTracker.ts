@@ -11,8 +11,29 @@ export interface ChangeBatch {
 }
 
 const MUTATING_TOOLS =
-  /^(write|edit|patch|fs[_a-z]*write|fs[_a-z]*edit|fs[_a-z]*create|fs[_a-z]*delete|fs[_a-z]*rename|fs[_a-z]*move|fs[_a-z]*mkdir)$/i;
+  /^(write|edit|patch|apply_patch|fs[_a-z]*write|fs[_a-z]*edit|fs[_a-z]*create|fs[_a-z]*delete|fs[_a-z]*rename|fs[_a-z]*move|fs[_a-z]*mkdir)$/i;
 const STR_COMMANDS = new Set(["create", "str_replace", "insert"]);
+
+/** Absolute path a tool call will mutate, or null when it isn't a file edit.
+ *  Shared by ChangeTracker and FollowEdits. */
+export function mutationTargetOf(name: string, args: Record<string, unknown>): string | null {
+  let pathVal: unknown;
+  if (name === "str_replace_editor") {
+    if (!STR_COMMANDS.has(String(args.command ?? ""))) return null;
+    pathVal = args.path;
+  } else if (MUTATING_TOOLS.test(name)) {
+    pathVal = args.file_path ?? args.path;
+  } else {
+    return null;
+  }
+  if (typeof pathVal !== "string" || pathVal.trim().length === 0) return null;
+  if (!path.isAbsolute(pathVal)) {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) pathVal = path.join(folder.uri.fsPath, pathVal);
+    else return null;
+  }
+  return typeof pathVal === "string" ? pathVal : null;
+}
 
 /**
  * M3 — watch the mux event stream for file mutations (write / edit /
@@ -45,7 +66,7 @@ export class ChangeTracker implements vscode.Disposable {
         } catch {
           /* keep empty args */
         }
-        const file = this.mutationTarget(name, args);
+        const file = mutationTargetOf(name, args);
         if (file) this.files.add(file);
         break;
       }
@@ -72,25 +93,6 @@ export class ChangeTracker implements vscode.Disposable {
   /** Deduplicated union of every captured change. */
   latestFiles(): string[] {
     return [...new Set(this.batches.flatMap((b) => b.files))];
-  }
-
-  private mutationTarget(name: string, args: Record<string, unknown>): string | null {
-    let pathVal: unknown;
-    if (name === "str_replace_editor") {
-      if (!STR_COMMANDS.has(String(args.command ?? ""))) return null;
-      pathVal = args.path;
-    } else if (MUTATING_TOOLS.test(name)) {
-      pathVal = args.file_path ?? args.path;
-    } else {
-      return null;
-    }
-    if (typeof pathVal !== "string" || pathVal.trim().length === 0) return null;
-    if (!path.isAbsolute(pathVal)) {
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      if (folder) pathVal = path.join(folder.uri.fsPath, pathVal);
-      else return null;
-    }
-    return typeof pathVal === "string" ? pathVal : null;
   }
 
   dispose(): void {

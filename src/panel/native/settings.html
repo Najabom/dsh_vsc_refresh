@@ -23,7 +23,7 @@
   h1 { font-size: 16px; margin: 0; }
   nav { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
   .tab { background: none; border: none; color: var(--muted); cursor: pointer;
-         padding: 6px 12px; font-size: 13px; border-bottom: 2px solid transparent; }
+         height: 28px; padding: 0 12px; font-size: 13px; border-bottom: 2px solid transparent; }
   .tab:hover { color: var(--fg); }
   .tab.sel { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
   #status { min-height: 18px; font-size: 12px; margin-bottom: 8px; }
@@ -35,13 +35,13 @@
   .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
   .row label { color: var(--muted); font-size: 12px; min-width: 150px; }
   input[type="text"], input[type="number"], select { background: var(--input-bg); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 2px; padding: 3px 6px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 2px; height: 28px; padding: 0 6px; font-size: 12px;
     width: 200px; max-width: 100%; }
   .perm-opt { display: inline-block; border: 1px solid var(--border); border-radius: 3px;
-    padding: 3px 10px; margin: 2px 4px 2px 0; cursor: pointer; font-size: 12px; }
+    height: 28px; line-height: 26px; padding: 0 10px; margin: 2px 4px 2px 0; cursor: pointer; font-size: 12px; }
   .perm-opt.sel { border-color: var(--accent); color: var(--ok); font-weight: 600; }
   .save { background: var(--accent); color: var(--vscode-button-foreground, #fff); border: none;
-    border-radius: 3px; padding: 4px 14px; cursor: pointer; font-size: 12px; margin-top: 6px; }
+    border-radius: 3px; height: 28px; padding: 0 14px; cursor: pointer; font-size: 12px; margin-top: 6px; }
   .save:disabled { opacity: .5; cursor: default; }
   details.raw { border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin: 6px 0; }
   details.raw summary { cursor: pointer; color: var(--muted); font-size: 12px; }
@@ -51,7 +51,7 @@
   .mono { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
   /* Agent 预设列表 */
   .preset { border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; margin: 6px 0; }
-  .preset .p-head { display: flex; align-items: center; gap: 8px; }
+  .preset .p-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .preset .p-name { font-weight: 600; }
   .preset .p-tag { border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
                    font-size: 10px; padding: 0 5px; }
@@ -59,7 +59,34 @@
   .preset .p-tag.default { color: var(--accent); border-color: var(--accent); }
   .preset .p-desc { color: var(--muted); font-size: 12px; margin-top: 4px; }
   .preset .p-broken { color: var(--err); font-size: 12px; margin-top: 4px; }
+  .preset .p-set { margin-top: 0; margin-left: auto; }
+  /* 插件管理 */
+  .pl-log { display: none; max-height: 170px; overflow: auto; background: var(--input-bg);
+    border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px; margin: 8px 0 0;
+    white-space: pre-wrap; word-break: break-all; }
+  .pl-log.on { display: block; }
+  .pl-row { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; margin: 6px 0; }
+  .pl-row .pl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pl-row .pl-name { font-weight: 600; }
+  .pl-row .pl-tag { border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+    font-size: 10px; padding: 0 5px; }
+  .pl-row .pl-tag.on { color: var(--ok); border-color: var(--ok); }
+  .pl-row .pl-tag.err { color: var(--err); border-color: var(--err); }
+  .pl-row .pl-sub { color: var(--muted); font-size: 12px; margin-top: 3px; word-break: break-all; }
+  .pl-row .pl-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pl-row .pl-actions label { color: var(--muted); font-size: 12px; }
+  .pl-row input[type="checkbox"] { width: auto; }
+  .pl-row .pl-del { background: none; border: 1px solid var(--border); color: var(--err);
+    border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
+  .pl-row .pl-del.confirm { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
   .hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+  #pl-incompat { border: 1px solid var(--err); border-radius: 4px; padding: 8px 10px; margin-top: 8px; }
+  #pl-incompat-text { white-space: pre-line; }
+  #pl-allow { margin-top: 8px; }
+  .pl-ex-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .pl-ex-row button { background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 3px; height: 28px; padding: 0 8px; cursor: pointer; font-size: 11px; margin-left: auto; }
+  .pl-ex-row button:hover { color: var(--err); border-color: var(--err); }
 </style>
 </head>
 <body>
@@ -78,8 +105,9 @@
   <section id="tab-general">
     <div class="card">
       <h3>默认模型 <span class="mono">(agent-default-model)</span></h3>
-      <div class="row"><label>provider</label><input id="in-def-provider" type="text"></div>
-      <div class="row"><label>model</label><input id="in-def-model" type="text"></div>
+      <div class="row"><label>provider</label><select id="in-def-provider"></select></div>
+      <div class="row"><label>model</label><select id="in-def-model"></select></div>
+      <div class="row"><label>reasoningEffort</label><select id="in-def-effort"></select></div>
       <button class="save" id="save-defmodel">保存</button>
     </div>
     <div class="card">
@@ -88,8 +116,8 @@
       <button class="save" id="save-perm">保存</button>
     </div>
     <div class="card">
-      <h3>默认模式 <span class="mono">(agent-presets.default)</span></h3>
-      <div class="row"><label>新会话默认 agent preset</label><input id="in-defpreset" type="text"></div>
+      <h3>默认模式 <span class="mono">(agent-preset-registry.selectedDefault)</span></h3>
+      <div class="row"><label>新会话默认 agent preset</label><select id="in-defpreset"></select></div>
       <button class="save" id="save-defpreset">保存</button>
     </div>
     <div class="card">
@@ -122,15 +150,40 @@
 
   <!-- 插件 -->
   <section id="tab-plugins" hidden>
-    <p class="hint">官方 web 的「插件」板块 = 客户端运行时自省：插件清单（Loader inventory）与插件配置表单都渲染自官方客户端运行时的内部状态，<b>桥接协议未暴露该面</b>（无独立 RPC）。<br>
-    我们的面板插件化蓝图见 internal/plugin-sets.md（协议插件集 + 宿主适配层 + 用户拓展判据）。</p>
-    <h2>当前 harness 插件态（只读，来自设置域）</h2>
-    <div id="raw-plugins"></div>
+    <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>：检索 → 安装 → 开关 / 删除，与官方 web 的插件面板同一机制。<br>
+    spec 可以是 npm 包名（从 registry 解析）、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
+    说明：客户端 UI 类 bundle（如 <span class="mono">dsh-drop-caret</span>、<span class="mono">dsh-webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设等其余插件与 web 共用同一个 harness，两边都生效。</p>
+    <div class="card">
+      <h3>安装插件包</h3>
+      <div class="row"><label>registry</label><select id="pl-registry"></select></div>
+      <div class="row"><label>包名 / 路径 / git / tarball</label><input id="pl-spec" type="text" placeholder="@scope/dsh-plugin-x 或 ./pkg.tgz"></div>
+      <div class="row">
+        <button class="save" id="pl-inspect">检索</button>
+        <button class="save" id="pl-install" disabled>安装</button>
+        <button class="save" id="pl-cancel" hidden>取消安装</button>
+      </div>
+      <div id="pl-inspect-out" class="hint"></div>
+      <div id="pl-progress" class="hint"></div>
+      <div id="pl-incompat" class="hint" hidden>
+        <div id="pl-incompat-text"></div>
+        <button class="save" id="pl-allow">授予版本豁免并重试</button>
+      </div>
+      <div id="pl-builds" class="hint" hidden>
+        <div id="pl-builds-text"></div>
+        <button class="save" id="pl-approve-builds">批准构建脚本并重试</button>
+      </div>
+      <div id="pl-exemptions" class="hint" hidden></div>
+      <pre id="pl-log" class="mono pl-log"></pre>
+    </div>
+    <h2>已安装插件包（bundle）</h2>
+    <div id="pl-bundles"></div>
+    <h2>插件条目（Loader entries）</h2>
+    <div id="pl-entries"></div>
   </section>
 
   <!-- Agent 预设 -->
   <section id="tab-presets" hidden>
-    <p class="hint">agentPreset.list 罗列部署提供的预设（内置/自定义）。</p>
+    <p class="hint">部署提供的预设（内置/自定义）；点「设为默认」切换新会话的默认模式（写入 <span class="mono">agent-preset-registry.selectedDefault</span>，与官方客户端同一机制）。</p>
     <div id="preset-list"></div>
   </section>
 
@@ -142,12 +195,42 @@
   var statusEl = $("status");
   var revisions = {}; // ns -> revision
   var data = null;    // settings.describe view
+  var catalog = null; // settingsCatalog: {models:{default,groups},permissions:{options}}
+  var roster = [];    // agent preset rows (settingsAgentPresets)
 
   function setStatus(text, kind) {
     statusEl.textContent = text || "";
     statusEl.className = kind || "";
   }
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  /* Fill a <select> with {value,label} options, keeping `current` selected.
+     A current value outside the list is preserved as its own option so a save
+     never silently rewrites a custom value. */
+  function fillSelect(sel, opts, current) {
+    sel.innerHTML = "";
+    if (!opts.length) {
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "(无)";
+      sel.appendChild(none);
+      return;
+    }
+    opts.forEach(function (op) {
+      var o = document.createElement("option");
+      o.value = op.value;
+      o.textContent = op.label;
+      sel.appendChild(o);
+    });
+    var want = current === undefined || current === null ? "" : String(current);
+    if (want !== "" && !opts.some(function (op) { return op.value === want; })) {
+      var custom = document.createElement("option");
+      custom.value = want;
+      custom.textContent = want;
+      sel.appendChild(custom);
+    }
+    sel.value = want !== "" ? want : opts[0].value;
+  }
 
   /* tabs */
   var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
@@ -158,6 +241,9 @@
       ["general", "models", "plugins", "presets"].forEach(function (name) {
         $("tab-" + name).hidden = name !== t.getAttribute("data-tab");
       });
+      if (t.getAttribute("data-tab") === "plugins") {
+        vscode.postMessage({ type: "pluginsReady" });
+      }
     });
   });
 
@@ -165,37 +251,92 @@
     return (data && data.namespaces || []).find(function (n) { return n.ns === name; });
   }
 
+  /* ---------- 默认模型：provider → model → reasoningEffort 级联下拉 ---------- */
+  var PERM_LABELS = { "read-only": "仅可查看", "workspace-write": "可写入工作区", "danger-full-access": "完全权限" };
+
+  function groupOf(providerId) {
+    if (!catalog) return null;
+    return catalog.models.groups.find(function (g) { return g.id === providerId; }) || null;
+  }
+  function refillModels(providerId, currentModel, currentEffort) {
+    var grp = groupOf(providerId);
+    var opts = grp ? grp.models.map(function (m) { return { value: m.id, label: m.name || m.id }; }) : [];
+    fillSelect($("in-def-model"), opts, currentModel);
+    refillEfforts(providerId, $("in-def-model").value, currentEffort);
+  }
+  function refillEfforts(providerId, modelId, currentEffort) {
+    var grp = groupOf(providerId);
+    var m = grp && grp.models.find(function (x) { return x.id === modelId; });
+    var efforts = (m && m.reasoning && m.reasoning.efforts) || [];
+    var opts = efforts.map(function (e) { return { value: e.id, label: e.name || e.id }; });
+    var fallback = m && m.reasoning && m.reasoning.defaultEffort;
+    fillSelect($("in-def-effort"), opts, currentEffort || fallback);
+  }
+  function renderDefaultModel() {
+    var def = ns("agent-default-model");
+    var v = (def && def.value) || {};
+    var providers = catalog
+      ? catalog.models.groups.map(function (g) { return { value: g.id, label: g.name || g.id }; })
+      : [];
+    fillSelect($("in-def-provider"), providers, v.provider);
+    refillModels(v.provider || $("in-def-provider").value, v.model, v.reasoningEffort);
+  }
+  $("in-def-provider").addEventListener("change", function () {
+    refillModels($("in-def-provider").value, null, null);
+  });
+  $("in-def-model").addEventListener("change", function () {
+    refillEfforts($("in-def-provider").value, $("in-def-model").value, null);
+  });
+
+  /* ---------- 默认权限（服务端 catalog，同官方三档） ---------- */
+  function renderPermission() {
+    var perm = ns("permission");
+    var cur = perm && (perm.value || {}).defaultPreset;
+    var fromCatalog = (catalog && catalog.permissions && catalog.permissions.options) || null;
+    var list = fromCatalog
+      ? fromCatalog.map(function (o) { return { value: o.value, label: PERM_LABELS[o.value] || o.name || o.value }; })
+      : Object.keys(PERM_LABELS).map(function (k) { return { value: k, label: PERM_LABELS[k] }; });
+    if (cur && !list.some(function (o) { return o.value === cur; })) list.push({ value: cur, label: cur });
+    var box = $("in-perm");
+    box.innerHTML = "";
+    list.forEach(function (item) {
+      var opt = document.createElement("span");
+      opt.className = "perm-opt" + (item.value === cur ? " sel" : "");
+      opt.textContent = item.label;
+      opt.setAttribute("data-v", item.value);
+      opt.addEventListener("click", function () {
+        Array.prototype.forEach.call(box.children, function (c) { c.className = "perm-opt"; });
+        opt.className = "perm-opt sel";
+      });
+      box.appendChild(opt);
+    });
+  }
+
+  /* ---------- 默认模式（agent-preset-registry） ---------- */
+  function currentDefaultPresetId() {
+    var reg = ns("agent-preset-registry");
+    var rv = (reg && reg.value) || {};
+    if (rv.selectedDefault) return rv.selectedDefault;
+    if (rv.default) return rv.default;
+    var d = roster.find(function (p) { return p.isDefault; });
+    return d ? d.id : "";
+  }
+  function renderDefaultPreset() {
+    var cur = currentDefaultPresetId();
+    var opts = roster.map(function (p) {
+      return { value: p.id, label: (p.name || p.id) + (p.isDefault ? "（当前默认）" : "") };
+    });
+    fillSelect($("in-defpreset"), opts, cur);
+  }
+
   function applyData(value) {
     data = value;
     revisions = {};
     (value.namespaces || []).forEach(function (n) { revisions[n.ns] = n.revision; });
 
-    var def = ns("agent-default-model");
-    if (def) {
-      var v = def.value || {};
-      $("in-def-provider").value = v.provider || "";
-      $("in-def-model").value = v.model || "";
-    }
-    var perm = ns("permission");
-    if (perm) {
-      var cur = (perm.value || {}).defaultPreset;
-      var labels = { "read-only": "仅可查看", "workspace-write": "可写入工作区", "danger-full-access": "完全权限" };
-      var box = $("in-perm");
-      box.innerHTML = "";
-      Object.keys(labels).forEach(function (key) {
-        var opt = document.createElement("span");
-        opt.className = "perm-opt" + (key === cur ? " sel" : "");
-        opt.textContent = labels[key];
-        opt.setAttribute("data-v", key);
-        opt.addEventListener("click", function () {
-          Array.prototype.forEach.call(box.children, function (c) { c.className = "perm-opt"; });
-          opt.className = "perm-opt sel";
-        });
-        box.appendChild(opt);
-      });
-    }
-    var dp = ns("agent-presets");
-    if (dp) $("in-defpreset").value = (dp.value || {}).default || "";
+    renderDefaultModel();
+    renderPermission();
+    renderDefaultPreset();
     var lp = ns("agent-loop");
     if (lp) {
       var mp = (lp.value || {}).maxParallelToolCalls;
@@ -234,7 +375,7 @@
   }
   function renderRaw() {
     if (!data) return;
-    rawListEl("raw-list", data.namespaces, ["agent-default-model", "permission", "agent-presets", "agent-loop", "ui-theme", "llm-deepseek", "llm-pi-ai"]);
+    rawListEl("raw-list", data.namespaces, ["agent-default-model", "permission", "agent-preset-registry", "agent-loop", "ui-theme", "llm-deepseek", "llm-pi-ai"]);
   }
 
   /* models tab: editable llm-* namespace scalars + raw values */
@@ -271,9 +412,22 @@
         row.className = "row";
         var label = document.createElement("label");
         label.textContent = f.key;
-        var input = document.createElement("input");
-        input.type = f.type;
-        input.value = f.type === "text" ? JSON.stringify(v[f.key]) : String(v[f.key] === undefined ? "" : v[f.key]);
+        var input;
+        if (f.key === "model" && Array.isArray(v.models) && v.models.length) {
+          // provider 自带模型清单 → 下拉框（而不是手输 id）
+          input = document.createElement("select");
+          v.models.forEach(function (m) {
+            var o = document.createElement("option");
+            o.value = m.id;
+            o.textContent = m.name ? (m.name + " (" + m.id + ")") : m.id;
+            input.appendChild(o);
+          });
+          if (v.model !== undefined) input.value = v.model;
+        } else {
+          input = document.createElement("input");
+          input.type = f.type;
+          input.value = f.type === "text" ? JSON.stringify(v[f.key]) : String(v[f.key] === undefined ? "" : v[f.key]);
+        }
         row.appendChild(label);
         row.appendChild(input);
         card.appendChild(row);
@@ -313,25 +467,325 @@
     setStatus("保存 " + name + " …");
   }
 
-  /* plugins tab: the inventory face is runtime introspection (no RPC) — show
-     the namespaces the harness does expose around plugin-ish config */
-  function renderPlugins() {
-    if (!data) return;
-    rawListEl("raw-plugins", data.namespaces.filter(function (n) {
-      return n.ns === "agent-presets" || n.ns === "web-search-deepseek";
-    }));
+  /* ---------- 插件 tab：pluginManager（检索 / 安装 / 开关 / 删除） ---------- */
+  var pluginBundles = [];
+  var pluginEntries = [];
+  var pluginRegistries = null;
+  var inspectValue = null;
+  var installBusy = false;
+  var logLines = [];
+  var pluginExemptions = {};
+  var pendingIncompatible = null;
+  var lastInstallSpec = "";
+  var lastPendingBuilds = [];
+  var lastInstallRegistry = undefined;
+
+  function pluginTitle(meta, fallback) {
+    return (meta && (meta.title || meta.name)) || fallback;
+  }
+  function pluginDescription(meta, fallback) {
+    return (meta && meta.description) || fallback || "";
+  }
+  function plTag(text, cls) {
+    var t = document.createElement("span");
+    t.className = "pl-tag" + (cls ? " " + cls : "");
+    t.textContent = text;
+    return t;
   }
 
+  function refillRegistries(regs) {
+    pluginRegistries = regs || null;
+    var sel = $("pl-registry");
+    var cur = sel.value;
+    sel.innerHTML = "";
+    var opts = [{ value: "", label: "默认（harness/pnpm 解析）" }];
+    ((regs && regs.fallbackRegistries) || []).forEach(function (r) {
+      opts.push({ value: r, label: r });
+    });
+    if (regs && regs.resolved && !opts.some(function (o) { return o.value === regs.resolved; })) {
+      opts.push({ value: regs.resolved, label: regs.resolved + "（解析值）" });
+    }
+    opts.forEach(function (o) {
+      var el = document.createElement("option");
+      el.value = o.value;
+      el.textContent = o.label;
+      sel.appendChild(el);
+    });
+    if (cur && opts.some(function (o) { return o.value === cur; })) sel.value = cur;
+  }
+
+  function renderPluginBundles() {
+    var box = $("pl-bundles");
+    box.innerHTML = "";
+    if (!pluginBundles.length) {
+      var empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = "没有已安装的插件包（内置 bundle 由部署提供，端口 harness 可能报 management-required）。";
+      box.appendChild(empty);
+      return;
+    }
+    pluginBundles.forEach(function (b) {
+      var row = document.createElement("div");
+      row.className = "pl-row";
+      var head = document.createElement("div");
+      head.className = "pl-head";
+      var name = document.createElement("span");
+      name.className = "pl-name";
+      name.textContent = pluginTitle(b.meta, b.name) + (b.version ? "@" + b.version : "");
+      head.appendChild(name);
+      head.appendChild(plTag(b.installed ? "已安装" : (b.readOnlyReason === "management-required" ? "内置" : "未安装"), b.installed ? "on" : ""));
+      if (b.optional) head.appendChild(plTag("可选"));
+      if (b.enabled) head.appendChild(plTag("启用", "on"));
+      if (b.readOnlyReason) head.appendChild(plTag("只读: " + b.readOnlyReason, "err"));
+      if (b.error) head.appendChild(plTag("错误: " + b.error.code, "err"));
+      var actions = document.createElement("div");
+      actions.className = "pl-actions";
+      var label = document.createElement("label");
+      var toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.checked = !!b.enabled;
+      toggle.disabled = !!b.readOnlyReason;
+      toggle.addEventListener("change", function () {
+        vscode.postMessage({ type: "pluginSetBundleEnabled", name: b.name, enabled: toggle.checked });
+        setStatus((toggle.checked ? "启用 " : "停用 ") + b.name + " …");
+      });
+      label.appendChild(toggle);
+      label.appendChild(document.createTextNode("启用"));
+      actions.appendChild(label);
+      if (b.removable && !b.readOnlyReason) {
+        var del = document.createElement("button");
+        del.className = "pl-del";
+        del.textContent = "删除";
+        var armed = false;
+        del.addEventListener("click", function () {
+          if (!armed) {
+            armed = true;
+            del.classList.add("confirm");
+            del.textContent = "确认删除？";
+            return;
+          }
+          vscode.postMessage({ type: "pluginRemove", name: b.name });
+          setStatus("删除 " + b.name + " …");
+        });
+        actions.appendChild(del);
+      }
+      head.appendChild(actions);
+      row.appendChild(head);
+      var sub = document.createElement("div");
+      sub.className = "pl-sub mono";
+      sub.textContent = b.name + (b.rows && b.rows.length ? " · " + b.rows.length + " 行" : "");
+      row.appendChild(sub);
+      var desc = pluginDescription(b.meta, b.description);
+      if (desc) {
+        var d = document.createElement("div");
+        d.className = "pl-sub";
+        d.textContent = desc;
+        row.appendChild(d);
+      }
+      if (b.error && b.error.diagnostic) {
+        var e = document.createElement("div");
+        e.className = "pl-sub";
+        e.textContent = b.error.diagnostic;
+        row.appendChild(e);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  function renderPluginEntries() {
+    var box = $("pl-entries");
+    box.innerHTML = "";
+    if (!pluginEntries.length) {
+      var empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = "没有可管理的 Loader 条目。";
+      box.appendChild(empty);
+      return;
+    }
+    pluginEntries.forEach(function (p) {
+      var row = document.createElement("div");
+      row.className = "pl-row";
+      var head = document.createElement("div");
+      head.className = "pl-head";
+      var name = document.createElement("span");
+      name.className = "pl-name";
+      name.textContent = pluginTitle(p.meta, p.moduleName);
+      head.appendChild(name);
+      if (p.fiberPhase) head.appendChild(plTag(p.fiberPhase, p.fiberPhase === "active" ? "on" : p.fiberPhase === "failed" ? "err" : ""));
+      if (p.readOnlyReason) head.appendChild(plTag("只读: " + p.readOnlyReason, "err"));
+      var actions = document.createElement("div");
+      actions.className = "pl-actions";
+      var label = document.createElement("label");
+      var toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.checked = !!p.enabled;
+      toggle.disabled = !!p.readOnlyReason;
+      toggle.addEventListener("change", function () {
+        vscode.postMessage({ type: "pluginSetEnabled", id: p.entryId, enabled: toggle.checked });
+        setStatus((toggle.checked ? "启用 " : "停用 ") + p.moduleName + " …");
+      });
+      label.appendChild(toggle);
+      label.appendChild(document.createTextNode("启用"));
+      actions.appendChild(label);
+      head.appendChild(actions);
+      row.appendChild(head);
+      var sub = document.createElement("div");
+      sub.className = "pl-sub mono";
+      sub.textContent = p.moduleName + " · " + p.entryId;
+      row.appendChild(sub);
+      box.appendChild(row);
+    });
+  }
+
+  function renderPlugins() {
+    renderPluginBundles();
+    renderPluginEntries();
+  }
+
+  function renderExemptions() {
+    var box = $("pl-exemptions");
+    var keys = Object.keys(pluginExemptions || {});
+    if (!keys.length) { box.hidden = true; box.textContent = ""; return; }
+    box.hidden = false;
+    box.textContent = "";
+    var title = document.createElement("div");
+    title.textContent = "已授予的版本豁免（等价 dsh plugin allow-version，只对所列运行时版本生效）：";
+    box.appendChild(title);
+    keys.forEach(function (key) {
+      (pluginExemptions[key] || []).forEach(function (runtime) {
+        var row = document.createElement("div");
+        row.className = "pl-ex-row";
+        var label = document.createElement("span");
+        label.className = "mono";
+        label.textContent = key + " → dsh " + runtime;
+        var revoke = document.createElement("button");
+        revoke.textContent = "撤销";
+        revoke.addEventListener("click", function () {
+          revoke.disabled = true;
+          vscode.postMessage({ type: "pluginRevokeVersion", packageVersion: key, runtimeVersion: runtime });
+        });
+        row.appendChild(label);
+        row.appendChild(revoke);
+        box.appendChild(row);
+      });
+    });
+  }
+
+  function selectedRegistry() {
+    var v = $("pl-registry").value;
+    return v === "" ? undefined : v;
+  }
+
+  function setInstallBusy(busy) {
+    installBusy = busy;
+    $("pl-inspect").disabled = busy;
+    $("pl-cancel").hidden = !busy;
+    $("pl-install").disabled = busy || !(inspectValue && inspectValue.status === "accepted" && inspectValue.bundle !== false);
+  }
+
+  function renderInspect(value) {
+    inspectValue = value;
+    var out = $("pl-inspect-out");
+    if (!value) { out.textContent = ""; setInstallBusy(installBusy); return; }
+    if (value.status === "refused") {
+      out.textContent = "不可安装：" + value.problem + " — " + value.reason
+        + (value.registries && value.registries.length ? "（已尝试 registry: " + value.registries.join(" / ") + "）" : "");
+      setInstallBusy(installBusy);
+      return;
+    }
+    out.textContent = "可安装：" + (value.name || "(未知包名)") + (value.version ? "@" + value.version : "")
+      + "（" + value.kind + (value.bundle === false ? "，不是 bundle" : value.bundle === true ? "，bundle" : "") + "）"
+      + (value.description ? " — " + value.description : "");
+    setInstallBusy(installBusy);
+  }
+
+  function appendLog(text) {
+    if (!text) return;
+    logLines.push(text.replace(/\r?\n$/, ""));
+    if (logLines.length > 400) logLines = logLines.slice(logLines.length - 400);
+    var pre = $("pl-log");
+    pre.textContent = logLines.join("\n");
+    pre.classList.add("on");
+    pre.scrollTop = pre.scrollHeight;
+  }
+
+  $("pl-inspect").addEventListener("click", function () {
+    var spec = $("pl-spec").value.trim();
+    if (!spec) { setStatus("请输入插件包 spec", "err"); return; }
+    inspectValue = null;
+    renderInspect(null);
+    setInstallBusy(installBusy);
+    setStatus("检索 " + spec + " …");
+    vscode.postMessage({ type: "pluginInspect", spec: spec, registry: selectedRegistry() });
+  });
+  $("pl-install").addEventListener("click", function () {
+    var spec = $("pl-spec").value.trim();
+    if (!spec) { setStatus("请输入插件包 spec", "err"); return; }
+    lastInstallSpec = spec;
+    lastInstallRegistry = selectedRegistry();
+    pendingIncompatible = null;
+    lastPendingBuilds = [];
+    $("pl-incompat").hidden = true;
+    $("pl-builds").hidden = true;
+    logLines = [];
+    $("pl-log").textContent = "";
+    $("pl-log").classList.remove("on");
+    setInstallBusy(true);
+    setStatus("安装 " + spec + " …");
+    vscode.postMessage({ type: "pluginInstall", spec: spec, registry: selectedRegistry(), enabled: true });
+  });
+  $("pl-allow").addEventListener("click", function () {
+    if (!pendingIncompatible || !pendingIncompatible.length) return;
+    var pairs = pendingIncompatible.map(function (p) {
+      return { packageVersion: p.name + "@" + p.version, runtimeVersion: p.runtimeVersion };
+    });
+    vscode.postMessage({
+      type: "pluginAllowVersion",
+      pairs: pairs,
+      spec: lastInstallSpec,
+      registry: lastInstallRegistry === undefined ? null : lastInstallRegistry
+    });
+    $("pl-incompat").hidden = true;
+    setStatus("已授予版本豁免，重新安装 " + lastInstallSpec + " …");
+  });
+  $("pl-approve-builds").addEventListener("click", function () {
+    if (!lastPendingBuilds.length) return;
+    vscode.postMessage({
+      type: "pluginInstall",
+      spec: lastInstallSpec,
+      registry: lastInstallRegistry === undefined ? null : lastInstallRegistry,
+      enabled: true,
+      approvedBuilds: lastPendingBuilds.slice()
+    });
+    $("pl-builds").hidden = true;
+    setStatus("已批准构建脚本，重新安装 " + lastInstallSpec + " …");
+  });
+  $("pl-cancel").addEventListener("click", function () {
+    vscode.postMessage({ type: "pluginCancelInstall" });
+    setStatus("取消安装 …");
+  });
+
   /* agent presets tab */
+  function setDefaultPreset(id) {
+    vscode.postMessage({
+      type: "settingsUpdate",
+      ns: "agent-preset-registry",
+      patch: { selectedDefault: id },
+      expectedRevision: revisions["agent-preset-registry"],
+    });
+    setStatus("切换默认模式 → " + id + " …");
+  }
   function applyPresets(value) {
+    roster = (value && value.presets) || [];
     var list = $("preset-list");
     list.innerHTML = "";
-    var presets = (value && value.presets) || [];
+    var presets = roster;
     if (!presets.length) {
       var empty = document.createElement("p");
       empty.className = "hint";
       empty.textContent = "部署未配置任何预设，所有会话共享 host 组合。";
       list.appendChild(empty);
+      renderDefaultPreset();
       return;
     }
     presets.forEach(function (p) {
@@ -355,6 +809,12 @@
         tag2.textContent = "默认";
         head.appendChild(tag2);
       }
+      var btn = document.createElement("button");
+      btn.className = "save p-set";
+      btn.textContent = p.isDefault ? "当前默认" : "设为默认";
+      btn.disabled = !!p.isDefault;
+      btn.addEventListener("click", function () { setDefaultPreset(p.id); });
+      head.appendChild(btn);
       var idLine = document.createElement("div");
       idLine.className = "hint mono";
       idLine.textContent = p.id;
@@ -374,6 +834,7 @@
       row.appendChild(idLine);
       list.appendChild(row);
     });
+    renderDefaultPreset();
   }
 
   /* saves */
@@ -382,10 +843,13 @@
     setStatus(okText + " …");
   }
   $("save-defmodel").addEventListener("click", function () {
-    mutate("agent-default-model", [
-      { op: "set", path: ["provider"], value: $("in-def-provider").value.trim() },
-      { op: "set", path: ["model"], value: $("in-def-model").value.trim() },
-    ], "保存默认模型");
+    var ops = [
+      { op: "set", path: ["provider"], value: $("in-def-provider").value },
+      { op: "set", path: ["model"], value: $("in-def-model").value },
+    ];
+    var effort = $("in-def-effort").value;
+    if (effort) ops.push({ op: "set", path: ["reasoningEffort"], value: effort });
+    mutate("agent-default-model", ops, "保存默认模型");
   });
   $("save-perm").addEventListener("click", function () {
     var sel = $("in-perm").querySelector(".perm-opt.sel");
@@ -393,9 +857,9 @@
     mutate("permission", [{ op: "set", path: ["defaultPreset"], value: sel.getAttribute("data-v") }], "保存默认权限");
   });
   $("save-defpreset").addEventListener("click", function () {
-    var v = $("in-defpreset").value.trim();
+    var v = $("in-defpreset").value;
     if (!v) { setStatus("默认模式不能为空", "err"); return; }
-    mutate("agent-presets", [{ op: "set", path: ["default"], value: v }], "保存默认模式");
+    setDefaultPreset(v);
   });
   $("save-maxpar").addEventListener("click", function () {
     var raw = $("in-maxpar").value;
@@ -412,8 +876,78 @@
     if (!msg) return;
     if (msg.type === "settingsData") { applyData(msg.value); }
     else if (msg.type === "settingsAgentPresets") { applyPresets(msg.value); }
+    else if (msg.type === "settingsCatalog") {
+      catalog = { models: msg.models, permissions: msg.permissions };
+      renderDefaultModel();
+      renderPermission();
+    }
     else if (msg.type === "settingsError") { setStatus(msg.message, "err"); }
     else if (msg.type === "settingsSaved") { setStatus(msg.message || "已保存", "ok"); }
+    else if (msg.type === "settingsPlugins") {
+      pluginBundles = (msg.bundles || []).slice();
+      pluginEntries = (msg.plugins || []).slice();
+      pluginExemptions = msg.exemptions || {};
+      refillRegistries(msg.registries);
+      renderExemptions();
+      renderPlugins();
+    }
+    else if (msg.type === "pluginInspectResult") {
+      if (msg.spec !== $("pl-spec").value.trim()) return;
+      renderInspect(msg.value);
+      setStatus(msg.value && msg.value.status === "accepted" ? "检索完成，可安装" : "检索完成", msg.value && msg.value.status === "accepted" ? "ok" : "err");
+    }
+    else if (msg.type === "pluginInstallStarted") {
+      setInstallBusy(true);
+      $("pl-incompat").hidden = true;
+      $("pl-builds").hidden = true;
+      $("pl-progress").textContent = "安装中（requestId " + msg.requestId + "）…";
+    }
+    else if (msg.type === "pluginInstallProgress") {
+      var pv = msg.value || {};
+      var text = pv.phase === "installing" ? "安装中" : pv.phase === "applying" ? "应用变更中" : pv.phase === "cancelling" ? "取消中" : String(pv.phase || "");
+      if (pv.attempt) text += "（registry " + (pv.attempt.index + "/" + pv.attempt.total) + (pv.attempt.registry ? "：" + pv.attempt.registry : "") + "）";
+      $("pl-progress").textContent = text + " …";
+    }
+    else if (msg.type === "pluginInstallLog") {
+      var lv = msg.value || {};
+      if (lv.text) appendLog((lv.stream === "stderr" ? "[stderr] " : "") + lv.text);
+    }
+    else if (msg.type === "pluginInstallResult") {
+      var r = msg.value || {};
+      var incompat = r.error && r.error.code === "incompatible-version"
+        && Array.isArray(r.error.incompatible) && r.error.incompatible.length ? r.error.incompatible : null;
+      pendingIncompatible = incompat;
+      $("pl-incompat").hidden = !incompat;
+      if (incompat) {
+        $("pl-incompat-text").textContent = incompat.map(function (p) {
+          var peers = p.peers ? Object.keys(p.peers).map(function (k) { return k + " " + p.peers[k]; }).join("，") : "";
+          return p.name + "@" + p.version + " 与 dsh " + p.runtimeVersion + " 不兼容"
+            + (peers ? "（要求 " + peers + "）" : "")
+            + "：可授予该精确版本的豁免后按原样安装（可能存在崩溃/数据损坏风险，请自行确认）。";
+        }).join("\n");
+      }
+      if (r.application === "applied") setStatus("安装完成：" + (r.bundle || msg.spec), "ok");
+      else if (r.application === "restart-required") setStatus("已安装：" + (r.bundle || msg.spec) + "，需重启 harness 生效", "ok");
+      else if (r.application === "cancelled") setStatus("安装已取消", "err");
+      else setStatus("安装未完成：" + (r.application || "failed")
+        + (r.error ? " [" + r.error.code + (r.error.diagnostic ? ": " + r.error.diagnostic : "") + "]" : "")
+        + (incompat ? " —— 可点下方「授予版本豁免并重试」" : ""), "err");
+      if (r.warnings && r.warnings.length) appendLog(r.warnings.join("\n"));
+      lastPendingBuilds = Array.isArray(r.pendingBuilds) ? r.pendingBuilds.slice() : [];
+      $("pl-builds").hidden = !lastPendingBuilds.length;
+      if (lastPendingBuilds.length) {
+        $("pl-builds-text").textContent = "安装包要求执行构建脚本：" + lastPendingBuilds.join("，")
+          + "。批准后安装会按原样运行这些脚本（脚本来自该包自身，请确认来源可信）。";
+      }
+    }
+    else if (msg.type === "pluginInstallDone") {
+      setInstallBusy(false);
+      $("pl-progress").textContent = "";
+    }
+    else if (msg.type === "pluginCancelResult") {
+      var cv = msg.value || {};
+      setStatus("取消结果：" + (cv.status || "unknown"), cv.status === "cancelled" ? "ok" : "err");
+    }
   });
 
   vscode.postMessage({ type: "settingsReady" });

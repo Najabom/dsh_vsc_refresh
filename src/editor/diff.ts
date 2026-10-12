@@ -2,7 +2,22 @@ import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as os from "node:os";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+
+/** Temp dirs backing open diff editors; cleaned up on deactivate so a long
+ *  session doesn't leak one directory per reviewed file. */
+const tempDirs = new Set<string>();
+
+export function cleanupTempDirs(): void {
+  for (const dir of tempDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort — an open editor may still hold the file */
+    }
+  }
+  tempDirs.clear();
+}
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -75,6 +90,7 @@ async function openGitDiff(file: string): Promise<boolean> {
       return false; // untracked / new file
     }
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), "dsh-diff-"));
+    tempDirs.add(tmpDir);
     const tmpFile = path.join(tmpDir, path.basename(file) + ".HEAD");
     writeFileSync(tmpFile, head, "utf8");
     await vscode.commands.executeCommand(

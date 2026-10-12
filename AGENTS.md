@@ -35,8 +35,8 @@ Debug via F5 (`.vscode/launch.json`) → Extension Development Host.
 
 1. **Never import DSH internals.** The client (`src/harness/client.ts`) reimplements the wire contract with only `fetch`; keep it thin (~200 lines). No `@deepseek-ai/dsh-*` imports in shipped code.
 2. **Forward events losslessly.** The bridge must not re-model DSH event frames (`src/panel/protocol.ts`). Rendering is the panel's job.
-3. **No second server.** Reuse a running harness; auto-start only when none is reachable; never spawn a second DSH writing the same `~/.dsh` history. Shutdown is **reference-counted** (query `host.describe` → `clientCount`).
-4. **The overlay is the only crossing, and it is guarded.** `src/harness/overlay/` is the single source for the 4 deltas. Every delta must: only mutate loaded memory (official files on disk stay byte-identical), be backed by a **SHA-256** entry in `pristine.ts`, and be gated by a **canary anchor** in `deltas.ts` — on any mismatch, degrade gracefully (skip the patch), never force it. When DSH ships the equivalent field, **remove** the delta (retirement path), don't keep it.
+3. **No second server.** Reuse a running harness; auto-start only when none is reachable; never spawn a second DSH writing the same `~/.dsh` history. Shutdown stops the owned instance deterministically (a windowless detached spawn must not outlive its owner); a shared harness is left alone.
+4. **The overlay is the only crossing, and it is guarded.** `src/harness/overlay/` is the single source for the overlay deltas. Every delta must: only mutate loaded memory (official files on disk stay byte-identical), be backed by a **SHA-256** entry in `pristine.ts`, and be gated by a **canary anchor** in `deltas.ts` — on any mismatch, degrade gracefully (skip the patch), never force it. When DSH ships the equivalent field, **remove** the delta (retirement path), don't keep it.
 
 ## Coding conventions
 
