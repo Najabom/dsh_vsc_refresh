@@ -10,3 +10,8 @@ tsconfig.json
 internal/**
 docs/**
 .gitignore
+
+# Maintainer-only artifacts (also absent from CI checkouts — keep the
+# CI-built and locally-built vsix identical)
+dsh-0.1.7-compat.patch
+.github/**

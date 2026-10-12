@@ -14,7 +14,7 @@
 
 ---
 
-![version](https://img.shields.io/badge/version-0.3.21-2ea44f)
+![version](https://img.shields.io/badge/version-1.0.0-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

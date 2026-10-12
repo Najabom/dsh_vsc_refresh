@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "0.3.21",
+  "version": "1.0.0",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
