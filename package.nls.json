@@ -1,0 +1,13 @@
+{
+  "dsh.command.openSidebar": "DSH: Open Sidebar",
+  "dsh.command.start": "DSH: Start Web Harness",
+  "dsh.command.stop": "DSH: Stop Auto-started Harness",
+  "dsh.command.refreshStatus": "DSH: Refresh Connection Status",
+  "dsh.command.openWebView": "DSH: Open Web GUI (advanced)",
+  "dsh.command.askSelection": "DSH: Ask about selection",
+  "dsh.command.reviewChanges": "DSH: Review Agent Changes",
+  "dsh.config.url": "Base URL of the DSH harness this extension talks to. Default 3080 = the web GUI's harness: the extension connects as a shared client and never starts or kills it. If nothing answers there, the extension auto-starts its own instance (recorded in %TEMP%\\dsh-vsc-harness.pid, stopped when VS Code exits) with the runtime overlay that bypasses dsh 0.1.7's launch-token auth. Also honors DSH_WEB_URL.",
+  "dsh.config.autoStart": "Start `dsh web` automatically when no harness is reachable at the configured URL.",
+  "dsh.config.followAgentEdits": "When DSH edits files, open them in the editor automatically with the cursor at the first changed line (preview tab, no focus steal, live refresh from disk). Covers direct write/edit tools and nested calls inside code execution (tools.write/edit etc.); shell commands without a recognizable path (e.g. pwsh Set-Content) are not tracked.",
+  "dsh.config.autoFixWorkspaceAcl": "On opening or switching a workspace, automatically repair the folder permissions DSH's workspace-write sandbox needs (grants the current user full control); when it cannot, offers a one-time elevated fix. When disabled, the sandbox fails to start in workspaces with incomplete permissions (e.g. folders copied from another machine)."
+}

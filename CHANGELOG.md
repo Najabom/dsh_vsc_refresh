@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - _(nothing yet)_
 
+## [1.0.1] - 2026-10-13
+
+- Docs: README（中/英）、docs/design.md、llms.txt 按现状全量重写；README 截图
+  区换成 7 张 v1.0.0 新 UI 实拍（旧图已删除）。
+- **Ask 流程本地化**：命令标题与右键菜单改用 `package.nls`，跟随 VS Code 显示
+  语言（中文界面显示「DSH: 询问选中内容」等；英文界面显示英文）；配置项描述
+  （4 项）同步本地化；面板 Ask 卡片标题「✎ 询问 DSH」。
+- **状态行精简**：移除运行中总结区顶部的独立「读秒 + 首 token」行；实时 tok/s
+  与全部统计保持在总结行内。
+
 ## [1.0.0] - 2026-10-12
 
 **首个正式版本** —— 版本号由 0.3.21 重置为 1.0.0，功能与 0.3.21 完全一致。

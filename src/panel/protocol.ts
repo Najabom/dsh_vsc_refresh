@@ -65,7 +65,7 @@ export type HostMessage =
   | {
       type: "interaction";
       sessionId: string;
-      /** rpcId to echo when answering via /api/respond. */
+      /** Waterfall event id; echoed back (with the stream's clientId) when answering via $events/result. */
       rpcId: string;
       kind: "approval";
       approvalId: string;

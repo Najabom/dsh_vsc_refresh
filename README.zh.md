@@ -1,41 +1,42 @@
-# DSH Bridge · DeepSeek Harness for VS Code
+# DSH Bridge · 把 DeepSeek Harness 放进 VS Code
 
-**把 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) —— 本地的 AI 智能体 —— 直接放进 VS Code。** 一个原生侧边栏面板 + 编辑器桥，以**协议客户端**的方式连接 DSH，不重写它、也不另起第二个服务端。
+**在 VS Code 里运行 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)——本地的 AI 智能体。** 一个原生侧边栏面板 + 编辑器桥，以**协议客户端**的身份连接 DSH：不重写它、不另起第二个服务端，与网页端共享同一份历史。
 
 语言：**简体中文** · [English](README.md)
 
 > **衍生说明** —— 本项目基于
 > [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc) 二次开发，由
-> [Najabom](https://github.com/Najabom) 维护。保留原项目「纯协议桥」设计，
-> 新增对 DSH 0.1.7-rc.2+ 的完整协议适配、启动时更新检查（接口预检 + 失败
-> 回滚）、Windows 沙箱工作区 ACL 自动修复、编辑器跟随 agent 编辑，以及全面
-> 的面板与交互改进。原作品 © 2026 zhibailu（MIT）。逐版本变更见
-> [CHANGELOG.md](CHANGELOG.md)。
+> [Najabom](https://github.com/Najabom) 维护。保留原项目「纯桥接」设计，新增：
+> 对新版 DSH（0.1.7-rc.2+，实测至 0.2.0-rc.2）的完整协议适配、更新中心（启动
+> 检查、接口预检、一键更新与失败回滚）、Windows 沙箱工作区 ACL 自动修复、
+> 跟随 agent 编辑、按工作区的会话管理，以及全面的面板与交互改进。原作品
+> © 2026 zhibailu（MIT）。逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
-![version](https://img.shields.io/badge/version-1.0.0-2ea44f)
+![version](https://img.shields.io/badge/version-1.0.1-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![node](https://img.shields.io/badge/node-%E2%89%A518-339933)
+![dsh](https://img.shields.io/badge/DSH-0.1.7--rc.2%2B-536af5)
 
-> **一句话** —— DeepSeek Harness（DSH）是一个住在你电脑里的 AI「工人」（默认 `http://127.0.0.1:3080`）。DSH 自带一个网页，但那个网页只是它「协议」的**一个客户端**。`dsh-vsc` 是**另一个客户端**——一张真正属于 VS Code 的侧边栏。它不重写 DSH、不模仿它的 UI，而是读懂协议、把干活的过程用原生面板画给你，并接上针对**你的代码**的原生编辑器桥。
+> **一句话** —— DeepSeek Harness（DSH）是一个住在你电脑里的 AI「工人」（默认 `http://127.0.0.1:3080`）。DSH 自带一个网页，但那个网页只是它「协议」的**一个客户端**。`dsh-vsc` 是**另一个客户端**——一张真正属于 VS Code 的侧边栏 + 原生编辑器桥。它不重写 DSH、不把网页塞进侧边栏，而是读懂协议、把干活的过程画进 VS Code 原生面板。**一份历史、一套契约、绝无第二个服务端。**
 
 ---
 
 ## 目录
 
-- [为什么用它](#为什么用它)
+- [本 fork 与上游的差异](#本-fork-与上游的差异)
 - [功能](#功能)
 - [截图](#截图)
+- [环境要求](#环境要求)
 - [安装](#安装)
 - [快速上手](#快速上手)
 - [它怎么工作](#它怎么工作)
 - [设计哲学——「纯桥接」](#设计哲学纯桥接)
 - [命令](#命令)
 - [配置](#配置)
-- [刻意不做的事](#刻意不做的事)
+- [边界与刻意不做的事](#边界与刻意不做的事)
 - [开发](#开发)
 - [文档](#文档)
 - [参与贡献](#参与贡献)
@@ -43,70 +44,99 @@
 
 ---
 
-## 为什么用它
+## 本 fork 与上游的差异
 
-多数「AI 进 IDE」的工具是在**重造一个 AI**。这个项目正好相反：
+上游 `zhibailu/dsh-vsc`（0.2.6）面向 2026-09 时代的 DSH。本 fork 跟进**新版 DSH 协议**，并把面板打磨成可以每天使用的工具：
 
-- **不 fork、不重写 DSH**：DSH 保持字节级一致（npm 原版）。它能做的事，这个扩展都能呈现。
-- **不把网页 iframe 当主力体验**：侧边栏是一张**原生 VS Code 面板** + 原生编辑器桥——选中代码、右键、提问；看着工具干活、审批操作、审阅 diff。
-- **DSH 升级也不怕**：它消费 DSH 的**协议契约（wire contract）**，而不是 UI。DSH 界面随便改版，这个扩展都不必跟着改。
-
-如果你已经在用 DSH（网页或命令行）、又在 VS Code 里写代码，`dsh-vsc` 把你的编辑器变成 DSH 的一等表面——**一份历史、一套契约、绝无第二个服务端**。
+- **新版 DSH 协议全量适配**（0.1.7-rc.2+ 至 0.2.0-rc.2）：typert RPC 网关、多路复用事件套接字、waterfall 审批与提问、分页历史、按会话投影。
+- **更新中心**：启动时检查 DSH 新版本；升级前对目标版本做**接口预检**（官方 Release Notes 扫描 + 新版本包内接口静态核验），发现本扩展依赖的接口有风险时会建议先更新扩展；升级后自动重启并验证通信——自检失败可一键回滚。
+- **工作区集成**：harness 跟随你打开的文件夹运行；会话按工作区分组；工作区条随时告诉你当前在哪；一个按钮切换文件夹。
+- **Windows 沙箱友好**：自动修复 DSH 沙箱所需的目录权限（工作区 ACL），确实无法自动修复时才请求一次管理员操作。
+- **跟随 agent 编辑**：DSH 改文件时，编辑器自动打开该文件并把光标定位到首个改动行——覆盖直接文件工具与 PTC 嵌套调用。
+- **易用性**：会话彻底删除、归档、「永久允许」审批、中文右键菜单、每轮标注所用模型、现代化状态行（上下文占用、实时 tok/s、缓存统计）、控件高度统一、opencode 风格输出着色。
 
 ## 功能
 
 **原生侧边栏面板**
-- 流式回复、可折叠的**思考（reasoning）**栏与每轮**实时计时**。
-- 相邻工具调用合并成「**⚙ 动作**」折叠块；每轮 **`+N-M`** 改动统计。
-- **审批卡片**：agent 请求执行需审批的操作时弹出——允许一次 / 拒绝。
-- **选择题卡片**：单选用数字键、多选勾选、推荐徽章、自定义回答（↑↓ 找回）、跳过——经 `/api/respond` 回传。
-- **会话模式**（标准 / PTC / 极简 / 创造）、**推理等级**切换、**权限预设**切换（只读 / workspace-write / full-access）。
-- **输入栏接管**：agent 提问时主输入栏整体隐藏，防止误发消息。
+
+- 流式回复；可折叠的**思考（reasoning）**；每轮摘要标注**所用模型**与用时。
+- 工具动作带色调（执行 / 读取 / 写入 / 代理）与每轮 `+N-M` 改动统计。
+- **审批卡片**——允许一次 / 拒绝 / **永久允许**（第三种回答会把会话权限提升为升级目标模式，同类操作不再反复询问）。
+- **选择题卡片**——单选用数字键、多选勾选、推荐徽章、自定义回答（↑↓ 找回）、跳过。
+- **会话模式**（标准 / PTC / 极简 / cordis）、**推理等级**、**权限预设**（只读 / workspace-write / danger-full-access），在输入栏一键切换。
+- **输入栏接管**：agent 提问时输入栏锁定，防止误发消息。
+- 记账类消息（运行时上下文、模型切换通知）不再上屏——记录里只保留你和 agent 真正说过的话。
+
+**会话与工作区**
+
+- 会话选择器按工作区分组：当前工作区的会话排在前面（活动会话加粗），其他工作区收在可展开的**「其他工作区」**开关后面。
+- 选择器上方的**工作区条**显示当前文件夹；右侧的**工作区按钮**用于切换文件夹（新会话落在那里）。
+- 面板只会自动打开**当前工作区**的会话；其他文件夹的会话留在选择器里，一键可达。
+- **归档**与**彻底删除**（删除 `~/.dsh/sessions` 下该会话的历史文件）。
 
 **原生编辑器桥**
-- **Ask DSH（选区）**：选中代码 → 右键 → *DSH: Ask about selection*，弹结构化上下文卡片（文件 / 选区 / 工作区 / 分支）送入最新会话；解释 / 审查 / 修复 / 自定义。
-- **Review Agent Changes**：监控 `write` / `edit` / `str_replace_editor` 工具调用，每轮提示改动数，一键打开 VS Code 原生 **git diff**。
+
+- **选中代码就问**——选中代码 → 右键 → *DSH: 询问选中内容*，带结构化上下文卡片（文件 / 选区 / 工作区 / 分支）。
+- **Review Agent Changes**——每轮改动文件清单 → 一键打开 VS Code 原生 **git diff**。
+- **跟随 agent 编辑**——自动打开 + 光标定位首个改动行（预览标签、不抢焦点）；可用 `dshVsc.followAgentEdits` 开关。
+
+**更新中心**
+
+- 启动时查询 npm 上的 DSH 新版本；弹窗提供**立即更新 / 暂不更新**（“暂不”会记住到下一个版本为止）。
+- 升级前的**接口预检**：扫描官方 Release Notes 中你当前版本到目标版本之间的说明，找出本扩展用到的接口是否被提及；再对新版本包做**静态核验**。有风险 → 警告并建议**先更新扩展**；仍保留逃生通道（*仍要更新，自检失败自动回滚*）。
+- 升级后：重启 harness、重连事件流、验证 RPC 与事件流；失败则提供**回滚**到旧版本。
+
+**插件与模型管理**（设置页：通用设置 / 模型 / 插件 / Agent 预设）
+
+- **模型选择**与推理等级；渠道（官方 / 账号）由 DSH 侧路由决定。
+- **插件管理**——从 registry 检索安装、启停、卸载；遇到 `incompatible-version` 拒绝可授予**版本豁免**（需显式确认风险）；需要批准的构建（pendingBuilds）也会弹出来等待确认。
 
 **harness 生命周期**
-- 复用正在运行的 DSH（共享客户端，不另起服务端）；只有确实没有才自拉一个；**自愈**（死了按退避重启）；**引用计数关闭**（绝不杀掉还被别的客户端用着的 harness）。详见[它怎么工作](#它怎么工作)。
+
+- 复用正在运行的 DSH（共享客户端——**绝不做第二个服务端**）；只有确实没有时才自启自己的无窗口实例。该实例是**从属（owned）**的：VS Code 退出时确定性关闭；手动启动的 harness 绝不被碰。
 
 ## 截图
 
-**侧边栏与对话**——原生 DSH 面板：会话列表、流式回复、可折叠的「⚙ 动作」、每轮实时计时、`+N-M` 统计
+**侧边栏**——原生 DSH 面板：工作区条、会话选择器、流式回复、每轮模型与用时、实时状态行（上下文占用环、吞吐、缓存命中）
 
-<p align="center"><img src="docs/screenshots/sidebar.png" width="290" alt="DSH 侧边栏与对话" /></p>
+<p align="center"><img src="docs/screenshots/sidebar.png" width="290" alt="DSH 侧边栏" /></p>
 
-**右键提问**——在编辑器里选中代码，右键 → *DSH: Ask about selection*
+**会话按工作区分组**——当前工作区的会话排在最前（加粗），其余折叠在「其他工作区（N）」下
 
-<p align="center"><img src="docs/screenshots/ask-menu.png" width="380" alt="右键 Ask DSH 菜单" /></p>
+<p align="center"><img src="docs/screenshots/session-picker.png" width="260" alt="按工作区分组的会话选择器" /></p>
 
-**Ask 卡片**——面板里弹出的结构化上下文卡片（文件 / 选区 / 工作区 / 分支）
+**跟随 agent 编辑**——DSH 写入的文件自动在编辑器打开，光标落在首个改动行（预览标签、不抢焦点）
 
-<p align="center"><img src="docs/screenshots/ask-card.png" width="290" alt="面板中的 Ask 卡片" /></p>
+<p align="center"><img src="docs/screenshots/follow-edits.png" width="640" alt="跟随 agent 编辑" /></p>
 
-**审批卡片**——agent 请求执行需审批的操作时，允许一次 / 拒绝
+**审批卡片**——允许一次 / **永久允许**（应答本次并把会话权限提升为升级目标）/ 拒绝
 
-<p align="center"><img src="docs/screenshots/approval.png" width="460" alt="审批卡片" /></p>
+<p align="center"><img src="docs/screenshots/approval.png" width="460" alt="带永久允许的审批卡" /></p>
 
-**选择题卡片**——单选 / 多选、推荐徽章、自定义回答
+**设置 → 插件**——检索、安装、启停、卸载；版本豁免与构建批准就地处理
 
-<p align="center"><img src="docs/screenshots/question.png" width="290" alt="选择题卡片" /></p>
+<p align="center"><img src="docs/screenshots/settings-plugins.png" width="660" alt="插件管理设置页" /></p>
 
-**Review Agent Changes**——每轮改动的文件 → 一键打开原生 git diff
+**选中代码就问**——选中代码 → 右键 → *DSH: Ask about selection*（标题跟随 VS Code 语言；截图为英文界面）
 
-<p align="center"><img src="docs/screenshots/review.png" width="440" alt="Review Agent Changes" /></p>
+<p align="center"><img src="docs/screenshots/ask-selection.png" width="460" alt="右键询问选中内容" /></p>
 
-**会话模式**——标准 / PTC / 极简 / 创造
+**Ask 卡片**——面板里的结构化上下文卡片：解释 / 代码审查 / 修复 / 自定义
 
-<p align="center"><img src="docs/screenshots/mode-picker.png" width="400" alt="会话模式选择" /></p>
+<p align="center"><img src="docs/screenshots/ask-card.png" width="460" alt="面板中的 Ask 卡片" /></p>
+
+## 环境要求
+
+- **VS Code `^1.90.0`**——Windows / macOS / Linux。
+- **全局安装 DSH**：`npm i -g @deepseek-ai/dsh`（0.1.7-rc.2 或更新；实测至 0.2.0-rc.2）。扩展会复用正在运行的 `dsh web`，没有时才自启自己的实例——同端口、同历史（`~/.dsh`），一份历史，绝无第二个服务端。DSH 缺失时，「DSH Bridge」输出通道会给出安装提示。
+- **扩展里不输入 API key。** key 与账号登录都在 DSH 侧（`dsh web`）；扩展只消费 DSH 暴露出来的东西。
+- **Windows**：workspace-write 沙箱要求工作区目录*可授权*（沙箱需要写入低完整性标签，这要求完全控制权限）。扩展会自动修复（`dshVsc.autoFixWorkspaceAcl`）；确实不行时才请求一次管理员修复。
 
 ## 安装
 
-> 需要 Windows / macOS / Linux + VS Code `^1.90.0`。DSH 本体**不用单独装**——没有 harness 在跑时扩展会自动拉起一个。
-
 **方式 A —— Release 安装包（推荐）**
 
-1. 从 [Releases](https://github.com/zhibailu/dsh-vsc/releases) 下载最新的 `dsh-vsc-<版本号>.vsix`。
+1. 从 [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases) 下载最新的 `dsh-vsc-<版本号>.vsix`。
 2. 安装（VS Code `Ctrl+Shift+P` → **Install from VSIX**，或命令行）：
 
    ```bash
@@ -115,13 +145,13 @@
 
 3. 重载窗口（`Ctrl+Shift+P` → **Reload Window**），左侧活动栏点 **DSH** 图标即可。
 
-> 会自动复用正在运行的 harness（`npm i -g @deepseek-ai/dsh` 或 `npx @deepseek-ai/dsh web`），默认 `http://127.0.0.1:3080`，可用 `DSH_WEB_URL` 或 `dshVsc.url` 覆盖。
+> 默认 harness 地址 `http://127.0.0.1:3080`；可用 `dshVsc.url` 设置或 `DSH_WEB_URL` 环境变量覆盖。
 
 **方式 B —— 源码构建**
 
 ```bash
-git clone https://github.com/zhibailu/dsh-vsc.git
-cd dsh-vsc
+git clone https://github.com/Najabom/dsh_vsc_refresh.git
+cd dsh_vsc_refresh
 npm install
 npm run package        # esbuild 构建 + vsce 打包 → dsh-vsc-<版本号>.vsix
 code --install-extension dsh-vsc-<版本号>.vsix --force
@@ -131,22 +161,19 @@ code --install-extension dsh-vsc-<版本号>.vsix --force
 
 1. **重载窗口**——装完必须重载才生效。
 2. 左侧活动栏点 **DSH** 图标打开侧边栏。
-3. 没有 harness 在跑时，扩展会自动静默拉起一个（不弹窗）；有则直接复用。
-4. 发消息，看 agent 干活。
-
-**扩展里不用配 API key**：key 在 DSH 侧配置（第一次 `dsh web` 时按提示设置）。扩展只是它的共享客户端，不碰你的 key。
+3. 若尚未安装 DSH，先执行一次 `npm i -g @deepseek-ai/dsh`（见[环境要求](#环境要求)）；之后扩展会自启并持有它的无窗口 harness（或复用正在运行的那个）。
+4. 发消息，看 agent 干活。审批/提问会以卡片形式出现在面板里；文件改动可在编辑器里自动打开（跟随 agent 编辑）。
 
 ## 它怎么工作
 
-DSH 对外暴露两样东西：**RPC 接口**（`POST /api/<method>`）和**实时事件流**（`/api/events.mux`）。网页只是这份契约的一个消费方。
+DSH 对外提供 **typert RPC 网关**（`POST /api/<endpoint>`，`{type:"client-request", rpcId, method, payload:{args}}` 信封）和**多路复用事件套接字**（`/api/remote.mux`，一条 WebSocket 上跑多条逻辑流：全局 `$events` 流、按会话的 `session/control`、`workspace/follow`、`session/follow`）。网页只是这份契约的一个消费方；这个扩展是另一个。
 
-`dsh-vsc` 是第二个消费方：
-
-- **`src/harness/client.ts` —— 约 200 行的最小协议客户端**：在 Node（≥ 18，全局 `fetch`）里重实现 DSH 的 wire contract，**不 import 任何 DSH 内部包**，刻意做得很薄——实现协议，而不是插件框架。
-- **无损事件**：面板拿到的是事件流的**原始帧**，不做二次建模；渲染交给面板自己。桥接层越透明，越不会跟官方语义脱节。
-- **协议优先、UI 无关**：官方 README 写明"没有协议版本字段，因为客户端与服务端一起发布——直到出现独立发布的客户端"。这个扩展正是那个独立发布的客户端，站的是**稳定契约**那一层，不是**易变 UI**那一层。
-- **唯一的例外 —— `overlay`**：协议没暴露的 4 个能力（`clientCount`、隐藏工具控制台）由**内存运行时补丁**提供，并上了三把锁——只改内存、磁盘官方文件一行不碰；启动时校验官方文件 **SHA-256**，对不上整体放弃；patch 前查**金丝雀锚点**，找不到就降级。且有明确退役路线（等官方补上对应字段，如 `hostInstanceId`，就删对应 delta）。
-- **第二个客户端，绝不做第二个服务端**：真实事故证明，两个 DSH 进程共用 `~/.dsh` 会互相写坏历史（`corrupt session log: seq gap`）。所以扩展绝不另起一个服务端去写同一份历史：能复用就复用，只有确实没有才自拉，关闭时用**引用计数**（问 `host.describe` 的 `clientCount`）决定停不停，绝不错杀正在被别人用着的 harness。
+- **`src/harness/client.ts`——不到 300 行的最小协议客户端。** 在 Node（≥ 18，全局 `fetch`；套接字用 `ws`）里重实现 wire contract，**不 import 任何 DSH 内部包**，刻意做得很薄——实现协议，而不是插件框架。端点覆盖会话、历史分页、提示、模型、权限、插件与账号状态。
+- **无损事件。** 面板拿到的是事件流的**原始帧**，不做二次建模；渲染是面板自己的事。桥接层越透明，越不会跟官方语义脱节。
+- **waterfall 问答。** 审批与提问以 `approval/request`、`user-questions/request` 形式到达 `$events` 流；回答通过 `$events/result` 回传，必须带上**流 ready 帧里的 clientId** 和事件 id。这对书错了就会被网关拒绝——本 fork 修掉了这个 bug，并补了测试。
+- **协议优先、UI 无关。** 官方 README 写明*没有协议版本字段，因为客户端与服务端一起发布——直到出现独立发布的客户端*。这个扩展正是那个独立发布的客户端，站的是**稳定契约**那一层，不是**易变 UI**那一层——DSH 从 0.1.7 到 0.2.0 的协议大改，适配被牢牢圈在客户端/映射层内。
+- **唯一的例外——`overlay`。** DSH 0.1.7-rc.2 为 `/api` 与事件套接字引入了进程级浏览器 token 鉴权；第三方协议客户端拿不到浏览器凭据。因此用**唯一一个内存 delta** 对本地请求绕过浏览器鉴权检查，并上了三把锁：只改内存（磁盘官方文件保持字节级一致）、**SHA-256** 校验（对不上整体放弃）、patch 前查**金丝雀锚点**（找不到就优雅降级）。降级会以可见的方式暴露（「API 拒绝访问」并提示更新扩展）。它有明确的退役路线：官方提供受支持的 headless/服务鉴权之日，删掉这个 delta。
+- **第二个客户端，绝不做第二个服务端。** 真实事故证明，两个 DSH 进程共用 `~/.dsh` 会互相写坏历史（`corrupt session log: seq gap`）。所以扩展绝不在这份历史上另起一个服务端：能复用就复用；确实没有时才自启（占同一个默认端口，两者永远不可能同时写）；VS Code 退出时确定性关掉这个从属实例——共享的 harness 原样保留。
 
 给想理解这套设计的人写的完整架构说明，见 [docs/design.md](docs/design.md)。
 
@@ -163,29 +190,33 @@ DSH 对外暴露两样东西：**RPC 接口**（`POST /api/<method>`）和**实�
 
 | 命令 | 作用 |
 |---|---|
-| `DSH: Open Sidebar` | 聚焦 DSH 侧边栏 |
-| `DSH: Start Web Harness` | 显式启动/连接 harness（清除"不再重启"闩） |
-| `DSH: Stop Auto-started Harness` | 只停本扩展自拉的那个；共享的绝不杀 |
-| `DSH: Refresh Connection Status` | 重新探测 harness |
-| `DSH: Open Web GUI (advanced)` | 把完整 DSH 网页作为标签页打开 |
-| `DSH: Ask about selection` | 询问选中的代码（右键菜单里也有） |
-| `DSH: Review Agent Changes` | 打开 agent 改动文件的原生 git diff |
+| `DSH: 打开侧边栏` | 聚焦 DSH 侧边栏 |
+| `DSH: 启动 Web Harness` | 显式启动/连接 harness |
+| `DSH: 停止自启的 Harness` | 只停本扩展自拉的实例；共享的绝不杀 |
+| `DSH: 刷新连接状态` | 重新探测 harness |
+| `DSH: 打开 Web 界面（高级）` | 把官方 DSH 网页作为标签页打开——同一个 harness、同一份历史 |
+| `DSH: 询问选中内容` | 询问选中的代码（右键菜单里也有） |
+| `DSH: 审查 Agent 改动` | 打开 agent 改动文件的原生 git diff |
+
+> 命令标题已本地化（`package.nls`）：命令面板与右键菜单跟随 VS Code 显示语言（中文界面即上表；英文界面显示英文）。
 
 ## 配置
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
 | `dshVsc.url` | `http://127.0.0.1:3080` | DSH harness 的地址；也认 `DSH_WEB_URL` |
-| `dshVsc.autoStart` | `true` | 配置地址无人应答时自动启动 `dsh web` |
+| `dshVsc.autoStart` | `true` | 配置地址无人应答时自动启动 harness |
+| `dshVsc.followAgentEdits` | `true` | agent 改文件时自动在编辑器打开（预览标签、光标定位首个改动行）；覆盖直接文件工具与 PTC 嵌套调用 |
+| `dshVsc.autoFixWorkspaceAcl` | `true` | 打开/切换工作区时自动授予 Windows 沙箱所需的目录权限；无法自动修复时提供一次性管理员修复 |
 
-## 刻意不做的事
+## 边界与刻意不做的事
 
-- 不重写聊天 UI、不截断/白名单事件、不要求重输 API key。
-- 不另起第二个 harness——能复用就复用，只有没有才自拉；关 VS Code 时若还有别的客户端连着，自拉实例会保留。
-- 改动追踪只识别 `write` / `edit` / `str_replace_editor` 工具事件；shell 里改的文件不计入（git diff 审查仍可手工用）。
-- `+N-M` 统计只覆盖上述文件工具；计时器是桥接侧纯展示（挂最新进行中的一轮，任务结束即固化为历史用时）。
-- Ask DSH 发送到"最近更新的会话"（不一定是 webview 当前打开的那个）。
-- 审批/选择题只在**当前选中会话**弹出。
+- 不重写聊天 UI、不截断/白名单事件、不在扩展里输入 API key 或登录账号——key 在 DSH 侧。
+- 不另起第二个 harness——能复用就复用，只有没有才自拉；从属实例随 VS Code 关闭，手动启动的保持不动。
+- 改动追踪与跟随编辑覆盖文件工具（`write` / `edit` / `apply_patch` / `str_replace_editor`）及其 PTC 嵌套调用；**通过 shell 命令**改的文件（如 `pwsh` 写文件）不在此列。
+- `+N-M` 统计只覆盖上述文件工具；实时计时器是纯展示（任务结束固化为历史用时）。
+- “选中代码就问”发送到最近更新且未归档的会话。
+- 审批/选择题在你切回一个正等待应答的会话时会重新显示（agent 未获答复前一直阻塞）。
 
 ## 开发
 
@@ -206,13 +237,11 @@ node scratch/auto-test.mjs <sessionId> <turnNo>
 
 ## 文档
 
-- [设计与架构说明](docs/design.md)——为什么采用「纯桥接」、如何应对 DSH 升级保持稳定、各模块如何配合。
+- [设计与架构说明](docs/design.md)——为什么采用「纯桥接」、新版 DSH 协议的大白话解释、overlay 护栏，以及更新器 / 沙箱 / 跟随编辑这些机制的设计。
 - [源码地图](src/README.md)——`src/` 里各目录管什么。
-- [截图](docs/screenshots/)——本 README 用到的图片素材。
 - [`llms.txt`](llms.txt)——给 LLM / AI 抓取器用的机器可读文档索引。
 - [`AGENTS.md`](AGENTS.md)——给 AI 编码代理的仓库上手说明。
 - [更新日志](CHANGELOG.md)——版本历史。
-- 维护者可见：[GITHUB-SETUP.md](GITHUB-SETUP.md)——在 GitHub 上设置仓库元数据与 topics 以提升可发现性。
 
 ## 参与贡献
 
@@ -220,4 +249,4 @@ node scratch/auto-test.mjs <sessionId> <turnNo>
 
 ## 许可证
 
-MIT © 2026 zhibailu — 详见 [LICENSE](LICENSE)。
+MIT © 2026 zhibailu（原项目）—— fork 由 [Najabom](https://github.com/Najabom) 维护。详见 [LICENSE](LICENSE)。

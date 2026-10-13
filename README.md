@@ -1,42 +1,44 @@
-# DSH Bridge · DeepSeek Harness for VS Code
+# DSH Bridge · DeepSeek Harness in VS Code
 
-**Run [DeepSeek Harness](https://github.com/deepseek-ai/dsh) — the local AI agent — inside VS Code.** A native sidebar panel plus an editor bridge that connects to DSH as a **protocol client**, without rewriting it and without starting a second server.
+**Run [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — the local AI agent — inside VS Code.** A native sidebar panel plus an editor bridge that connects to DSH as a **protocol client**: no rewriting DSH, no second server, one shared history with the web GUI.
 
 Read this in: **English** · [简体中文](README.zh.md)
 
 > **Fork notice** — This is a community fork of
 > [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc), maintained by
 > [Najabom](https://github.com/Najabom). It keeps the original "pure bridge"
-> design and adds full protocol support for DSH 0.1.7-rc.2+, activation update
-> checks (interface preflight + rollback), Windows sandbox workspace-ACL
-> auto-repair, follow-agent-edits in the editor, and a large panel/UX overhaul.
+> design and adds: full protocol support for the new DSH (0.1.7-rc.2+ through
+> 0.2.0-rc.2), an update center (activation checks, interface preflight,
+> one-click update with rollback), Windows sandbox workspace-ACL auto-repair,
+> follow-agent-edits, workspace-aware sessions, and a large panel/UX overhaul.
 > Original work © 2026 zhibailu (MIT). Per-version history in
 > [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-![version](https://img.shields.io/badge/version-1.0.0-2ea44f)
+![version](https://img.shields.io/badge/version-1.0.1-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![node](https://img.shields.io/badge/node-%E2%89%A518-339933)
+![dsh](https://img.shields.io/badge/DSH-0.1.7--rc.2%2B-536af5)
 
-> **TL;DR** — DeepSeek Harness (DSH) is an AI *agent* that lives on your machine (default `http://127.0.0.1:3080`). DSH ships a web UI, but a web UI is just **one client** of DSH's wire protocol. `dsh-vsc` is **another client** — a real VS Code sidebar. It does not rewrite DSH and it does not copy its UI: it talks the protocol and renders the work in a panel that belongs to VS Code, plus a native editor bridge for *your* code.
+> **TL;DR** — DeepSeek Harness (DSH) is an AI *agent* that lives on your machine (default `http://127.0.0.1:3080`). DSH ships a web UI, but that web UI is just **one client** of DSH's wire protocol. `dsh-vsc` is **another client** — a real VS Code sidebar plus a native editor bridge. It does not rewrite DSH and it does not embed the web UI: it talks the protocol and renders the work in a panel that belongs to VS Code. Same history, same contract, no second server.
 
 ---
 
 ## Table of contents
 
-- [Why dsh-vsc](#why-dsh-vsc)
+- [Why this fork](#why-this-fork)
 - [Features](#features)
 - [Screenshots](#screenshots)
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Design philosophy — "pure bridge"](#design-philosophy--pure-bridge)
 - [Commands](#commands)
 - [Configuration](#configuration)
-- [What is deliberately out of scope](#what-is-deliberately-out-of-scope)
+- [Limitations & deliberately out of scope](#limitations--deliberately-out-of-scope)
 - [Development](#development)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
@@ -44,70 +46,99 @@ Read this in: **English** · [简体中文](README.zh.md)
 
 ---
 
-## Why dsh-vsc
+## Why this fork
 
-Most "AI-in-IDE" tools **rebuild the AI**. This project does the opposite:
+Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tracks the **new DSH protocol** and turns the panel into a first-class daily driver:
 
-- **It does not fork or reimplement DeepSeek Harness.** DSH stays byte-identical (`npm` original). Whatever it can do, this extension can surface.
-- **It does not embed an iframe of the web UI as the primary experience.** The sidebar is a **native VS Code panel** with a native editor bridge — select code, right-click, ask; watch tool calls, approve operations, review diffs.
-- **It stays robust when DSH updates.** It consumes DSH's **wire contract (protocol)**, not its UI. DSH's UI can change freely; this extension does not have to follow.
-
-If you already use DSH (web GUI or CLI) and you work in VS Code, `dsh-vsc` turns your editor into a first-class DSH surface with **one shared history, one contract, and no second server**.
+- **Full protocol support for the new DSH** (0.1.7-rc.2+ through 0.2.0-rc.2): typert RPC gateway, the multiplexed event socket, waterfall approvals & questions, paginated history, per-session projections.
+- **Update center**: checks for new DSH versions on activation; before updating, it *preflights* the new version (official release-notes scan + a static interface check of the new package) and recommends updating the extension first when an interface it relies on is at risk; after updating, it restarts the harness and verifies communication — with one-click rollback if the self-test fails.
+- **Workspace-aware**: the harness runs in your opened folder; sessions are grouped by workspace; a workspace strip keeps you oriented; one button switches the folder.
+- **Windows sandbox friendly**: auto-repairs the directory permission the DSH sandbox needs (workspace ACL), prompting for a one-time elevated fix only when it truly cannot do it alone.
+- **Follow agent edits**: when DSH edits a file, the editor opens it and the cursor lands on the first changed line — covering direct file tools *and* nested PTC dispatches.
+- **Quality-of-life**: session hard-delete, archiving, "always allow" approvals, Chinese context menu, per-turn model label, a modern status row (context usage, live tok/s, cache stats), unified control sizing, opencode-style output coloring.
 
 ## Features
 
 **Native sidebar panel**
-- Streaming agent replies, collapsible **reasoning** and per-turn **timing**.
-- Adjacent tool calls merged into **"⚙ Actions"** collapsible blocks; **`+N-M`** change stats per turn.
-- **Approval cards** when the agent asks to run a privileged operation — allow once / deny.
-- **Question cards** for agent questions: single-choice (number keys), multi-select checkboxes, recommended badge, custom answer with ↑↓ recall, skip — answered via `/api/respond`.
-- **Session modes** (standard / PTC / minimal / creative), **reasoning-effort** switch, and **permission-preset** switch (read-only / workspace-write / full-access).
-- **Composer takeover**: the input bar hides while the agent is asking, so you can't accidentally send a message mid-question.
+
+- Streaming replies; collapsible **reasoning**; per-turn summary with the **model used** and elapsed time.
+- Tool actions with tone colors (exec / read / write / agent) and `+N-M` change stats per turn.
+- **Approval cards** — allow once / deny / **always allow** (the third answer raises the session permission to the escalated mode, so similar operations stop asking).
+- **Question cards** — single choice (number keys), multi-select, recommended badge, custom answer with ↑↓ recall, skip.
+- **Session modes** (standard / PTC / minimal / cordis), **reasoning effort**, and **permission presets** (read-only / workspace-write / danger-full-access) — one click from the composer.
+- **Composer takeover**: the input bar locks while the agent is asking, so you can't send mid-question.
+- Bookkeeping messages (runtime context, model-change notices) are hidden — the transcript keeps what you and the agent actually said.
+
+**Sessions & workspaces**
+
+- The session picker groups conversations by workspace: current-workspace sessions up front (active one bold), other workspaces behind an expandable **“其他工作区”** toggle.
+- The **workspace strip** above the picker shows the current folder; the **workspace button** on its right switches folders (new sessions land there).
+- The panel auto-opens a conversation only from the **current** workspace; other folders' sessions stay in the picker, one click away.
+- **Archive** and **permanent delete** (removes the session's history files under `~/.dsh/sessions`).
 
 **Native editor bridge**
-- **Ask DSH about a selection** — select code → right-click → *DSH: Ask about selection*, with a structured context card (file / selection / workspace / branch) into the latest session; explain / review / fix / custom.
-- **Review Agent Changes** — watches `write` / `edit` / `str_replace_editor` tool calls, reports changed files per turn, opens the native VS Code **git diff** in one click.
+
+- **Ask DSH about a selection** — select code → right-click → *DSH: Ask about selection* (localized), with a structured context card (file / selection / workspace / branch).
+- **Review Agent Changes** — per-turn changed-file list → native VS Code **git diff** in one click.
+- **Follow agent edits** — auto-open + first-changed-line cursor (preview tab, no focus steal); toggle with `dshVsc.followAgentEdits`.
+
+**Update center**
+
+- On activation, checks for a newer DSH on npm; offers **update now / later** (the skip is remembered until the next version).
+- **Interface preflight** before updating: scans the official release notes between your version and the new one for the interfaces this extension uses, and statically verifies them inside the new package tarball. If an interface is at risk → warns and suggests **updating the extension first**; an escape hatch (*update anyway, auto-rollback on self-test failure*) remains available.
+- After updating: restarts the harness, reconnects the streams, verifies RPC + event stream; on failure offers a **rollback** to the previous version.
+
+**Plugin & model management** (settings page: General / Models / Plugins / Agent presets)
+
+- **Model picker** with reasoning effort; channels (official / account) are whatever DSH routes.
+- **Plugin manager** — search & install from the registry, enable/disable, remove; an `incompatible-version` refusal can be answered with a **version exemption** (explicit risk acknowledgement), and pending-build approvals are surfaced for confirmation.
 
 **Harness lifecycle**
-- Reuses a running DSH (shared client, no second server); auto-starts one only when none is reachable; self-heals (respawns on death with backoff); reference-counted shutdown (never kills a harness another client is using). Full detail in [How it works](#how-it-works).
+
+- Reuses a running DSH (shared client — **never a second server**); auto-starts its own windowless instance only when none is reachable. That instance is **owned**: it is stopped deterministically when VS Code exits. A manually started harness is never touched.
 
 ## Screenshots
 
-**Sidebar & chat** — the native DSH panel: session list, streaming reply, collapsible "⚙ Actions", per-turn timing, `+N-M` stats
+**Sidebar** — native DSH panel: workspace strip, session picker, streaming reply, per-turn model & timing, live status row (context ring, throughput, cache hits)
 
-<p align="center"><img src="docs/screenshots/sidebar.png" width="290" alt="DSH sidebar and chat" /></p>
+<p align="center"><img src="docs/screenshots/sidebar.png" width="290" alt="DSH sidebar panel" /></p>
 
-**Ask about selection** — select code in the editor, right-click → *DSH: Ask about selection*
+**Sessions grouped by workspace** — the current workspace's conversations stay on top (bold); everything else folds under *Other workspaces (N)*
 
-<p align="center"><img src="docs/screenshots/ask-menu.png" width="380" alt="Ask about selection menu" /></p>
+<p align="center"><img src="docs/screenshots/session-picker.png" width="260" alt="Session picker grouped by workspace" /></p>
 
-**Ask card** — structured context card (file / selection / workspace / branch) shown in the panel
+**Follow agent edits** — files DSH writes open automatically with the cursor at the first changed line (preview tab, focus stays where you are)
 
-<p align="center"><img src="docs/screenshots/ask-card.png" width="290" alt="Ask card in the panel" /></p>
+<p align="center"><img src="docs/screenshots/follow-edits.png" width="640" alt="Editor following an agent edit" /></p>
 
-**Approval card** — allow once / deny when the agent requests a privileged operation
+**Approval card** — allow once / **always allow** (answers once and raises the session preset) / deny
 
-<p align="center"><img src="docs/screenshots/approval.png" width="460" alt="Approval card" /></p>
+<p align="center"><img src="docs/screenshots/approval.png" width="460" alt="Approval card with always-allow" /></p>
 
-**Question card** — single / multi choice, recommended badge, custom answer
+**Settings → Plugins** — search, install, enable/remove bundles; version exemptions and build approvals handled inline
 
-<p align="center"><img src="docs/screenshots/question.png" width="290" alt="Question card" /></p>
+<p align="center"><img src="docs/screenshots/settings-plugins.png" width="660" alt="Plugin management settings" /></p>
 
-**Review Agent Changes** — changed files per turn → native git diff
+**Ask about selection** — right-click selected code → *DSH: Ask about selection* (menu titles follow your VS Code language)
 
-<p align="center"><img src="docs/screenshots/review.png" width="440" alt="Review Agent Changes" /></p>
+<p align="center"><img src="docs/screenshots/ask-selection.png" width="460" alt="Ask about selection in the context menu" /></p>
 
-**Session modes** — standard / PTC / minimal / creative
+**Ask card** — the structured context card in the panel: explain / review / fix / custom
 
-<p align="center"><img src="docs/screenshots/mode-picker.png" width="400" alt="Session mode picker" /></p>
+<p align="center"><img src="docs/screenshots/ask-card.png" width="460" alt="Ask card in the panel" /></p>
+
+## Requirements
+
+- **VS Code `^1.90.0`** — Windows / macOS / Linux.
+- **DSH installed globally**: `npm i -g @deepseek-ai/dsh` (0.1.7-rc.2 or newer; tested through 0.2.0-rc.2). The extension reuses a running `dsh web` or auto-starts its own instance on the same port and the same history (`~/.dsh`) — one history, never a second server. If DSH is missing, the “DSH Bridge” output channel tells you what to install.
+- **No API key is entered in the extension.** Keys and account sign-in live on the DSH side (`dsh web`); the extension only reads what DSH exposes.
+- **Windows**: the workspace-write sandbox needs the workspace folder to be *grantable* (the sandbox writes a low-integrity label, which requires full control). The extension repairs this automatically (`dshVsc.autoFixWorkspaceAcl`) and asks for a one-time elevated fix only when it cannot.
 
 ## Installation
 
-> Requires Windows / macOS / Linux + VS Code `^1.90.0`. DSH itself does not need to be installed separately — the extension auto-starts one when none is running.
-
 **Option A — Release package (recommended)**
 
-1. Download the latest `dsh-vsc-<version>.vsix` from [Releases](https://github.com/zhibailu/dsh-vsc/releases).
+1. Download the latest `dsh-vsc-<version>.vsix` from [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases).
 2. Install it (VS Code `Ctrl+Shift+P` → **Install from VSIX**, or command line):
 
    ```bash
@@ -116,13 +147,13 @@ If you already use DSH (web GUI or CLI) and you work in VS Code, `dsh-vsc` turns
 
 3. Reload the window (`Ctrl+Shift+P` → **Reload Window**), then click the **DSH** icon in the left activity bar.
 
-> Existing harnesses are reused automatically (`npm i -g @deepseek-ai/dsh` or a running `npx @deepseek-ai/dsh web`), default `http://127.0.0.1:3080`, overridable with `DSH_WEB_URL` or the `dshVsc.url` setting.
+> Default harness URL `http://127.0.0.1:3080`; overridable with the `dshVsc.url` setting or the `DSH_WEB_URL` environment variable.
 
 **Option B — from source**
 
 ```bash
-git clone https://github.com/zhibailu/dsh-vsc.git
-cd dsh-vsc
+git clone https://github.com/Najabom/dsh_vsc_refresh.git
+cd dsh_vsc_refresh
 npm install
 npm run package        # esbuild build + vsce package → dsh-vsc-<version>.vsix
 code --install-extension dsh-vsc-<version>.vsix --force
@@ -132,22 +163,19 @@ code --install-extension dsh-vsc-<version>.vsix --force
 
 1. **Reload the window** — required after install.
 2. Click the **DSH** icon in the left activity bar to open the sidebar.
-3. If no harness is running, the extension silently starts one (no window pops up); if one is running, it reuses it.
-4. Send a message and watch the agent work.
-
-**No API key needed in the extension.** Your key stays on the DSH side (configured the first time you run `dsh web`). The extension is a shared client and never touches your key.
+3. If DSH isn't installed yet, run `npm i -g @deepseek-ai/dsh` once (see [Requirements](#requirements)); the extension then starts and owns its windowless harness (or reuses a running one).
+4. Send a message and watch the agent work. Approvals and questions show up as cards in the panel; file edits can auto-open in the editor (follow agent edits).
 
 ## How it works
 
-DSH exposes two things: an **RPC interface** (`POST /api/<method>`) and a **real-time event stream** (`/api/events.mux`). The web GUI is just one consumer of that contract.
+DSH exposes a **typert RPC gateway** (`POST /api/<endpoint>` with `{type:"client-request", rpcId, method, payload:{args}}` envelopes) and a **multiplexed event socket** (`/api/remote.mux`, a WebSocket carrying logical streams: the global `$events` stream, per-session `session/control`, `workspace/follow`, `session/follow`). The web GUI is one consumer of that contract; this extension is another.
 
-`dsh-vsc` is a second consumer:
-
-- **`src/harness/client.ts` — a ~200-line minimal protocol client.** It reimplements the DSH wire contract in Node (≥ 18, global `fetch`), imports **no** DSH internals, and is deliberately thin — it implements the protocol, not the plugin framework.
-- **Lossless events.** The panel receives the **raw frames** from the event stream with no re-modeling; rendering is the panel's job. The bridge stays transparent, so it can't drift from DSH's semantics.
-- **Protocol-first, UI-agnostic.** DSH's official README notes there is *no protocol version field because client and host ship together* — until an independently released client exists. This extension is exactly such an independently released client, standing on the stable **contract** layer rather than the volatile **UI** layer.
-- **The one deliberate exception — `overlay`.** Four capabilities the protocol doesn't expose (`clientCount`, hidden tool consoles) are provided by an **in-memory runtime patch** with three safety rails: it mutates only loaded memory (official files stay byte-identical on disk), it **verifies SHA-256** of the official files and bails entirely on mismatch, and it checks **canary anchors** before patching, degrading gracefully on any failure. It has an explicit retirement path (remove each delta once DSH ships the equivalent field, e.g. `hostInstanceId`).
-- **Second client, never a second server.** A real incident showed two DSH processes sharing `~/.dsh` corrupt each other's history (`corrupt session log: seq gap`). So the extension never starts a second server on an existing history: it reuses a live harness, auto-starts one only when none is reachable, and shuts it down by **reference count** (queries `host.describe` for `clientCount` before stopping) so it never kills a harness another client is attached to.
+- **`src/harness/client.ts` — a <300-line minimal protocol client.** It reimplements the wire contract in Node (≥ 18, global `fetch`; `ws` for the socket), imports **no** DSH internals, and stays deliberately thin — it implements the protocol, not the plugin framework. Endpoints cover sessions, history paging, prompts, models, permissions, plugins, and account state.
+- **Lossless events.** The panel receives the **raw frames** from the event streams with no re-modeling; rendering is the panel's job. The bridge stays transparent, so it can't drift from DSH's semantics.
+- **Waterfall questions.** Approvals and user questions arrive on the `$events` stream (`approval/request`, `user-questions/request`); the answer is posted back to `$events/result` carrying the **clientId from the stream's ready frame** and the event id. Get that bookkeeping wrong and the gateway rejects the answer — a bug this fork fixed and now covers with tests.
+- **Protocol-first, UI-agnostic.** DSH's official README notes there is *no protocol version field because client and host ship together* — until an independently released client exists. This extension is exactly such an independently released client, standing on the stable **contract** layer rather than the volatile **UI** layer — it survived DSH 0.1.7 → 0.2.0 protocol evolution with the adaptation contained in the client/mapping layer.
+- **The one deliberate exception — `overlay`.** DSH 0.1.7-rc.2 introduced process-level browser-token auth for `/api` and the event socket; a third-party protocol client cannot obtain a browser credential. A single **in-memory delta** therefore bypasses the browser-auth check for local requests, with three safety rails: it mutates only loaded memory (official files stay byte-identical on disk), it **verifies SHA-256** of the official files and bails entirely on mismatch, and it checks **canary anchors** before patching, degrading gracefully on any failure. Degraded mode surfaces visibly (“API 拒绝访问” with a hint to update the extension). It has an explicit retirement path: when DSH offers a supported headless/service auth, the delta is deleted.
+- **Second client, never a second server.** A real incident showed two DSH processes sharing `~/.dsh` corrupt each other's history (`corrupt session log: seq gap`). So the extension never starts a second server on an existing history: it reuses a live harness, auto-starts its own only when none is reachable (taking the same default port, so the two can never co-write), and stops that owned instance deterministically when VS Code exits — a shared harness is left alone.
 
 A full, reader-friendly deep-dive — written for someone who doesn't know the domain — lives in [docs/design.md](docs/design.md).
 
@@ -165,28 +193,32 @@ A full, reader-friendly deep-dive — written for someone who doesn't know the d
 | Command | What it does |
 |---|---|
 | `DSH: Open Sidebar` | Focus the DSH sidebar |
-| `DSH: Start Web Harness` | Start/connect the harness explicitly (clears the "don't respawn" latch) |
+| `DSH: Start Web Harness` | Start/connect the harness explicitly |
 | `DSH: Stop Auto-started Harness` | Stop only the instance *this* extension started; never a shared one |
 | `DSH: Refresh Connection Status` | Re-probe the harness |
-| `DSH: Open Web GUI (advanced)` | Open the full embedded DSH web GUI as a tab |
+| `DSH: Open Web GUI (advanced)` | Open the official DSH web GUI as a tab — same harness, same history |
 | `DSH: Ask about selection` | Ask DSH about the selected code (also in the right-click menu) |
 | `DSH: Review Agent Changes` | Open a native git diff of the files the agent changed |
+
+> Titles are localized (`package.nls`): command palette and context-menu entries follow the VS Code display language (the table shows the default English).
 
 ## Configuration
 
 | Setting | Default | Description |
 |---|---|---|
 | `dshVsc.url` | `http://127.0.0.1:3080` | Base URL of the DSH harness. Also honors `DSH_WEB_URL`. |
-| `dshVsc.autoStart` | `true` | Auto-start `dsh web` when no harness answers at the configured URL. |
+| `dshVsc.autoStart` | `true` | Auto-start the harness when no instance answers at the configured URL. |
+| `dshVsc.followAgentEdits` | `true` | Open files in the editor (preview tab, cursor on the first changed line) as the agent edits them; covers direct file tools and nested PTC dispatches. |
+| `dshVsc.autoFixWorkspaceAcl` | `true` | On opening/switching a workspace, auto-grant the directory permission the Windows sandbox needs; if it cannot, offer a one-time elevated fix. |
 
-## What is deliberately out of scope
+## Limitations & deliberately out of scope
 
-- No rewritten chat UI, no event truncation/whitelisting, no API-key re-entry.
-- No second harness — reuse a running one, auto-start only when none exists; auto-started instances survive closing VS Code if other clients are attached.
-- Change tracking covers only `write` / `edit` / `str_replace_editor` tool events; files changed via a shell are not counted (git diff review still works manually).
-- The `+N-M` counter covers only those file tools; the timer is display-only on the bridge side (latest in-flight round; finalized to history when the task ends).
-- Ask DSH sends to the **most recently updated** session (not necessarily the one currently open in the webview).
-- Approval/question cards appear only for the **currently selected** session.
+- No rewritten chat UI, no event truncation/whitelisting, no API-key or account sign-in inside the extension — the key lives on the DSH side.
+- No second harness — reuse first, auto-start only when none exists; the owned instance stops with VS Code, a manually started one is left running.
+- Change tracking & follow-edits cover the file tools (`write` / `edit` / `apply_patch` / `str_replace_editor`) including their nested PTC dispatches; files changed **via a shell command** (e.g. `pwsh` writing a file) are not detected.
+- The `+N-M` counter covers only those file tools; the live timer is display-only (finalized to history when the turn ends).
+- Ask-about-selection targets the most recently updated session that is not archived.
+- Approval/question cards replay when you switch back to a session that is waiting on you (the agent stays blocked until answered).
 
 ## Development
 
@@ -207,13 +239,11 @@ node scratch/auto-test.mjs <sessionId> <turnNo>
 
 ## Documentation
 
-- [Design & architecture rationale](docs/design.md) — why the "pure bridge" approach, how it stays robust across DSH upgrades, and how the pieces fit.
+- [Design & architecture rationale](docs/design.md) — why the "pure bridge" approach, the new DSH protocol in plain words, how the overlay is guarded, and how the updater/sandbox/follow-edit mechanisms work.
 - [Source map](src/README.md) — what lives where in `src/`.
-- [Screenshots](docs/screenshots/) — image assets used by this README.
 - [`llms.txt`](llms.txt) — machine-readable doc index for LLM / AI crawlers.
 - [`AGENTS.md`](AGENTS.md) — onboarding guide for AI coding agents working in the repo.
 - [Changelog](CHANGELOG.md) — release history.
-- For maintainers: [GITHUB-SETUP.md](GITHUB-SETUP.md) — repo metadata & topics to set on GitHub for discoverability.
 
 ## Contributing
 
@@ -221,4 +251,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). We welcome issues, PRs, and docs improve
 
 ## License
 
-MIT © 2026 zhibailu — see [LICENSE](LICENSE).
+MIT © 2026 zhibailu (original project) — fork maintained by [Najabom](https://github.com/Najabom). See [LICENSE](LICENSE).

@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -70,32 +70,32 @@
     "commands": [
       {
         "command": "dsh.openSidebar",
-        "title": "DSH: Open Sidebar"
+        "title": "%dsh.command.openSidebar%"
       },
       {
         "command": "dsh.start",
-        "title": "DSH: Start Web Harness"
+        "title": "%dsh.command.start%"
       },
       {
         "command": "dsh.stop",
-        "title": "DSH: Stop Auto-started Harness"
+        "title": "%dsh.command.stop%"
       },
       {
         "command": "dsh.refreshStatus",
-        "title": "DSH: Refresh Connection Status"
+        "title": "%dsh.command.refreshStatus%"
       },
       {
         "command": "dsh.openWebView",
-        "title": "DSH: Open Web GUI (advanced)"
+        "title": "%dsh.command.openWebView%"
       },
       {
         "command": "dsh.askSelection",
-        "title": "DSH: Ask about selection",
+        "title": "%dsh.command.askSelection%",
         "enablement": "editorHasSelection"
       },
       {
         "command": "dsh.reviewChanges",
-        "title": "DSH: Review Agent Changes"
+        "title": "%dsh.command.reviewChanges%"
       }
     ],
     "menus": {
@@ -122,22 +122,22 @@
         "dshVsc.url": {
           "type": "string",
           "default": "http://127.0.0.1:3080",
-          "description": "Base URL of the DSH harness this extension talks to. Default 3080 = the web GUI's harness: the extension connects as a shared client and never starts or kills it. If nothing answers there, the extension auto-starts its own instance (recorded in %TEMP%\\dsh-vsc-harness.pid, stopped when VS Code exits) with the runtime overlay that bypasses dsh 0.1.7's launch-token auth. Also honors DSH_WEB_URL."
+          "description": "%dsh.config.url%"
         },
         "dshVsc.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Start `dsh web` automatically when no harness is reachable at the configured URL."
+          "description": "%dsh.config.autoStart%"
         },
         "dshVsc.followAgentEdits": {
           "type": "boolean",
           "default": true,
-          "description": "DSH 修改文件时自动在编辑器打开对应文件，并把光标定位到第一个修改行（跟随 agent 编辑：预览标签、不抢焦点，磁盘更新实时刷新）。覆盖直接写入/编辑工具与代码执行内的嵌套调用（tools.write/edit 等）；无法识别路径的 shell 命令（如 pwsh Set-Content）除外。"
+          "description": "%dsh.config.followAgentEdits%"
         },
         "dshVsc.autoFixWorkspaceAcl": {
           "type": "boolean",
           "default": true,
-          "description": "打开或切换工作区时，自动修复 DSH workspace-write 沙箱所需的目录权限（授予当前用户完全控制）；无法自动修复时提示以管理员身份修复一次。关闭后沙箱在权限不完整的工作区（如从其他电脑拷贝的文件夹）中会启动失败。"
+          "description": "%dsh.config.autoFixWorkspaceAcl%"
         }
       }
     }

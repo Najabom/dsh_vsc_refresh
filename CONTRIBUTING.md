@@ -45,4 +45,4 @@ node scratch/auto-test.mjs <sessionId> <turnNo>
 
 ## Code of conduct / issues
 
-Keep it kind and specific. If you found a crash or a misleading behavior, include the extension log output ("DSH Bridge" Output channel) and steps to reproduce. See the project [issues](https://github.com/zhibailu/dsh-vsc/issues).
+Keep it kind and specific. If you found a crash or a misleading behavior, include the extension log output ("DSH Bridge" Output channel) and steps to reproduce. See the project [issues](https://github.com/Najabom/dsh_vsc_refresh/issues).

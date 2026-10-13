@@ -1,12 +1,12 @@
 # DSH Bridge (dsh-vsc)
 
-> DSH Bridge is a VS Code extension that connects to DeepSeek Harness (DSH) — a local AI agent service — as a **protocol client**. It provides a native sidebar panel plus an editor bridge (ask-about-selection, review-agent-changes) without rewriting DSH or starting a second server. It is a "pure bridge": it consumes DSH's wire contract, not its UI, so it stays robust when DSH updates. Includes a small in-memory runtime patch (overlay) with SHA-256 verification and canary anchors for the few capabilities the protocol does not expose.
+> DSH Bridge is a VS Code extension (community fork of zhibailu/dsh-vsc, maintained by Najabom) that connects to DeepSeek Harness (DSH) — a local AI agent service (default http://127.0.0.1:3080) — as a **protocol client**: a native sidebar panel plus an editor bridge, without rewriting DSH and without starting a second server (one shared history with the web GUI). It supports the new DSH protocol (0.1.7-rc.2+ through 0.2.0-rc.2): typert RPC gateway, multiplexed event socket (`/api/remote.mux`), waterfall approvals & questions, paginated history, per-session projections. It ships an update center (activation checks, interface preflight via release-notes scan + static package check, one-click update with rollback), Windows sandbox workspace-ACL auto-repair, follow-agent-edits (including nested PTC dispatches), and workspace-aware sessions. Includes a single in-memory runtime overlay delta — a local-request bypass of DSH's browser-token auth — guarded by SHA-256 verification and canary anchors.
 
 ## Docs
 
-- [README.md](README.md): Project overview, features, installation, quick start, architecture, configuration, boundaries. (English)
+- [README.md](README.md): Project overview, features, requirements, installation, architecture summary, configuration, boundaries. (English)
 - [README.zh.md](README.zh.md): 中文版项目说明。
-- [docs/design.md](docs/design.md): Deep architecture & "pure bridge" philosophy — written from zero domain knowledge, with a 90-second explainer and Q&A for skeptics.
+- [docs/design.md](docs/design.md): Deep architecture & "pure bridge" philosophy (rewritten for v1.0.0) — the new protocol in plain words, overlay rationale, and the updater/sandbox/follow-edit mechanisms.
 - [src/README.md](src/README.md): Source tree map — what lives in `src/editor`, `src/events`, `src/harness`, `src/panel`.
 - [src/harness/README.md](src/harness/README.md): Harness client / discovery / launcher notes.
 - [src/harness/overlay/README.md](src/harness/overlay/README.md): The in-memory runtime overlay (the one deliberate crossing).
@@ -14,13 +14,17 @@
 
 ## Key source files
 
-- [src/harness/client.ts](src/harness/client.ts): ~200-line minimal protocol client (no DSH internals).
+- [src/harness/client.ts](src/harness/client.ts): <300-line minimal protocol client (no DSH internals).
 - [src/harness/protocol.ts](src/harness/protocol.ts): Wire-contract types & endpoint names (single source of truth).
 - [src/panel/protocol.ts](src/panel/protocol.ts): Panel message protocol — events forwarded losslessly.
-- [src/harness/overlay/deltas.ts](src/harness/overlay/deltas.ts): The 4 overlay deltas (source of truth).
+- [src/harness/overlay/deltas.ts](src/harness/overlay/deltas.ts): The single overlay delta (browser-auth bypass; source of truth).
 - [src/harness/overlay/loader.ts](src/harness/overlay/loader.ts): ESM in-memory loader (swap source, log, degrade).
 - [src/harness/overlay/pristine.ts](src/harness/overlay/pristine.ts): Official SHA-256 table + integrity self-check.
-- [src/harness/launcher.ts](src/harness/launcher.ts): Start DSH (NODE_OPTIONS injection, PID record).
-- [src/extension.ts](src/extension.ts): Activation/shutdown logic (reference-counted harness stop).
+- [src/harness/launcher.ts](src/harness/launcher.ts): Start DSH windowless (overlay injection, PID record).
+- [src/harness/updater.ts](src/harness/updater.ts): Update check / install / version compare.
+- [src/harness/updatePreflight.ts](src/harness/updatePreflight.ts): Interface preflight (release-notes scan + static package check).
+- [src/harness/workspaceAcl.ts](src/harness/workspaceAcl.ts): Windows sandbox workspace-ACL auto-repair.
+- [src/editor/followEdits.ts](src/editor/followEdits.ts): Follow agent edits (open + first-changed-line cursor).
+- [src/extension.ts](src/extension.ts): Activation/shutdown logic (deterministic owned-instance stop).
 - [src/panel/NativePanelProvider.ts](src/panel/NativePanelProvider.ts): The native sidebar panel provider.
 - [src/panel/native/panel.html](src/panel/native/panel.html): The hand-built panel UI.

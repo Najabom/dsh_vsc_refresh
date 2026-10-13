@@ -287,12 +287,10 @@
   #input-status { font-size: 13px; color: var(--muted); min-height: 19px; margin-bottom: 4px;
                   display: flex; flex-wrap: wrap; align-items: center; line-height: 19px;
                   max-height: 80px; overflow-y: auto; }
-  /* Items wrap as whole units (item = one stat chip), never mid-text; while a turn
-     runs the live-progress chips break to their own row above the summary row
-     (see .st-brk); 4 rows max, then scroll. */
+  /* Items wrap as whole units (item = one stat chip), never mid-text;
+     4 rows max, then scroll. */
   #input-status .st-i { flex: none; white-space: nowrap; }
   #input-status .st-i + .st-i { margin-left: 10px; }
-  #input-status .st-brk { flex-basis: 100%; height: 0; }
   #input-row { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
   #input-row[hidden] { display: none; } /* explicit display wins over [hidden]'s default; re-assert it */
   #input { flex: none; resize: none; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
@@ -502,7 +500,7 @@
       <ul id="todo-list" hidden></ul>
     </section>
     <section id="ask-card" hidden>
-      <div class="ask-head">✎ Ask DSH <button class="ask-close" id="ask-close" title="关闭">✕</button></div>
+      <div class="ask-head">✎ 询问 DSH <button class="ask-close" id="ask-close" title="关闭">✕</button></div>
       <div class="ask-ctx" id="ask-ctx"></div>
       <div class="ask-choices" id="ask-choices"></div>
       <div class="ask-custom-row" id="ask-custom-row" hidden>
@@ -1574,11 +1572,6 @@
     for (var i = 0; i < els.length; i++) {
       var st = parseFloat(els[i].getAttribute("data-start") || "0");
       if (st > 0) els[i].textContent = fmtLive(now - st);
-    }
-    if (state.running && state.turnStartTime) {
-      var seg = document.getElementById("live-status");
-      var sst = seg ? parseFloat(seg.getAttribute("data-start") || "0") : 0;
-      if (seg && sst > 0) seg.textContent = fmtLive(now - sst);
     }
   }
   setInterval(tickLive, 250);
@@ -3281,36 +3274,19 @@
       }
       groups.push("输入 " + fmtTok(billed) + " tok · 输出 " + fmtTok(u.outputTokens || 0) + " tok");
     }
-    var livePre = "", liveSpeed = "";
-    if (state.running) {
-      var live = [];
-      // Live task clock (the value that will stay in history as 总计时) plus
-      // the running turn's accumulated "+N-M" — both tick/jump without a full
-      // rebuild via tickLive().
-      var ts = state.turnStartTime ? Math.max(0, Date.now() - state.turnStartTime) : 0;
-      live.push("<span id='live-status' data-start='" + (state.turnStartTime || 0) + "'>" + fmtLive(ts) + "</span>");
-      var td = turnDiffLive();
-      if (td) live.push(diffChipHtml(td));
-      if (state.firstTokenTime) {
-        // Both stamps are durable event times, so the first-token figure stays
-        // truthful across history replays instead of collapsing to 0.0s.
-        var ttft = Math.max(0, state.firstTokenTime - state.turnStartTime) / 1000;
-        live.push("首 token " + ttft.toFixed(1) + "s");
-        var elapsed = (Date.now() - state.firstTokenTime) / 1000;
-        if (elapsed > 0.3 && state.turnOutput > 0) liveSpeed = fmtTps(state.turnOutput / elapsed) + " tok/s";
-      }
-      livePre = live.join(" · ");
+    var liveSpeed = "";
+    if (state.running && state.firstTokenTime) {
+      var elapsed = (Date.now() - state.firstTokenTime) / 1000;
+      if (elapsed > 0.3 && state.turnOutput > 0) liveSpeed = fmtTps(state.turnOutput / elapsed) + " tok/s";
     }
-    var parts = [];
-    if (livePre) parts.push("<span class='st-i'>" + livePre + "</span>");
-    // The context-usage ring heads the summary row (never alone on its own
-    // line); the row breaks after the live-progress line while a turn runs.
+    // Single summary row: the context-usage ring heads it, live speed and the
+    // session stats follow. The live clock / first-token figures stay off this
+    // row on purpose — per-turn summaries carry the final numbers.
     var tail = [];
     if (ring) tail.push("<span class='st-i'>" + ring + "</span>");
     if (liveSpeed) tail.push("<span class='st-i'>" + liveSpeed + "</span>");
     groups.forEach(function (g) { tail.push("<span class='st-i'>" + esc(g) + "</span>"); });
-    if (tail.length && parts.length) parts.push("<span class='st-brk' aria-hidden='true'></span>");
-    statusEl.innerHTML = parts.join("") + tail.join("");
+    statusEl.innerHTML = tail.join("");
   }
 
   /* ---------- input ---------- */

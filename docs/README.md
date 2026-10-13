@@ -8,7 +8,7 @@
 
 ## 放这里 ✅
 
-- `screenshots/` — README 引用的截图（sidebar.png / chat.png / ask-menu.png）
+- `screenshots/` — README 引用的截图（7 张 v1.0.0 实拍；清单与拍摄规范见 `screenshots/README.md`）
 - `design.md` — 架构与设计说明（为什么「纯桥接」、如何保持稳定、对外讲述用）
 - 用户指南、FAQ、配置说明等面向使用者的文档
 
