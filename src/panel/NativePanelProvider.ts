@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
 import type { ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionSummary } from "../harness/protocol";
 import type { WaterfallFrame, WorkspaceState } from "../events/eventStream";
-import type { HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, WebviewMessage } from "./protocol";
+import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
 import { INTENT_CHOICES, sendAsk } from "../editor/askSelection";
 import { deleteSessionStorage } from "../harness/storage";
@@ -167,6 +167,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
    *  only the current value in 0.1.7). */
   private permissionOptions: { value: string; name?: string }[] = [];
   private currentPermission: string | undefined;
+  /** Our plan-mode variant per session + the preset a hard switch locked down
+   *  (restored when plan mode ends — only while still read-only). */
+  private planVariants = new Map<string, { variant: "soft" | "hard"; restorePermission?: string }>();
+  /** Latest account-balance snapshot (account/getBalance) for the panel chip. */
+  private lastBalance: AccountBalanceView | null = null;
+  /** Last balance fetch time — turn/end refreshes are throttled. */
+  private lastBalanceAt = 0;
   /** mux clientId of the $events stream — required by $events/result. */
   private eventClientId = "";
   /** Pending waterfall requests: eventId → sessionId. */
@@ -191,6 +198,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = html;
     webviewView.onDidDispose(() => {
       if (this.view === webviewView) this.view = undefined;
+    });
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) return;
+      // Re-showing the sidebar refreshes the balance instead of leaving
+      // whatever the chip displayed when it was last hidden.
+      this.post({ type: "balance", value: this.lastBalance });
+      void this.refreshBalance(true);
     });
     if (this.wired) {
       // Webview views can be revived after being hidden: the provider instance
@@ -239,6 +253,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
     void this.refresh();
     void this.loadPermissionCatalog();
+    if (client) {
+      // The panel may have loaded before the harness came up (its "ready" ran
+      // with no client): seed the chip and fetch so the balance is fresh the
+      // moment the panel works, not at some later turn end.
+      this.post({ type: "balance", value: this.lastBalance });
+      void this.refreshBalance(true);
+    }
   }
 
   /** Loading-phase hint from the extension (searching / starting). */
@@ -287,6 +308,12 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (key === "modelSelection") {
       this.noteModelSelection(sessionId, value);
       if (sessionId === this.activeSessionId) void this.postModels();
+      return;
+    }
+    if (key === "plan") {
+      // Runs BEFORE the active-session guard: the hard-variant permission
+      // restore must fire even when the panel is showing another session.
+      this.handlePlanProjection(sessionId, value);
       return;
     }
     if (sessionId !== this.activeSessionId) return;
@@ -520,13 +547,15 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       // authoritative once it has spoken.
       for (const item of items) {
         const perms = item.projections?.values?.permissions;
-        if (perms === undefined) continue;
+        const plan = item.projections?.values?.plan;
+        if (perms === undefined && plan === undefined) continue;
         let values = this.projections.get(item.sessionId);
         if (!values) {
           values = new Map<string, unknown>();
           this.projections.set(item.sessionId, values);
         }
-        if (!values.has("permissions")) values.set("permissions", perms);
+        if (perms !== undefined && !values.has("permissions")) values.set("permissions", perms);
+        if (plan !== undefined && !values.has("plan")) values.set("plan", plan);
       }
       // Mirror the official client's session visibility contract
       // (dsh-client-ui-workspace `sessionVisible`): subagent children carry
@@ -572,6 +601,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         await this.postModels();
         await this.postCommands();
         this.postPermissions();
+        this.postPlanMode();
       }
     } catch (error) {
       this.post({ type: "error", message: describeHarnessFailure("会话列表失败", error) });
@@ -614,6 +644,9 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         await this.buildFileIndex();
         // Seed the ＋ mode dropdown with the agent-preset roster.
         await this.postAgentPresets();
+        // Account balance chip: show the last snapshot instantly, then refresh.
+        this.post({ type: "balance", value: this.lastBalance });
+        void this.refreshBalance(true);
         if (this.pendingAsk) {
           const pending = this.pendingAsk;
           this.pendingAsk = null;
@@ -631,6 +664,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         await this.postModels();
         await this.postCommands();
         this.postPermissions();
+        this.postPlanMode();
         // An unanswered approval/question can outlive a session switch: the
         // panel clears cards on switch, so re-post this session's pending
         // waterfall or the agent stays blocked with no visible card.
@@ -855,8 +889,21 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         try {
           await this.client.answerEvent(this.eventClientId, message.rpcId, {
             kind: "result",
-            value: { answers: message.answers },
+            value: { answers: message.answers ?? [] },
           });
+          // Plan review answered with the approve label: mirror the plan
+          // menu's optimistic flip so the button shows the queued "pending"
+          // state until the projection lands (otherwise it snaps straight
+          // from active to off with no transition).
+          const entry = this.pendingWaterfalls.get(message.rpcId);
+          if (entry && entry.message.type === "interaction" && entry.message.kind === "question") {
+            const review = entry.message.questions.find((q) => q.intent && q.intent.kind === "plan-review");
+            const approveLabel = review?.intent?.approve;
+            if (review && approveLabel && (message.answers ?? []).some((a) => a.id === review.id && a.selected.includes(approveLabel))) {
+              this.rememberPlan(message.sessionId, false, true, null);
+              this.postPlanMode();
+            }
+          }
           this.pendingWaterfalls.delete(message.rpcId);
           this.post({ type: "interactionSettled", sessionId: message.sessionId, rpcId: message.rpcId });
         } catch (error) {
@@ -890,6 +937,43 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           }
         } catch (error) {
           this.post({ type: "error", message: describeHarnessFailure("切换权限失败", error) });
+        }
+        break;
+      }
+      case "planMode": {
+        if (!this.activeSessionId || !this.client) break;
+        const sessionId = this.activeSessionId;
+        try {
+          if (message.action === "off") {
+            const outcome = await this.client.commandExecute(sessionId, "/plan off");
+            if (!outcome || !outcome.result || outcome.result.kind === "error") {
+              const detail = outcome?.result?.text ? `：${outcome.result.text}` : "";
+              this.post({ type: "error", message: `退出计划模式失败${detail}` });
+            } else {
+              this.log(`plan switch: off on ${sessionId}`);
+              this.rememberPlan(sessionId, false, true, null); // queued: flips next step
+            }
+          } else {
+            // Both variants run the official /plan command; HARD additionally
+            // locks the preset to read-only until plan mode ends (restored in
+            // handlePlanProjection when the plan projection reports off).
+            const outcome = await this.client.commandExecute(sessionId, "/plan");
+            if (!outcome || !outcome.result || outcome.result.kind === "error") {
+              const detail = outcome?.result?.text ? `：${outcome.result.text}` : "";
+              this.post({ type: "error", message: `切换计划模式失败${detail}` });
+            } else {
+              this.log(`plan switch: ${message.action} on ${sessionId}`);
+              this.rememberPlan(sessionId, true, true, message.action === "hard" ? "hard" : "soft");
+              if (message.action === "hard") {
+                const lock = await this.client.commandExecute(sessionId, "/permission read-only");
+                if (lock && lock.result && lock.result.kind !== "error") this.rememberPermission(sessionId, "read-only");
+              }
+            }
+          }
+          this.postPlanMode();
+          this.postPermissions();
+        } catch (error) {
+          this.post({ type: "error", message: describeHarnessFailure("切换计划模式失败", error) });
         }
         break;
       }
@@ -1097,6 +1181,86 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     values.set("permissions", { currentValue: current });
   }
 
+  /** `plan` projection push (~stateVersion 3 view {active, pending}): reflect
+   *  the toggle and run the hard-variant permission restore on the
+   *  active→false edge (approve / exit — every path funnels through here). */
+  private handlePlanProjection(sessionId: string, value: unknown): void {
+    const view = (value ?? undefined) as { active?: boolean; pending?: boolean } | null | undefined;
+    const active = view?.active === true;
+    const pending = view?.pending === true;
+    const meta = this.planVariants.get(sessionId);
+    if (meta && !active && !pending) {
+      const restore = meta.restorePermission;
+      if (meta.variant === "hard" && restore && this.currentPermission === "read-only") {
+        // Never clobber a preset the user changed meanwhile: restore only
+        // while the session is still under the lock we applied.
+        void this.client
+          ?.commandExecute(sessionId, `/permission ${restore}`)
+          .then(() => {
+            this.rememberPermission(sessionId, restore);
+            if (sessionId === this.activeSessionId) void this.postPermissions();
+          })
+          .catch((error) => this.log(`plan restore permission: ${(error as Error).message}`));
+      }
+      this.planVariants.delete(sessionId);
+    }
+    if (sessionId !== this.activeSessionId) return;
+    this.log(`plan projection: ${sessionId.slice(0, 18)} -> ${active ? "on" : "off"}${pending ? " (pending)" : ""}`);
+    this.postPlanMode();
+  }
+
+  /** Optimistic echo of a confirmed /plan switch: writes the cached view and
+   *  records which variant owns the session (hard also pins its restore). */
+  private rememberPlan(sessionId: string, active: boolean, pending: boolean, variant: "soft" | "hard" | null): void {
+    let values = this.projections.get(sessionId);
+    if (!values) {
+      values = new Map<string, unknown>();
+      this.projections.set(sessionId, values);
+    }
+    values.set("plan", { active, pending });
+    if (variant === "hard") {
+      this.planVariants.set(sessionId, { variant: "hard", restorePermission: this.currentPermission });
+    } else if (variant === "soft") {
+      const prev = this.planVariants.get(sessionId);
+      this.planVariants.set(sessionId, { variant: "soft", restorePermission: prev?.restorePermission });
+    }
+  }
+
+  /** Push the active session's plan view (button state: off/on + pending). */
+  private postPlanMode(): void {
+    const cached = (this.activeSessionId
+      ? this.projections.get(this.activeSessionId)?.get("plan")
+      : undefined) as { active?: boolean; pending?: boolean } | null | undefined;
+    const active = cached?.active === true;
+    const pending = cached?.pending === true;
+    const meta = this.activeSessionId ? this.planVariants.get(this.activeSessionId) : undefined;
+    const variant = active || pending ? meta?.variant ?? "soft" : null;
+    this.post({ type: "planMode", active, pending, variant });
+  }
+
+  /**
+   * Pull the account balance (account/getBalance) and push it to the panel
+   * chip. Throttled unless forced: turn ends are frequent and the balance
+   * moves slowly. Failures only log — the chip keeps its last snapshot.
+   */
+  private async refreshBalance(force = false): Promise<void> {
+    if (!this.client) return;
+    const now = Date.now();
+    if (!force && now - this.lastBalanceAt < 10000) return;
+    this.lastBalanceAt = now;
+    try {
+      const raw = await this.client.getAccountBalance(this.context.extension.packageJSON.version as string, "zh-CN");
+      const view: AccountBalanceView | null =
+        raw && Array.isArray(raw.value)
+          ? { status: raw.status, wallets: raw.value, bonusWallets: raw.bonusWallets ?? [] }
+          : null;
+      this.lastBalance = view;
+      this.post({ type: "balance", value: view });
+    } catch (error) {
+      this.log(`balance: ${(error as Error).message}`);
+    }
+  }
+
   /** Seed panel state from the control-plane projection cache of a session. */
   private applyCachedProjections(sessionId: string): void {
     const values = this.projections.get(sessionId);
@@ -1107,6 +1271,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     this.noteModelSelection(sessionId, values?.get("modelSelection"));
     this.post({ type: "todos", sessionId, items: this.todos });
     this.postPermissions();
+    this.postPlanMode();
     this.postQueue(sessionId, values?.get("inbox"));
   }
 
@@ -1132,6 +1297,9 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "running", sessionId, running: true });
     } else if (event.type === "turn/end") {
       this.post({ type: "running", sessionId, running: false });
+      // A finished turn is the moment tokens were billed: refresh the balance
+      // chip (throttled inside; covers background sessions too).
+      void this.refreshBalance();
     } else if (event.type === "session/title") {
       const title = (event.data as { title?: string } | undefined)?.title;
       if (typeof title === "string") {

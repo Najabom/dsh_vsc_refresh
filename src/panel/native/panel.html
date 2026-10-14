@@ -345,6 +345,8 @@
   .t-item.in_progress .ttext { color: var(--fg); }
   .t-item .ttext { flex: 1; word-wrap: break-word; }
   .todo-empty { color: var(--muted); font-size: 11px; padding: 2px 0; }
+  /* transcript task-list card body (todo/write snapshots) */
+  .todo-tlist { list-style: none; margin: 0; padding: 2px 6px 4px; }
 
   /* ask card — in-panel "ask about selection" (sits just above the input row) */
   #ask-card { padding: 6px 8px; background: rgba(128,128,128,.06); border-top: 1px solid var(--border); }
@@ -393,6 +395,9 @@
   .in-q .in-qheader { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px;
                       margin-bottom: 2px; }
   .in-q .in-qdetail { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin-bottom: 6px; }
+  /* plan-review detail: rendered markdown (renderMd), scrollable */
+  .in-q .in-qdetail.in-plan { font-size: 12px; color: var(--fg); white-space: normal;
+                              max-height: 46vh; overflow-y: auto; }
   /* Options stack vertically — one option per full-width row; label + badge on
      one line, description under it. Single-select shows a number chip, multi a
      checkbox (mirrors the web question composer). */
@@ -449,6 +454,7 @@
     border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
     max-height: 264px; overflow-y: auto; font-size: 12px; min-width: 168px; }
   #perm-menu { left: 6px; bottom: 44px; }
+  #plan-menu { bottom: 44px; }
   #model-menu { bottom: 44px; }
   #effort-menu { bottom: 44px; }
   .combo-popup .cp-title { padding: 4px 10px; color: var(--muted); font-size: 11px;
@@ -466,12 +472,21 @@
   #settings-btn { flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 2px;
                   background: transparent; color: var(--fg); cursor: pointer; font-size: 13px; line-height: 1; }
   #settings-btn:hover { background: var(--input-bg); }
-  #perm-btn, #model-btn, #effort-btn { flex: none; border: 1px solid var(--border); border-radius: 3px;
+  #perm-btn, #plan-btn, #model-btn, #effort-btn { flex: none; border: 1px solid var(--border); border-radius: 3px;
                           background: var(--input-bg); color: var(--fg); cursor: pointer;
                           font-size: 11px; height: 28px; padding: 0 8px; max-width: 128px;
                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #perm-btn:hover, #model-btn:hover, #effort-btn:hover { border-color: var(--accent); }
+  #perm-btn:hover, #plan-btn:hover, #model-btn:hover, #effort-btn:hover { border-color: var(--accent); }
   #perm-btn { color: var(--vscode-textLink-foreground, #3794ff); }
+  /* Account balance (deepseek-account wallet) — read-only text, slightly
+     bold, muted, tabular figures; no button chrome, no interaction. */
+  #balance-chip { flex: none; color: var(--muted); font-size: 12px; font-weight: 600;
+                  font-variant-numeric: tabular-nums; padding: 0 4px;
+                  white-space: nowrap; }
+  /* Plan-mode toggle (right of the permission chip). Active = blue like the
+     permission chip; pend = a queued switch, landing on the next step. */
+  #plan-btn.on { color: var(--vscode-textLink-foreground, #3794ff); }
+  #plan-btn.pend { opacity: .65; border-style: dashed; }
 </style>
 </head>
 <body>
@@ -513,6 +528,8 @@
       <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；Ctrl+V 粘图片）"></textarea>
       <div id="composer-btns">
         <button id="perm-btn" title="权限预设" hidden></button>
+        <button id="plan-btn" title="计划模式" hidden></button>
+        <span id="balance-chip" title="账户余额" hidden></span>
         <div class="in-spacer"></div>
         <button id="model-btn" title="模型" hidden></button>
         <button id="effort-btn" title="推理等级" hidden></button>
@@ -521,6 +538,7 @@
       </div>
     </div>
     <div id="perm-menu" class="combo-popup" hidden></div>
+    <div id="plan-menu" class="combo-popup" hidden></div>
     <div id="model-menu" class="combo-popup" hidden></div>
     <div id="effort-menu" class="combo-popup" hidden></div>
     <div id="input-status"></div>
@@ -535,8 +553,10 @@
       wsLineEl = $("ws-line"), wsPathEl = $("ws-path"),
       attachEl = $("attach-row"), queueEl = $("queue-row"),
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
-      permBtnEl = $("perm-btn"), modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
-      permMenuEl = $("perm-menu"), modelMenuEl = $("model-menu"), effortMenuEl = $("effort-menu"),
+      permBtnEl = $("perm-btn"), planBtnEl = $("plan-btn"), balanceChipEl = $("balance-chip"),
+      modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
+      permMenuEl = $("perm-menu"), planMenuEl = $("plan-menu"),
+      modelMenuEl = $("model-menu"), effortMenuEl = $("effort-menu"),
       todoBarEl = $("todo-bar"), todoToggleEl = $("todo-toggle"), todoListEl = $("todo-list"),
       todoCountEl = $("todo-count"), todoChevronEl = $("todo-chevron"),
       askCardEl = $("ask-card"), askCtxEl = $("ask-ctx"), askChoicesEl = $("ask-choices"),
@@ -558,6 +578,8 @@
     models: null,            // { current: {provider, model}, groups: [...] }
     presets: [],             // permission presets (projections.permissions): [{value,label}]
     permCurrent: "",         // active session's current permission value
+    planMode: null,          // {active, pending, variant} | null until the host reports plan
+    balance: null,           // account balance view {status,wallets,bonusWallets} | null
     modes: [],               // agent presets for the ＋ mode picker: [{id,name,description,isDefault}]
     interact: null,          // pending interaction card {rpcId, kind, ...} | null
     usage: null,             // active session tokenUsage projection
@@ -834,6 +856,15 @@
         }
         break;
       }
+      case "todo/write": {
+        // Durable task-list snapshots (dsh-tool-todo emits todo/write). The
+        // bottom task bar is per-turn by design (resets every turn/start), so
+        // without a transcript record an interrupted list becomes invisible
+        // forever — record each snapshot as a card in the conversation.
+        state.items.push({ kind: "todo", todos: Array.isArray(d.todos) ? d.todos : [],
+                           turn: typeof d.turn === "number" ? d.turn : state.lastTurn });
+        break;
+      }
       case "turn/end": {
         finalizeStream();
         state.activeRound = null;
@@ -974,6 +1005,13 @@
           if (t === curTool) curTool = null;
           break;
         }
+        case "todo/write":
+          // Transcript task-list card (same shape as the live path).
+          if (Array.isArray(d.todos)) {
+            out.push({ kind: "todo", todos: d.todos,
+                       turn: typeof d.turn === "number" ? d.turn : histTurn });
+          }
+          break;
       }
     });
     return out;
@@ -1872,6 +1910,45 @@
         el.appendChild(det);
         break;
       }
+      case "todo": {
+        // Task-list snapshot card (todo/write): collapsed by default, summary
+        // carries the progress counts; expands to the full checklist.
+        var tdet = document.createElement("details");
+        tdet.className = "tool t-todo";
+        var tsum2 = document.createElement("summary");
+        var tdot2 = document.createElement("span");
+        tdot2.className = "dot ok";
+        var tname2 = document.createElement("span");
+        tname2.className = "tname";
+        var tlist = item.todos || [];
+        var tdone = 0, tact = 0;
+        tlist.forEach(function (t) {
+          if (t.status === "completed") tdone++;
+          else if (t.status === "in_progress") tact++;
+        });
+        tname2.textContent = "☑ 任务清单 : " + (tact ? tact + " 进行中 · " : "") + tdone + "/" + tlist.length;
+        tsum2.appendChild(tdot2);
+        tsum2.appendChild(tname2);
+        tdet.appendChild(tsum2);
+        var tul = document.createElement("ul");
+        tul.className = "todo-tlist";
+        tlist.forEach(function (t) {
+          var tli = document.createElement("li");
+          tli.className = "t-item " + t.status;
+          var tmk = document.createElement("span");
+          tmk.className = "tmark";
+          tmk.textContent = TODO_MARK[t.status] || "○";
+          var ttx = document.createElement("span");
+          ttx.className = "ttext";
+          ttx.textContent = t.content;
+          tli.appendChild(tmk);
+          tli.appendChild(ttx);
+          tul.appendChild(tli);
+        });
+        tdet.appendChild(tul);
+        el.appendChild(tdet);
+        break;
+      }
       case "cmd": {
         el.className = item.err ? "sys-err" : "cmd-note";
         el.textContent = item.text;
@@ -2051,6 +2128,7 @@
           }
           state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
           state.turnModels = {};
+          state.planMode = null; renderPlanButton(); // host re-pushes for the new session
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; renderQueue();
@@ -2110,6 +2188,16 @@
         state.presets = msg.options || [];
         state.permCurrent = msg.current;
         renderPermButton();
+        break;
+      }
+      case "planMode": {
+        state.planMode = { active: msg.active === true, pending: msg.pending === true, variant: msg.variant || null };
+        renderPlanButton();
+        break;
+      }
+      case "balance": {
+        state.balance = msg.value || null;
+        renderBalance();
         break;
       }
       case "agentPresets": {
@@ -2773,6 +2861,94 @@
     });
   }
 
+  /* ---------- plan mode (right of the permission chip) ----------
+     DSH ships plan mode natively (`/plan` + `plan` projection +
+     exit_plan_mode review). The button reflects the logged {active, pending}
+     view; the menu picks between the official SOFT variant (guidance only)
+     and a HARD variant that also locks the session to read-only and restores
+     the previous preset when plan mode ends. */
+  function renderPlanButton() {
+    var pm = state.planMode;
+    if (!pm) {
+      planBtnEl.hidden = true; planBtnEl.textContent = "";
+      planBtnEl.classList.remove("on", "pend");
+      return;
+    }
+    var label = "计划";
+    if (pm.active) label = pm.variant === "hard" ? "计划·只读" : "计划·引导";
+    planBtnEl.textContent = label;
+    planBtnEl.classList.toggle("on", !!pm.active);
+    planBtnEl.classList.toggle("pend", !!pm.pending);
+    planBtnEl.title = "计划模式：先探索并提交计划，评审批准后才执行（/plan）" +
+      (pm.pending ? "。切换将在下一步生效" : "");
+    planBtnEl.hidden = false;
+    if (!planMenuEl.hidden) renderPlanMenu();
+  }
+
+  function renderPlanMenu() {
+    planMenuEl.innerHTML = "";
+    var pm = state.planMode || { active: false, pending: false, variant: null };
+    var title = document.createElement("div");
+    title.className = "cp-title";
+    title.textContent = "计划模式";
+    planMenuEl.appendChild(title);
+    function addRow(label, desc, selected, action) {
+      var row = document.createElement("div");
+      row.className = "cp-row" + (selected ? " sel" : "");
+      var main = document.createElement("span");
+      main.textContent = label;
+      row.appendChild(main);
+      if (desc) {
+        var sub = document.createElement("span");
+        sub.className = "cp-sub";
+        sub.textContent = desc;
+        row.appendChild(sub);
+      }
+      row.addEventListener("click", function () {
+        planMenuEl.hidden = true;
+        post({ type: "planMode", action: action });
+      });
+      planMenuEl.appendChild(row);
+    }
+    addRow("计划模式（软引导）", "先规划 · 无硬限制", pm.active && pm.variant !== "hard", "soft");
+    addRow("计划模式 + 强制只读", "权限锁为仅可查看", pm.active && pm.variant === "hard", "hard");
+    if (pm.active) addRow(pm.pending ? "退出计划模式（切换中…）" : "退出计划模式", "恢复默认执行", false, "off");
+  }
+
+  /* ---------- account balance chip (right of the plan button) ---------- */
+  /** Amount display: round DOWN to 2 decimals + thousands separators — the
+   *  official account UI's BigDecimal.roundDown formatting, mirrored. */
+  function fmtMoney(s) {
+    var n = Number(s);
+    if (!isFinite(n)) return String(s == null ? "" : s);
+    var cents = Math.floor(Math.abs(n) * 100 + 1e-6);
+    var whole = String(Math.floor(cents / 100));
+    var frac = String(cents % 100);
+    if (frac.length < 2) frac = "0" + frac;
+    return (n < 0 ? "-" : "") + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + frac;
+  }
+  var CURRENCY_SIGN = { CNY: "¥", USD: "$" };
+  function renderBalance() {
+    var b = state.balance;
+    var wallets = b && Array.isArray(b.wallets) ? b.wallets : [];
+    var main = null;
+    for (var bi = 0; bi < wallets.length; bi++) {
+      if (wallets[bi].currency === "CNY") { main = wallets[bi]; break; }
+    }
+    if (!main && wallets.length) main = wallets[0];
+    if (!main) { balanceChipEl.hidden = true; balanceChipEl.textContent = ""; return; }
+    var sign = CURRENCY_SIGN[main.currency] || main.currency + " ";
+    balanceChipEl.textContent = sign + fmtMoney(main.balance);
+    var bonusText = "";
+    (b.bonusWallets || []).forEach(function (w) {
+      if (w.currency === main.currency && Number(w.balance) > 0) {
+        bonusText = "（含赠金 " + (CURRENCY_SIGN[w.currency] || w.currency + " ") + fmtMoney(w.balance) + "）";
+      }
+    });
+    balanceChipEl.title = "账户余额：" + sign + fmtMoney(main.balance) + bonusText;
+    balanceChipEl.hidden = false;
+  }
+
   function renderModelButton() {
     var cur = state.models && state.models.current;
     var groups = (state.models && state.models.groups) || [];
@@ -3021,8 +3197,11 @@
     });
     var cancelBtn2 = $("in-cancel");
     if (cancelBtn2) cancelBtn2.addEventListener("click", function () {
-      state.interact = null; interactEl.hidden = true; interactState = null;
-      unlockMainInput();
+      // Dismissal = a COMPLETED batch of skipped answers (empty selected), the
+      // official skip semantics. A waterfall rejection (ASK_CANCELLED) reads
+      // to the model as a failed tool call, so it believes the question never
+      // reached the user and asks the whole thing again.
+      answerInteraction({ submit: true, skipAll: true });
     });
     // If this is a question, render the (paginated) question set now.
     if (msg.kind === "question") {
@@ -3061,10 +3240,17 @@
         '<div class="in-qhead"><div class="in-qtext">' + (pages > 1 ? '[' + (qi + 1) + '] ' : '') + esc(q.question) + '</div>' +
         '<button class="in-skip" data-qi="' + qi + '" title="跳过此题">' + (skipped ? "取消跳过" : "跳过") + '</button></div>' +
         (q.header ? '<div class="in-qheader">' + esc(q.header) + '</div>' : "") +
-        (q.detail ? '<div class="in-qdetail">' + esc(q.detail) + '</div>' : "") +
+        (q.detail ? (q.intent && q.intent.kind === "plan-review"
+          ? '<div class="in-qdetail in-plan">' + renderMd(q.detail) + '</div>'
+          : '<div class="in-qdetail">' + esc(q.detail) + '</div>') : "") +
         '<div class="in-opts">' +
         (q.options || []).map(function (o, oi) {
           var disp = parseRecommendedLabel(o.label);
+          if (q.intent && q.intent.kind === "plan-review") {
+            // Localized display only; submit still sends the original label
+            // (the harness compares against the exact "Approve" string).
+            disp = { label: o.label === q.intent.approve ? "批准并退出计划模式" : "继续规划", recommended: disp.recommended };
+          }
           var chip = q.multiSelect ? '<span class="in-check">✓</span>' : '<span class="in-num">' + (oi + 1) + '</span>';
           return '<button class="in-opt' + (interactState.selections[qi] && interactState.selections[qi].has(oi) ? " sel" : "") + '" data-qi="' + qi + '" data-oi="' + oi + '">' + chip +
             '<span class="in-ocopy"><span class="in-oline">' +
@@ -3189,7 +3375,7 @@
       var qs = state.interact && state.interact.questions || [];
       qs.forEach(function (q, qi) {
         // skipped question: empty answer (web composer sends {id, selected:[]})
-        if (st.skipped && st.skipped[qi]) {
+        if (ans.skipAll || (st.skipped && st.skipped[qi])) {
           answers.push({ id: q.id, selected: [] });
           return;
         }
@@ -3371,6 +3557,7 @@
   }
   function openMenu(menu, btn, render) {
     permMenuEl.hidden = true;
+    planMenuEl.hidden = true;
     modelMenuEl.hidden = true;
     effortMenuEl.hidden = true;
     render();
@@ -3381,6 +3568,11 @@
     ev.stopPropagation();
     if (permMenuEl.hidden) openMenu(permMenuEl, permBtnEl, renderPermMenu);
     else permMenuEl.hidden = true;
+  });
+  planBtnEl.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    if (planMenuEl.hidden) openMenu(planMenuEl, planBtnEl, renderPlanMenu);
+    else planMenuEl.hidden = true;
   });
   modelBtnEl.addEventListener("click", function (ev) {
     ev.stopPropagation();
@@ -3395,21 +3587,23 @@
   settingsBtnEl.addEventListener("click", function () { post({ type: "openSettings" }); });
   // click anywhere outside the popups closes them
   document.addEventListener("click", function (ev) {
-    if (permMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden && selMenuEl.hidden) return;
+    if (permMenuEl.hidden && planMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden && selMenuEl.hidden) return;
     var t = ev.target;
     if (t && t.closest &&
         (t.closest("#perm-menu") || t.closest("#perm-btn") ||
+         t.closest("#plan-menu") || t.closest("#plan-btn") ||
          t.closest("#model-menu") || t.closest("#model-btn") ||
          t.closest("#effort-menu") || t.closest("#effort-btn") ||
          t.closest("#session-menu") || t.closest("#session-btn"))) return;
     permMenuEl.hidden = true;
+    planMenuEl.hidden = true;
     modelMenuEl.hidden = true;
     effortMenuEl.hidden = true;
     selMenuEl.hidden = true;
   });
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape") {
-      permMenuEl.hidden = true; modelMenuEl.hidden = true; effortMenuEl.hidden = true;
+      permMenuEl.hidden = true; planMenuEl.hidden = true; modelMenuEl.hidden = true; effortMenuEl.hidden = true;
       selMenuEl.hidden = true;
     }
   });

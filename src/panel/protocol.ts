@@ -29,6 +29,20 @@ export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
 }
 
+/** One account wallet (currency + decimal-string amount). */
+export interface AccountWallet {
+  currency: string;
+  balance: string;
+}
+
+/** Account balance view for the panel (provider-normalized account/getBalance;
+ *  null when the account channel is signed out or the call failed). */
+export interface AccountBalanceView {
+  status: string;
+  wallets: AccountWallet[];
+  bonusWallets: AccountWallet[];
+}
+
 /** Host → webview messages. */
 export type HostMessage =
   | {
@@ -54,6 +68,7 @@ export type HostMessage =
   | { type: "commands"; items: { name: string; description?: string; input?: { hint?: string; images?: boolean } }[] }
   | { type: "cmdResult"; text: string; ok: boolean }
   | { type: "todos"; sessionId: string; items: TodoItem[] }
+  | { type: "balance"; value: AccountBalanceView | null }
   | { type: "toolDiff"; sessionId: string; callId: string; added: number; deleted: number; path?: string }
   | {
       type: "ask";
@@ -96,6 +111,15 @@ export type HostMessage =
       type: "permissions";
       options: { value: string; label: string }[];
       current?: string;
+    }
+  | {
+      /** Plan mode for the active session (harness `plan` projection). */
+      type: "planMode";
+      active: boolean;
+      /** A queued switch (flips on the next step). */
+      pending: boolean;
+      /** Our soft variant vs the hard read-only variant; null = plain off. */
+      variant?: "soft" | "hard" | null;
     }
   | {
       type: "agentPresets";
@@ -155,10 +179,15 @@ export type WebviewMessage =
       type: "respondQuestion";
       rpcId: string;
       sessionId: string;
-      answers: { id: string; selected: string[]; custom?: string }[];
+      /** One item per question. A dismissed card rides here too: dismissing
+       *  submits a completed batch of SKIPPED answers (empty selected), the
+       *  official skip semantics — a waterfall rejection would surface to the
+       *  model as a failed tool call and it would ask the question again. */
+      answers?: { id: string; selected: string[]; custom?: string }[];
     }
   | { type: "getPermissions" }
   | { type: "selectPermission"; permission: string }
+  | { type: "planMode"; action: "soft" | "hard" | "off" }
   | { type: "openExternal"; url: string }
   | {
       /** Lazy fetch of one logged image's bytes (harness session.attachment). */

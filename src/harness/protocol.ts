@@ -70,6 +70,7 @@ export const METHODS = {
   pluginRemoveBundle: "pluginManager/removeBundle",
   pluginListExemptions: "pluginManager/listVersionExemptions",
   pluginSetExemption: "pluginManager/setVersionExemption",
+  accountGetBalance: "account/getBalance",
   eventsResult: "$events/result",
 } as const;
 
@@ -101,6 +102,23 @@ export type QueueAction =
   | { kind: "remove" }
   | { kind: "steer" }
   | { kind: "edit"; content: { type: string; text?: string }[] };
+
+/* ---------- account ---------- */
+
+/** One wallet row of account/getBalance (decimal-string amount). */
+export interface AccountWalletWire {
+  currency: string;
+  balance: string;
+}
+
+/** account/getBalance value: the signed-in account's wallet snapshot
+ *  ({status:'ready'}); the wire union also allows null / {status:'failed'},
+ *  which callers surface as "no balance". */
+export interface AccountBalanceWire {
+  status: string;
+  value?: AccountWalletWire[];
+  bonusWallets?: AccountWalletWire[];
+}
 
 /* ---------- session/list + projection values ---------- */
 

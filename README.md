@@ -55,7 +55,7 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 - **Workspace-aware**: the harness runs in your opened folder; sessions are grouped by workspace; a workspace strip keeps you oriented; one button switches the folder.
 - **Windows sandbox friendly**: auto-repairs the directory permission the DSH sandbox needs (workspace ACL), prompting for a one-time elevated fix only when it truly cannot do it alone.
 - **Follow agent edits**: when DSH edits a file, the editor opens it and the cursor lands on the first changed line — covering direct file tools *and* nested PTC dispatches.
-- **Quality-of-life**: session hard-delete, archiving, "always allow" approvals, Chinese context menu, per-turn model label, a modern status row (context usage, live tok/s, cache stats), unified control sizing, opencode-style output coloring.
+- **Quality-of-life**: session hard-delete, archiving, "always allow" approvals, plan mode, Chinese context menu, per-turn model label, a modern status row (context usage, live tok/s, cache stats), unified control sizing, opencode-style output coloring.
 
 ## Features
 
@@ -66,7 +66,10 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 - **Approval cards** — allow once / deny / **always allow** (the third answer raises the session permission to the escalated mode, so similar operations stop asking).
 - **Question cards** — single choice (number keys), multi-select, recommended badge, custom answer with ↑↓ recall, skip.
 - **Session modes** (standard / PTC / minimal / cordis), **reasoning effort**, and **permission presets** (read-only / workspace-write / danger-full-access) — one click from the composer.
-- **Composer takeover**: the input bar locks while the agent is asking, so you can't send mid-question.
+- **Plan mode** — a plan toggle right of the permission button: *plan* (soft guidance) or *plan + lock read-only*. Entering and exiting is a session command; exiting restores the permission preset you had before. Plan-review questions render the plan as a formatted card with **Approve and exit plan mode** / **Keep planning** — the answer still travels verbatim, so DSH's own approval check stays intact.
+- **Account balance** — right of the plan toggle: the signed-in DeepSeek-account wallet as plain read-only text (CNY first, two-decimal display, slightly bold; hover for bonus detail; auto-refreshes after each turn and whenever the panel opens).
+- **Task-list records** — every `todo_write` snapshot stays in the transcript as an expandable card, so a list wiped by an interruption is never lost.
+- **Composer takeover**: the input bar locks while the agent is asking, so you can't send mid-question. Dismissing a question card submits a completed batch of skipped answers (the official skip semantics), so the agent carries on instead of thinking the question never arrived.
 - Bookkeeping messages (runtime context, model-change notices) are hidden — the transcript keeps what you and the agent actually said.
 
 **Sessions & workspaces**

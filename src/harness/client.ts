@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { METHODS, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
+import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -203,6 +203,20 @@ export class HarnessClient {
    */
   answerEvent(clientId: string, eventId: string, outcome: unknown): Promise<void> {
     return this.call<void>(METHODS.eventsResult, { clientId, eventId, outcome });
+  }
+
+  /**
+   * Account balance of the signed-in DeepSeek-account channel
+   * (account/getBalance). `client` is the request identity the official
+   * account UI sends — {version, locale, timezoneOffsetSeconds} — carried as
+   * a descriptor-named argument (NOT the `_request` wrapper). A null result
+   * means the account channel is not signed in; {status:'failed'} means the
+   * platform call itself failed (offline etc.).
+   */
+  getAccountBalance(version: string, locale: string): Promise<AccountBalanceWire | null> {
+    return this.call<AccountBalanceWire | null>(METHODS.accountGetBalance, {
+      client: { version, locale, timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 },
+    });
   }
 
   /** Patch one namespace's user layer with a partial value (settings/update).
