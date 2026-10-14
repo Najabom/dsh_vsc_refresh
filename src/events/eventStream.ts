@@ -39,16 +39,20 @@ const WORKSPACE_STREAM = "workspace";
 /**
  * M3 — WS client for the harness mux (0.1.7 /api/remote.mux). One socket
  * carries every stream: $events (host emits + waterfalls), session/control
- * (projection baseline + increments), workspace/follow (archived set), and one
- * session/follow for the session the panel is showing. Auto-reconnects with
- * backoff and re-opens every stream on (re)connect.
+ * (projection baseline + increments), workspace/follow (archived set), and a
+ * session/follow per followed session — the mux multiplexes streams, so the
+ * sidebar and the ask window can follow two different sessions at once.
+ * Auto-reconnects with backoff and re-opens every stream on (re)connect.
  */
 export class HarnessEventStream implements vscode.Disposable {
   private ws: WebSocket | null = null;
   private disposed = false;
   private retryTimer: NodeJS.Timeout | null = null;
   private retries = 0;
-  private activeSession: string | null = null;
+  /** Followed session per owner ("panel", "ask", …). */
+  private readonly follows = new Map<string, string>();
+  /** Session ids with an open follow stream right now (dedupes owners). */
+  private readonly openFollows = new Set<string>();
 
   constructor(private readonly base: string) {}
 
@@ -73,14 +77,27 @@ export class HarnessEventStream implements vscode.Disposable {
     this.connect();
   }
 
-  /** Follow another session (null = stop following). Safe before connect. */
-  setActiveSession(sessionId: string | null): void {
-    if (this.activeSession === sessionId) return;
-    const previous = this.activeSession;
-    this.activeSession = sessionId;
+  /** Follow a session on behalf of one surface (null = stop). Safe before
+   *  connect: streams open on (re)connect from the owners map. */
+  setFollow(owner: string, sessionId: string | null): void {
+    const previous = this.follows.get(owner);
+    if (previous === sessionId || (previous === undefined && sessionId === null)) return;
+    if (sessionId) this.follows.set(owner, sessionId);
+    else this.follows.delete(owner);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    if (previous) this.send({ type: "cancel", streamId: `follow:${previous}` });
-    if (sessionId) this.openFollow(sessionId);
+    if (previous && previous !== sessionId && !this.wanted(previous)) {
+      this.openFollows.delete(previous);
+      this.send({ type: "cancel", streamId: `follow:${previous}` });
+    }
+    if (sessionId && !this.openFollows.has(sessionId)) this.openFollow(sessionId);
+  }
+
+  /** True when some owner still wants this session streamed. */
+  private wanted(sessionId: string): boolean {
+    for (const id of this.follows.values()) {
+      if (id === sessionId) return true;
+    }
+    return false;
   }
 
   private connect(): void {
@@ -114,10 +131,11 @@ export class HarnessEventStream implements vscode.Disposable {
     this.send({ type: "open", streamId: EVENTS_STREAM, endpoint: "$events", payload: { args: {} } });
     this.send({ type: "open", streamId: CONTROL_STREAM, endpoint: "session/control", payload: { args: {} } });
     this.send({ type: "open", streamId: WORKSPACE_STREAM, endpoint: "workspace/follow", payload: { args: {} } });
-    if (this.activeSession) this.openFollow(this.activeSession);
+    for (const sessionId of new Set(this.follows.values())) this.openFollow(sessionId);
   }
 
   private openFollow(sessionId: string): void {
+    this.openFollows.add(sessionId);
     this.send({
       type: "open",
       streamId: `follow:${sessionId}`,
@@ -157,8 +175,9 @@ export class HarnessEventStream implements vscode.Disposable {
       // restarting — drop the socket so the reconnect loop rebuilds a fresh one.
       if (streamId.startsWith("follow:")) {
         const ended = streamId.slice("follow:".length);
+        this.openFollows.delete(ended);
         setTimeout(() => {
-          if (!this.disposed && this.activeSession === ended && this.ws?.readyState === WebSocket.OPEN) {
+          if (!this.disposed && this.wanted(ended) && this.ws?.readyState === WebSocket.OPEN) {
             this.openFollow(ended);
           }
         }, 500);

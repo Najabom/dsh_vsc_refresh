@@ -1,6 +1,6 @@
 # DSH Bridge (dsh-vsc)
 
-> DSH Bridge is a VS Code extension (community fork of zhibailu/dsh-vsc, maintained by Najabom) that connects to DeepSeek Harness (DSH) — a local AI agent service (default http://127.0.0.1:3080) — as a **protocol client**: a native sidebar panel plus an editor bridge, without rewriting DSH and without starting a second server (one shared history with the web GUI). It supports the new DSH protocol (0.1.7-rc.2+ through 0.2.0-rc.2): typert RPC gateway, multiplexed event socket (`/api/remote.mux`), waterfall approvals & questions, paginated history, per-session projections. It ships an update center (activation checks, interface preflight via release-notes scan + static package check, one-click update with rollback), Windows sandbox workspace-ACL auto-repair, follow-agent-edits (including nested PTC dispatches), and workspace-aware sessions. Includes a single in-memory runtime overlay delta — a local-request bypass of DSH's browser-token auth — guarded by SHA-256 verification and canary anchors.
+> DSH Bridge is a VS Code extension (community fork of zhibailu/dsh-vsc, maintained by Najabom) that connects to DeepSeek Harness (DSH) — a local AI agent service (default http://127.0.0.1:3080) — as a **protocol client**: a native sidebar panel plus an editor bridge, without rewriting DSH and without starting a second server (one shared history with the web GUI). It supports the new DSH protocol (0.1.7-rc.2+ through 0.2.0-rc.2): typert RPC gateway, multiplexed event socket (`/api/remote.mux`), waterfall approvals & questions, paginated history, per-session projections. It ships an update center (activation checks, interface preflight via release-notes scan + static package check, one-click update with rollback), Windows sandbox workspace-ACL auto-repair, follow-agent-edits (including nested PTC dispatches and turn-time external writes captured by a workspace watcher), workspace-aware sessions, a dedicated per-workspace ask-conversation window (side editor split), and API-key/provider management (settings page *API* tab). Includes a single in-memory runtime overlay delta — a local-request bypass of DSH's browser-token auth — guarded by SHA-256 verification and canary anchors.
 
 ## Docs
 
@@ -25,6 +25,8 @@
 - [src/harness/updatePreflight.ts](src/harness/updatePreflight.ts): Interface preflight (release-notes scan + static package check).
 - [src/harness/workspaceAcl.ts](src/harness/workspaceAcl.ts): Windows sandbox workspace-ACL auto-repair.
 - [src/editor/followEdits.ts](src/editor/followEdits.ts): Follow agent edits (open + first-changed-line cursor).
+- [src/editor/externalChanges.ts](src/editor/externalChanges.ts): Turn-time workspace file-watch (shell writes join the change badge).
+- [src/editor/askSessions.ts](src/editor/askSessions.ts): Per-workspace dedicated ask conversation (persistent mapping).
 - [src/extension.ts](src/extension.ts): Activation/shutdown logic (deterministic owned-instance stop).
 - [src/panel/NativePanelProvider.ts](src/panel/NativePanelProvider.ts): The native sidebar panel provider.
 - [src/panel/native/panel.html](src/panel/native/panel.html): The hand-built panel UI.

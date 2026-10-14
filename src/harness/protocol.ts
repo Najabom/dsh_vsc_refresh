@@ -45,6 +45,7 @@ export const METHODS = {
   sessionList: "session/list",
   sessionPage: "session/page",
   sessionCreate: "session/create",
+  sessionRename: "session/rename",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
   sessionModelCatalog: "session/modelCatalog",
@@ -71,6 +72,12 @@ export const METHODS = {
   pluginListExemptions: "pluginManager/listVersionExemptions",
   pluginSetExemption: "pluginManager/setVersionExemption",
   accountGetBalance: "account/getBalance",
+  llmListProviders: "llm/listProviders",
+  llmListConfigurableProviders: "llm/listConfigurableProviders",
+  llmDiscoverModels: "llm/discoverModels",
+  credentialsDescribe: "credentials/describe",
+  credentialsSet: "credentials/set",
+  credentialsUnset: "credentials/unset",
   eventsResult: "$events/result",
 } as const;
 
@@ -304,6 +311,40 @@ export interface SettingsDescribeView {
   writable: boolean;
   hasDocument: boolean;
   namespaces: SettingsNamespaceView[];
+}
+
+/* ---------- llm providers + credentials (llm/*, credentials/*) ---------- */
+
+/** llm/listProviders row: one registered provider route. */
+export interface LlmProviderInfo {
+  id: string;
+  name: string;
+}
+
+/** llm/listConfigurableProviders row: where a provider's profile is stored. */
+export interface LlmConfigurableProvider {
+  provider: string;
+  displayName: string;
+  settingsNs: string;
+  settingsPath: string[];
+  declared?: boolean;
+  error?: string;
+}
+
+/** One candidate model from llm/discoverModels. */
+export interface LlmDiscoveredModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  inputModalities?: string[];
+}
+
+/** credentials/describe row state (credential values are never read back). */
+export interface CredentialInfo {
+  configured: boolean;
+  source?: string;
+  writable: boolean;
 }
 
 /* ---------- plugin manager (pluginManager/*) ---------- */

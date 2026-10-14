@@ -31,6 +31,11 @@ export async function buildSelectionContext(): Promise<string | null> {
  * itself with its fs tools.
  */
 
+/** Message text shipped to the harness for an ask (context + instruction). */
+export function askPromptText(contextBlock: string, instruction: string): string {
+  return `${contextBlock}\n\n----\n指令：${instruction}`;
+}
+
 /** Assemble the prompt text and queue it into the most recent non-blank
  *  session (creating one if needed). Shared by the panel card path and the
  *  legacy quick-pick path. */
@@ -40,7 +45,7 @@ export async function sendAsk(
   instruction: string,
   excludeSessionIds?: ReadonlySet<string>,
 ): Promise<void> {
-  const message = `${contextBlock}\n\n----\n指令：${instruction}`;
+  const message = askPromptText(contextBlock, instruction);
   const sessionId = await targetSession(client, excludeSessionIds);
   await client.prompt(sessionId, [{ type: "text", text: message }], "queue");
   const short = sessionId.replace(/^session-/, "").slice(0, 8);

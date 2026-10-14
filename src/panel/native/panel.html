@@ -33,6 +33,19 @@
      ellipsis lands on the left. */
   #ws-path { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
              direction: rtl; text-align: left; unicode-bidi: plaintext; }
+  /* Ask mode (dedicated question-conversation window): the pinned session is
+     implicit — session picker, workspace strip and the utility buttons have no
+     meaning there. Transcript / input / queue / cards stay. */
+  body.ask-mode #ws-line,
+  body.ask-mode #session-picker,
+  body.ask-mode #settings-btn,
+  body.ask-mode #delete-session,
+  body.ask-mode #delete-session-hard,
+  body.ask-mode #perm-btn,
+  body.ask-mode #plan-btn,
+  body.ask-mode #balance-chip,
+  body.ask-mode #model-btn,
+  body.ask-mode #effort-btn { display: none !important; }
   /* connection dot — compact: no text, color carries the state */
   .pill { flex: none; width: 10px; height: 10px; border-radius: 50%; font-size: 0; }
   .pill.on { background: var(--ok); }
@@ -75,7 +88,9 @@
   .mode-empty { padding: 6px 10px; color: var(--muted); }
   #mode-tip { position: fixed; z-index: 50; max-width: 280px; background: var(--vscode-editorWidget-background, var(--input-bg));
               color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;
-              font-size: 11px; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.35); white-space: pre-wrap; }
+              font-size: 11px; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,.35);
+              pointer-events: none; /* pure hint: never intercept hover/clicks over the menu rows */
+              white-space: pre-wrap; }
   #mode-tip[hidden] { display: none; }
   #delete-session, #delete-session-hard { flex: none; width: auto; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px;
                     background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; line-height: 1; white-space: nowrap; }
@@ -181,6 +196,11 @@
   .tool.t-exec .tname { color: #e0b94a; }
   .tool.t-read .tname { color: #61afef; }
   .tool.t-write .tname { color: #98c379; }
+  /* PTC sub-calls (shell/fs calls inside run_code programs): indented,
+     slightly recessed so nested work reads as a distinct layer */
+  .tool.sub { border-left: 3px solid var(--border); background: rgba(127, 127, 127, .07); }
+  .tool.sub summary { padding-left: 12px; }
+  .tool.sub .tname { font-weight: 500; }
   .tool.t-agent .tname { color: #c678dd; }
   /* tool group: consecutive internal tool calls bundled behind one fold —
      open the group, then open an individual tool to see its args/result */
@@ -478,6 +498,7 @@
                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #perm-btn:hover, #plan-btn:hover, #model-btn:hover, #effort-btn:hover { border-color: var(--accent); }
   #perm-btn { color: var(--vscode-textLink-foreground, #3794ff); }
+  #effort-btn { color: #c678dd; }
   /* Account balance (deepseek-account wallet) — read-only text, slightly
      bold, muted, tabular figures; no button chrome, no interaction. */
   #balance-chip { flex: none; color: var(--muted); font-size: 12px; font-weight: 600;
@@ -569,6 +590,7 @@
     connected: false, version: null, phase: "searching",
     sessions: [], activeSessionId: null,
     workspace: null,         // effective workspace folder (provider-reported)
+    mode: "main",            // "ask" = dedicated question-conversation window
     items: [], seqs: new Set(), oldestSeq: Infinity,
     running: false, lastTurn: -1,
     dirtySync: false,       // one unfrozen render right after turn/end
@@ -658,6 +680,15 @@
   }
   function prettyArgs(s) {
     try { return JSON.stringify(JSON.parse(s), null, 2); } catch (e) { return String(s || ""); }
+  }
+  /** PTC sub-call arguments arrive as a JSON TEXT (the byte-identical dispatch
+   *  value); accept an already-parsed object too so replay stays safe. */
+  function argsTextOf(a) {
+    if (typeof a === "string") return prettyArgs(a);
+    if (a && typeof a === "object") {
+      try { return JSON.stringify(a, null, 2); } catch (e) { return ""; }
+    }
+    return "";
   }
   function summarizeResult(content) {
     var parts = [];
@@ -856,6 +887,35 @@
         }
         break;
       }
+      case "tool/ptc-dispatch-start": {
+        // Nested (PTC) sub-call starting inside a run_code program: render it
+        // as its own tool card (opencode-style per-command rows) instead of
+        // burying every child call behind the parent run_code fold.
+        var subId = String(d.subCallId || "");
+        if (!subId) break;
+        state.items.push({ kind: "tool", callId: subId, name: d.name || "tool",
+                           argsText: argsTextOf(d.arguments), status: "running", resultText: "",
+                           turn: typeof d.turn === "number" ? d.turn : state.lastTurn,
+                           startTime: typeof ev.time === "number" ? ev.time : Date.now(),
+                           sub: true });
+        break;
+      }
+      case "tool/ptc-dispatch": {
+        var subId2 = String(d.subCallId || "");
+        if (!subId2) break;
+        var subTool = findTool(subId2);
+        if (!subTool) {
+          // Settled without a seen start (page boundary): render the row anyway.
+          subTool = { kind: "tool", callId: subId2, name: d.name || "tool",
+                      argsText: argsTextOf(d.arguments), status: "ok", resultText: "",
+                      turn: typeof d.turn === "number" ? d.turn : state.lastTurn, sub: true };
+          state.items.push(subTool);
+        }
+        subTool.status = d.isError === true ? "error" : "ok";
+        subTool.resultText = summarizeResult(d.content);
+        subTool.version = (subTool.version || 0) + 1;
+        break;
+      }
       case "todo/write": {
         // Durable task-list snapshots (dsh-tool-todo emits todo/write). The
         // bottom task bar is per-turn by design (resets every turn/start), so
@@ -1003,6 +1063,31 @@
           var rc = Array.isArray(m.content) && m.content.length ? m.content : (v3b && v3b.content);
           t.resultText = summarizeResult(rc);
           if (t === curTool) curTool = null;
+          break;
+        }
+        case "tool/ptc-dispatch-start": {
+          var psubId = String(d.subCallId || "");
+          if (!psubId) break;
+          var psub = { kind: "tool", callId: psubId, name: d.name || "tool",
+                       argsText: argsTextOf(d.arguments), status: "ok", resultText: "",
+                       turn: typeof d.turn === "number" ? d.turn : histTurn, sub: true };
+          out.push(psub);
+          toolsByCallId[psubId] = psub;
+          break;
+        }
+        case "tool/ptc-dispatch": {
+          var psubId2 = String(d.subCallId || "");
+          if (!psubId2) break;
+          var psub2 = toolsByCallId[psubId2] || null;
+          if (!psub2) {
+            psub2 = { kind: "tool", callId: psubId2, name: d.name || "tool",
+                      argsText: argsTextOf(d.arguments), status: "ok", resultText: "",
+                      turn: typeof d.turn === "number" ? d.turn : histTurn, sub: true };
+            out.push(psub2);
+            toolsByCallId[psubId2] = psub2;
+          }
+          psub2.status = d.isError === true ? "error" : "ok";
+          psub2.resultText = summarizeResult(d.content);
           break;
         }
         case "todo/write":
@@ -1172,7 +1257,7 @@
     var label = "";
     if (n > 0) {
       var nm = cards[n - 1].querySelector(".tname");
-      if (nm) label = nm.textContent.replace(/^⚙\s*/, "");
+      if (nm) label = nm.textContent.replace(/^[⚙↳]\s*/, "");
     }
     t.textContent = "⚙ 动作 · " + n + (label ? " · " + label : "");
   }
@@ -1292,6 +1377,12 @@
           if (tel) {
             delete byKey[tkey];
             if (!p.frozen) { syncToolEl(tit, tel); tel.dataset.ver = tver; }
+            // A prepend/insert can shift the run's FIRST tool, changing the
+            // group key: the container is rebuilt, but reused cards still sit
+            // in the old (now stale) container — the stale-pass below would
+            // remove it with the cards inside. Re-home them into the current
+            // container (append order = plan order, so order stays correct).
+            if (tel.parentNode !== gBody) gBody.appendChild(tel);
           } else {
             tel = renderItem(tit);
             tel.dataset.ver = tver;
@@ -1494,7 +1585,7 @@
     if (tn) {
       var tsum = toolSummaryText(item);
       tn.setAttribute("data-name", item.name);
-      tn.textContent = "⚙ " + item.name + (tsum ? " : " + tsum : "");
+      tn.textContent = (item.sub ? "↳ " : "⚙ ") + item.name + (tsum ? " : " + tsum : "");
     }
     var oldC = sum.querySelectorAll(".diff-chip");
     for (var i = 0; i < oldC.length; i++) oldC[i].remove();
@@ -1878,7 +1969,7 @@
         // clicking); summary row shows status + "⚙ name : <summary>". The
         // bundle (tool-group) wraps consecutive tool calls.
         var det = document.createElement("details");
-        det.className = "tool " + toolTone(item.name);
+        det.className = "tool " + toolTone(item.name) + (item.sub ? " sub" : "");
         var dot = item.status === "running" ? "run" : item.status === "error" ? "err" : "ok";
         var sum = document.createElement("summary");
         var d = document.createElement("span");
@@ -1887,7 +1978,7 @@
         nm.className = "tname";
         var tsum = toolSummaryText(item);
         nm.setAttribute("data-name", item.name);
-        nm.textContent = "⚙ " + item.name + (tsum ? " : " + tsum : "");
+        nm.textContent = (item.sub ? "↳ " : "⚙ ") + item.name + (tsum ? " : " + tsum : "");
         sum.appendChild(d);
         sum.appendChild(nm);
         // "+N-M" line counts — on the fold row, so they stay visible while
@@ -2105,6 +2196,10 @@
         state.sessions = msg.sessions || [];
         state.activeSessionId = msg.activeSessionId;
         state.workspace = msg.workspace || null;
+        if (msg.mode && msg.mode !== state.mode) {
+          state.mode = msg.mode;
+          applyAskMode();
+        }
         // Transient errors (e.g. "harness 未连接" fired while booting) should
         // vanish once connectivity comes back.
         if (msg.connected && !wasConnected) {
@@ -2650,6 +2745,11 @@
     wsLineEl.title = ws
       ? ws + "\n新会话与 web GUI 的默认工作区（可用右侧「工作区」按钮更改）"
       : "未打开文件夹，也未手选工作区";
+  }
+
+  /* Ask mode chrome switch (state.mode === "ask"). */
+  function applyAskMode() {
+    document.body.classList.toggle("ask-mode", state.mode === "ask");
   }
 
   /* ---------- session picker (grouped by workspace) ----------
@@ -3894,6 +3994,19 @@
     if (e.key === "Escape") hideCtxMenu();
   }, true);
   window.addEventListener("blur", hideCtxMenu);
+
+  /* Report this webview's width so the host can size the ask-window column
+     to match the sidebar (throttled; ignored before the first paint). */
+  var widthTimer = null;
+  function reportPanelWidth() {
+    var px = Math.round(document.body.clientWidth || window.innerWidth || 0);
+    if (px > 0) post({ type: "panelWidth", px: px });
+  }
+  window.addEventListener("resize", function () {
+    if (widthTimer) clearTimeout(widthTimer);
+    widthTimer = setTimeout(reportPanelWidth, 300);
+  });
+  setTimeout(reportPanelWidth, 600);
 
   post({ type: "ready" });
 })();

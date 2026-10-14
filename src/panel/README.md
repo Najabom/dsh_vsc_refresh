@@ -10,7 +10,7 @@
 
 | 文件/目录 | 职责 |
 |---|---|
-| `NativePanelProvider.ts` | 原生侧边栏面板（webview 宿主） |
+| `NativePanelProvider.ts` | 原生侧边栏面板（webview 宿主）；同一实现也承载「问题对话」编辑器分屏窗口（askMode：固定会话 + 精简界面） |
 | `renderer.ts` | 面板消息渲染/嵌入辅助 |
 | `embed.ts` | 嵌入 DSH Web GUI 的高级视图 |
 | `protocol.ts` | 面板 ↔ 宿主消息协议 |

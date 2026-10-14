@@ -15,6 +15,8 @@ import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./
 import { HarnessEventStream } from "./events/eventStream";
 import { ChangeTracker } from "./editor/changeTracker";
 import { FollowEdits } from "./editor/followEdits";
+import { ExternalChanges } from "./editor/externalChanges";
+import { AskSessions } from "./editor/askSessions";
 import { buildSelectionContext } from "./editor/askSelection";
 import { cleanupTempDirs, reviewFiles } from "./editor/diff";
 import type { PanelEvent } from "./panel/protocol";
@@ -47,6 +49,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const tracker = new ChangeTracker();
   const followEdits = new FollowEdits(makeLog);
+  const externalChanges = new ExternalChanges(makeLog, (sessionId, turn, files) => {
+    const added = tracker.addExternalFiles(sessionId, turn, files);
+    for (const file of added) followEdits.revealExternal(file);
+  });
   const panelListeners = new Set<(sessionId: string, event: PanelEvent) => void>();
   let client: HarnessClient | null = null;
   let stream: HarnessEventStream | null = null;
@@ -74,6 +80,72 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const panel = new NativePanelProvider(context, makeLog, () => client, (cb) => panelListeners.add(cb));
 
+  // Dedicated per-workspace ask conversation, shown in its own editor-area
+  // split to the side, hugging the existing DSH sidebar (not a bottom panel).
+  const askSessions = new AskSessions(context);
+  const askProvider = new NativePanelProvider(context, makeLog, () => client, (cb) => panelListeners.add(cb), true);
+  let askPanel: vscode.WebviewPanel | null = null;
+  const openAskPanel = async (): Promise<boolean> => {
+    if (askPanel) {
+      askPanel.reveal(undefined, true);
+      return true;
+    }
+    try {
+      // Split to the right of the active editor group and drop the ask window
+      // into the new side column (adjacent to the DSH sidebar). If the command
+      // is unavailable, fall back to a plain side split.
+      let column = vscode.ViewColumn.Active;
+      try {
+        await vscode.commands.executeCommand("workbench.action.newGroupRight");
+      } catch {
+        column = vscode.ViewColumn.Beside;
+      }
+      const created = vscode.window.createWebviewPanel(
+        "dsh.ask",
+        "问题对话",
+        { viewColumn: column, preserveFocus: true },
+        { enableScripts: true, retainContextWhenHidden: true }
+      );
+      askPanel = created;
+      created.onDidDispose(() => {
+        if (askPanel === created) askPanel = null;
+        askProvider.onAskWidth = undefined;
+      });
+      askProvider.attachPanel(created);
+      // Match the ask column to the sidebar width: the first self-measured
+      // width from the ask webview drives a one-shot split adjustment (a
+      // freshly created side column starts at ~50% of the editor area).
+      let widthAdjusted = false;
+      askProvider.onAskWidth = (px) => {
+        if (widthAdjusted) return;
+        const side = panel.panelWidthPx();
+        if (!side || px <= 0) return;
+        widthAdjusted = true;
+        if (vscode.window.tabGroups.all.length > 2) {
+          log.appendLine("ask window: width match skipped (multi-column layout)");
+          return;
+        }
+        const ratio = side / px;
+        if (Math.abs(ratio - 1) <= 0.12) return;
+        const frac = Math.min(0.6, Math.max(0.06, 0.5 * ratio));
+        void vscode.commands
+          .executeCommand("vscode.setEditorLayout", {
+            orientation: 0,
+            groups: [{ size: 1 - frac }, { size: frac }],
+          })
+          .then(
+            () => log.appendLine(`ask window: width matched sidebar (${px}px → ${Math.round(frac * 100)}%)`),
+            (error: unknown) => log.appendLine(`ask window: width adjust failed: ${(error as Error).message}`),
+          );
+      };
+      log.appendLine("ask window: opened");
+      return true;
+    } catch (error) {
+      log.appendLine(`ask window: ${(error as Error).message}`);
+      return false;
+    }
+  };
+
   log.appendLine("dsh-vsc activated");
 
   tracker.onBatch((batch) => {
@@ -88,6 +160,7 @@ export function activate(context: vscode.ExtensionContext): void {
     status,
     tracker,
     followEdits,
+    externalChanges,
     vscode.commands.registerCommand("dsh.openSidebar", () => {
       void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`);
     }),
@@ -145,25 +218,42 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("dsh.openWebView", () => openWebView(context, log)),
     vscode.commands.registerCommand("dsh.askSelection", () => {
-      // Preferred path: in-panel ask card (right sidebar). Falls back to the
-      // legacy quick-pick flow when the panel was never opened.
+      // Dedicated ask flow: the selection context rides a per-workspace
+      // question conversation, brought up in its own side split; the intent
+      // card lives there. Degrades to the sidebar card if the harness is
+      // unreachable mid-resolve.
       void (async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.selection.isEmpty) {
           void vscode.window.showWarningMessage("DSH: 请先在编辑器里选中要询问的代码。");
           return;
         }
-        if (!client) {
+        const harness = client;
+        if (!harness) {
           const choice = await vscode.window.showWarningMessage("DSH: harness 未连接。", "启动 harness");
           if (choice === "启动 harness") void vscode.commands.executeCommand("dsh.start");
           return;
         }
         const block = await buildSelectionContext();
         if (block === null) return;
-        // Focus the sidebar first so the card is visible, then post it.
-        void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`).then(() => {
-          panel.showAskCard(block);
-        });
+        const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+        // The ask conversation follows the workspace the panel is on (the
+        // button-picked folder wins), not the folder of the active file:
+        // asks in one project must not land in another project's thread.
+        const askCwd = panel.currentWorkspaceCwd() ?? folder?.uri.fsPath;
+        try {
+          const askSessionId = await askSessions.resolve(harness, askCwd);
+          const opened = await openAskPanel();
+          if (!opened) throw new Error("问题对话窗口创建失败");
+          askProvider.openAskSession(askSessionId);
+          askProvider.showAskCard(block);
+          panel.scheduleRefresh(200);
+        } catch (error) {
+          log.appendLine(`ask conversation: ${(error as Error).message}`);
+          void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`).then(() => {
+            panel.showAskCard(block);
+          });
+        }
       })();
     }),
     vscode.commands.registerCommand("dsh.reviewChanges", () => {
@@ -294,11 +384,13 @@ export function activate(context: vscode.ExtensionContext): void {
       status.setOnline(d.version ?? "?");
       log.appendLine(`harness connected at ${d.base} (version ${d.version})`);
       panel.setClient(client, d.version);
+      askProvider.setClient(client, d.version);
       ensureStream(d.base);
       return;
     }
     client = null;
     panel.setClient(null);
+    askProvider.setClient(null);
     await checkHarness();
   }
 
@@ -316,17 +408,37 @@ export function activate(context: vscode.ExtensionContext): void {
     stream.onSessionEvent = (sessionId, event) => {
       tracker.handleEvent(sessionId, event);
       followEdits.handleEvent(sessionId, event);
+      externalChanges.handleEvent(sessionId, event);
       panelListeners.forEach((cb) => cb(sessionId, event as PanelEvent));
     };
     // Control-plane channels (0.1.7): projections, workspace archived set,
     // host emits and answerable waterfalls all ride the same mux socket.
-    stream.onProjection = (sessionId, key, value) => panel.onProjection(sessionId, key, value);
-    stream.onWorkspace = (state) => panel.onWorkspace(state);
-    stream.onApiSession = (event, args) => panel.onApiSession(event, args);
-    stream.onWaterfall = (frame) => panel.onWaterfall(frame);
-    stream.onWaterfallCancel = (eventId) => panel.onWaterfallCancel(eventId);
-    // The panel decides which session to follow (active session switching).
-    panel.attachStream({ setFollowSession: (sessionId) => stream?.setActiveSession(sessionId) });
+    // Both surfaces run a full provider instance over the same stream (each
+    // filters by its own active session host-side).
+    stream.onProjection = (sessionId, key, value) => {
+      panel.onProjection(sessionId, key, value);
+      askProvider.onProjection(sessionId, key, value);
+    };
+    stream.onWorkspace = (state) => {
+      panel.onWorkspace(state);
+      askProvider.onWorkspace(state);
+    };
+    stream.onApiSession = (event, args) => {
+      panel.onApiSession(event, args);
+      askProvider.onApiSession(event, args);
+    };
+    stream.onWaterfall = (frame) => {
+      panel.onWaterfall(frame);
+      askProvider.onWaterfall(frame);
+    };
+    stream.onWaterfallCancel = (eventId) => {
+      panel.onWaterfallCancel(eventId);
+      askProvider.onWaterfallCancel(eventId);
+    };
+    // Each surface decides which session to follow (the mux carries parallel
+    // follow streams, so the sidebar and the ask window coexist).
+    panel.attachStream({ setFollowSession: (sessionId) => stream?.setFollow("panel", sessionId) });
+    askProvider.attachStream({ setFollowSession: (sessionId) => stream?.setFollow("ask", sessionId) });
     stream.onError = (message) => log.appendLine(`event stream: ${message}`);
     stream.onOpen = () => {
       // A restart watchdog (update flow) may be waiting for the WS mux to

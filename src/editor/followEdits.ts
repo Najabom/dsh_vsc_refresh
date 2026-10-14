@@ -90,6 +90,13 @@ export class FollowEdits implements vscode.Disposable {
     this.reveal(entry.path, line);
   }
 
+  /** Reveal an externally changed file (shell write / untracked tool). No
+   *  line information is available — the file opens at the top. */
+  revealExternal(target: string): void {
+    if (!this.followEnabled) return;
+    this.reveal(target, 0);
+  }
+
   private reveal(target: string, line: number): void {
     // Only reveal files inside an open workspace folder — never pop unrelated
     // system paths into the editor.

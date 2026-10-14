@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
+import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -110,6 +110,14 @@ export class HarnessClient {
         ...(opts?.cwd ? { cwd: opts.cwd } : {}),
         ...(opts?.agentPreset ? { agentPreset: opts.agentPreset } : {}),
       },
+    });
+  }
+
+  /** Pin a session title (official rename: appends a user-owned
+   *  `session/title` event; later user messages schedule no auto-title). */
+  renameSession(sessionId: string, title: string): Promise<{ title: string; seq?: number }> {
+    return this.call<{ title: string; seq?: number }>(METHODS.sessionRename, {
+      request: { sessionId, title },
     });
   }
 
@@ -253,6 +261,42 @@ export class HarnessClient {
       { ns, ops, ...(expectedRevision !== undefined ? { expectedRevision } : {}) },
       signal
     );
+  }
+
+  /* ---------- llm providers + credentials (API keys) ---------- */
+
+  /** Registered provider routes (id + display name). */
+  listLlmProviders(signal?: AbortSignal): Promise<LlmProviderInfo[]> {
+    return this.call<LlmProviderInfo[]>(METHODS.llmListProviders, {}, signal);
+  }
+
+  /** Providers whose profile is stored in a settings namespace. */
+  listConfigurableProviders(signal?: AbortSignal): Promise<LlmConfigurableProvider[]> {
+    return this.call<LlmConfigurableProvider[]>(METHODS.llmListConfigurableProviders, {}, signal);
+  }
+
+  /** Ask one adapter namespace for the models an endpoint serves. */
+  discoverModels(
+    settingsNs: string,
+    request: { provider?: string; baseURL?: string; api?: string; apiKey?: string },
+    signal?: AbortSignal
+  ): Promise<LlmDiscoveredModel[]> {
+    return this.call<LlmDiscoveredModel[]>(METHODS.llmDiscoverModels, { settingsNs, request }, signal);
+  }
+
+  /** Credential state for a batch of refs (values are never read back). */
+  describeCredentials(refs: string[], signal?: AbortSignal): Promise<Record<string, CredentialInfo>> {
+    return this.call<Record<string, CredentialInfo>>(METHODS.credentialsDescribe, { refs }, signal);
+  }
+
+  /** Store (or replace) one credential value. */
+  setCredential(ref: string, value: string, signal?: AbortSignal): Promise<void> {
+    return this.call<void>(METHODS.credentialsSet, { ref, value }, signal);
+  }
+
+  /** Remove a stored credential. */
+  unsetCredential(ref: string, signal?: AbortSignal): Promise<void> {
+    return this.call<void>(METHODS.credentialsUnset, { ref }, signal);
   }
 
   /* ---------- plugin manager ---------- */

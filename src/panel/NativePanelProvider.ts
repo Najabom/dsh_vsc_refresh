@@ -3,11 +3,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
-import type { ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionSummary } from "../harness/protocol";
+import type { LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionSummary, SettingsDescribeView } from "../harness/protocol";
 import type { WaterfallFrame, WorkspaceState } from "../events/eventStream";
 import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
-import { INTENT_CHOICES, sendAsk } from "../editor/askSelection";
+import { INTENT_CHOICES, askPromptText, sendAsk } from "../editor/askSelection";
+import { askSessionIdSet } from "../editor/askSessions";
 import { deleteSessionStorage } from "../harness/storage";
 import { ensureWorkspaceAcl } from "../harness/workspaceAcl";
 
@@ -123,13 +124,29 @@ function normalizePath(p: string): string {
 export class NativePanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dsh.sidebar.right";
 
-  private view?: vscode.WebviewView;
-  /** True once the webview routers were registered (views can be revived). */
+  private view?: vscode.WebviewView | vscode.WebviewPanel;
+  /** True once the webview's own "ready" arrived — posts before that are lost
+   *  (a freshly created panel loads asynchronously), so state re-sends on it. */
+  private viewReady = false;
+  /** True once the one-per-instance registrations (mux bridge + file-index
+   *  watchers) were made. */
   private wired = false;
+  /** The webview the host-message router is bound to. A closed-and-reopened
+   *  panel (or a revived sidebar view) is a NEW webview object — it must get
+   *  its own onDidReceiveMessage or it comes back deaf. */
+  private wiredWebview?: vscode.Webview;
+  /** Last self-reported CSS width (px) of a hosted webview. The sidebar
+   *  reports on load/resize; the ask window uses it to size its column. */
+  private lastPanelWidth?: number;
+  /** Ask surface only: fired when the ask webview reports its width. */
+  onAskWidth?: (px: number) => void;
+  /** Debounce timer for the list-only session refresh pump. */
+  private refreshTimer?: ReturnType<typeof setTimeout>;
   private client: HarnessClient | null = null;
   private activeSessionId: string | null = null;
   /** Manual workspace override picked from the panel header (folder dialog);
-   *  wins over the VS Code folder for NEW sessions until the window reloads. */
+   *  wins over the VS Code folder for NEW sessions (persisted across reloads
+   *  so the current workspace survives a window restart). */
   private manualWorkspace: string | undefined;
   /** One auto-created session per panel lifetime when the harness has none. */
   private autoCreatedWorkspace = false;
@@ -185,11 +202,17 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly log: (message: string) => void,
     private readonly getClient: () => HarnessClient | null,
-    private readonly onSessionEvent: (cb: (sessionId: string, event: PanelEvent) => void) => void
-  ) {}
+    private readonly onSessionEvent: (cb: (sessionId: string, event: PanelEvent) => void) => void,
+    /** Ask surface: the whole pipeline with a pinned session and a slimmer
+     *  chrome (panel.html ask mode). */
+    private readonly askMode = false
+  ) {
+    this.manualWorkspace = context.workspaceState.get<string>("dsh.manualWorkspace");
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
+    this.viewReady = false;
     const html = this.renderHtml();
     webviewView.webview.options = {
       enableScripts: true,
@@ -206,16 +229,39 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "balance", value: this.lastBalance });
       void this.refreshBalance(true);
     });
-    if (this.wired) {
-      // Webview views can be revived after being hidden: the provider instance
-      // survives, so register the routers only once per host session.
-      return;
-    }
-    this.wired = true;
-    webviewView.webview.onDidReceiveMessage((message) => {
-      void this.onMessage(message as WebviewMessage);
+    this.wireWebview(webviewView.webview);
+  }
+
+  /** Attach a standalone editor-area panel (the ask window). Same webview
+   *  contract as the sidebar view. */
+  attachPanel(panel: vscode.WebviewPanel): void {
+    this.view = panel;
+    this.viewReady = false;
+    panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "dist", "media")],
+    };
+    panel.webview.html = this.renderHtml();
+    panel.onDidDispose(() => {
+      if (this.view === panel) this.view = undefined;
     });
-    // Route mux events into this panel (filtered by active session host-side).
+    this.wireWebview(panel.webview);
+    if (this.askMode) this.log("ask window: attached");
+  }
+
+  /** Bind the host-message router to THIS webview (per webview object), and
+   *  the mux/file-index registrations once per instance (wiring them twice
+   *  would double-post every event). */
+  private wireWebview(webview: vscode.Webview): void {
+    if (this.wiredWebview !== webview) {
+      this.wiredWebview = webview;
+      webview.onDidReceiveMessage((message) => {
+        void this.onMessage(message as WebviewMessage);
+      });
+    }
+    if (this.wired) return;
+    this.wired = true;
+    // Route mux events into this surface (filtered by active session host-side).
     this.onSessionEvent((sessionId, event) => {
       this.trackRunning(sessionId, event);
       if (sessionId !== this.activeSessionId) return;
@@ -277,10 +323,11 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
    */
   showAskCard(contextBlock: string): void {
     this.askContext = contextBlock;
-    if (this.view) {
+    if (this.view && this.viewReady) {
       this.post({ type: "ask", context: contextBlock, choices: INTENT_CHOICES });
     } else {
-      // Sidebar never opened: keep the card until the webview reports ready.
+      // Webview not loaded yet (or never opened): keep the card until it
+      // reports ready.
       this.pendingAsk = { context: contextBlock, choices: INTENT_CHOICES };
     }
   }
@@ -293,6 +340,32 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   /** Follow the active session on the mux (idempotent). */
   private followActive(): void {
     this.setFollowSession(this.activeSessionId);
+  }
+
+  /** Switch this surface to a session: identity first (the renderer drops
+   *  history frames for any other session), then history + per-session chrome. */
+  private async activateSession(sessionId: string): Promise<void> {
+    this.activeSessionId = sessionId;
+    this.postState();
+    this.followActive();
+    await this.loadHistory(sessionId, undefined);
+    await this.postModels();
+    await this.postCommands();
+    this.postPermissions();
+    this.postPlanMode();
+    // An unanswered approval/question can outlive a session switch: the panel
+    // clears cards on switch, so re-post this session's pending waterfall or
+    // the agent stays blocked with no visible card.
+    for (const entry of this.pendingWaterfalls.values()) {
+      if (entry.sessionId === sessionId && entry.message.type === "interaction") {
+        this.post(entry.message);
+      }
+    }
+  }
+
+  /** Ask surface: pin the dedicated question conversation and load it. */
+  openAskSession(sessionId: string): void {
+    void this.activateSession(sessionId);
   }
 
   /** session/control push: projection values are cached per session; the ones
@@ -362,6 +435,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
 
   /** $events emit: host-level session-list / status / command-catalog deltas. */
   onApiSession(event: string, args: unknown[]): void {
+    // Any api-session delta also schedules a debounced list refresh so the
+    // picker reflects new/updated conversations (ask windows included)
+    // without waiting for a reload.
+    if (event.startsWith("api-session/")) this.scheduleRefresh();
     if (event === "api-session/added") {
       const item = args[0] as SessionSummary | undefined;
       if (!item || typeof item.sessionId !== "string") return;
@@ -480,14 +557,15 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** Cache an unanswered waterfall's card (so re-selecting the session can
-   *  re-show it) and post it to the panel. */
+   *  re-show it); post it only while its session is the one on screen —
+   *  sibling surfaces (the ask window) run their own instance. */
   private rememberWaterfall(eventId: string, sessionId: string, message: HostMessage): void {
     this.pendingWaterfalls.set(eventId, { sessionId, message });
     if (this.pendingWaterfalls.size > 200) {
       const oldest = this.pendingWaterfalls.keys().next().value;
       if (oldest !== undefined) this.pendingWaterfalls.delete(oldest);
     }
-    this.post(message);
+    if (sessionId === this.activeSessionId) this.post(message);
   }
 
   /** $events cancel: the waterfall was withdrawn (e.g. the run ended). */
@@ -515,9 +593,49 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
 
   async refresh(): Promise<void> {
     if (!this.client) {
-      this.post({ type: "state", connected: false, sessions: [], activeSessionId: null });
+      this.post({ type: "state", connected: false, sessions: [], activeSessionId: null, mode: this.askMode ? "ask" : "main" });
       return;
     }
+    if (this.askMode) {
+      // Ask surface: no session list, no auto-open — just the pinned
+      // question conversation (once one has been resolved).
+      this.postState();
+      if (this.activeSessionId) await this.loadHistory(this.activeSessionId, undefined);
+      return;
+    }
+    await this.refreshSessions();
+    try {
+      if (this.activeSessionId) {
+        await this.loadHistory(this.activeSessionId, undefined);
+        await this.postModels();
+        await this.postCommands();
+        this.postPermissions();
+        this.postPlanMode();
+      }
+    } catch (error) {
+      this.post({ type: "error", message: describeHarnessFailure("会话加载失败", error) });
+    }
+  }
+
+  /** Debounced, list-only refresh. Public: the extension asks for a quick
+   *  picker update right after creating the ask conversation. */
+  scheduleRefresh(delay = 600): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      if (this.askMode) {
+        this.postState();
+        return;
+      }
+      void this.refreshSessions();
+    }, delay);
+  }
+
+  /** Session-list freshness only (picker rows: titles/times/running dots) —
+   *  shared by refresh() and the api-session event pump, so live turns do not
+   *  re-fetch the transcript mid-scroll. */
+  private async refreshSessions(): Promise<void> {
+    if (!this.client) return;
     try {
       const { items } = await this.client.listSessions();
       // Cache each session's journal cursor (projections.asOfSeq) while the
@@ -589,20 +707,16 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       // (a fresh/empty workspace opens BLANK instead of the previous chat).
       if (!this.activeSessionId) {
         const cwd = this.workspaceCwd();
+        // The dedicated ask conversation of this workspace is never
+        // auto-opened as the coding chat — it lives in its own window.
+        const askIds = askSessionIdSet(this.context);
         const match = cwd
-          ? this.sessions.find((s) => s.cwd && normalizePath(s.cwd) === normalizePath(cwd))
+          ? this.sessions.find((s) => s.cwd && normalizePath(s.cwd) === normalizePath(cwd) && !askIds.has(s.sessionId))
           : undefined;
         if (match) this.activeSessionId = match.sessionId;
       }
       this.postState();
       this.followActive();
-      if (this.activeSessionId) {
-        await this.loadHistory(this.activeSessionId, undefined);
-        await this.postModels();
-        await this.postCommands();
-        this.postPermissions();
-        this.postPlanMode();
-      }
     } catch (error) {
       this.post({ type: "error", message: describeHarnessFailure("会话列表失败", error) });
     }
@@ -630,49 +744,70 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     return folders && folders.length > 0 ? folders[0].uri.fsPath : undefined;
   }
 
+  /** The workspace the panel currently follows (button-picked folder first):
+   *  used for the ask conversation key so asks land in the workspace shown in
+   *  the header, not the folder of whichever editor file is active. */
+  currentWorkspaceCwd(): string | undefined {
+    return this.workspaceCwd();
+  }
+
+  /** Last self-reported width (px) of a hosted webview — used to size the
+   *  ask window column to the sidebar width. */
+  panelWidthPx(): number | undefined {
+    return this.lastPanelWidth;
+  }
+
   private async onMessage(message: WebviewMessage): Promise<void> {
+    if (message.type === "panelWidth") {
+      // Webview self-measurement (load/resize): stored for the ask-window
+      // width match; informational, so it works even before a client lands.
+      const px = Math.round(message.px);
+      if (Number.isFinite(px) && px > 80) {
+        this.lastPanelWidth = px;
+        if (this.askMode) this.onAskWidth?.(px);
+      }
+      return;
+    }
     if (!this.client) {
       this.post({ type: "error", message: "harness 未连接" });
       return;
     }
     switch (message.type) {
       case "ready":
+        this.viewReady = true;
+        if (this.askMode) this.log(`ask window: ready (${this.activeSessionId ?? "no session"})`);
         this.postState();
-        if (this.activeSessionId) {
-          await this.loadHistory(this.activeSessionId, undefined);
-        }
-        await this.buildFileIndex();
-        // Seed the ＋ mode dropdown with the agent-preset roster.
-        await this.postAgentPresets();
-        // Account balance chip: show the last snapshot instantly, then refresh.
-        this.post({ type: "balance", value: this.lastBalance });
-        void this.refreshBalance(true);
         if (this.pendingAsk) {
           const pending = this.pendingAsk;
           this.pendingAsk = null;
           this.post({ type: "ask", context: pending.context, choices: pending.choices });
         }
+        try {
+          if (this.activeSessionId) {
+            await this.loadHistory(this.activeSessionId, undefined);
+            if (this.askMode) {
+              // The session was pinned before this webview finished loading;
+              // re-send the per-session chrome its activateSession posts lost.
+              await this.postModels();
+              await this.postCommands();
+              this.postPermissions();
+              this.postPlanMode();
+            }
+          }
+          await this.buildFileIndex();
+          // Seed the ＋ mode dropdown with the agent-preset roster.
+          await this.postAgentPresets();
+          // Account balance chip: show the last snapshot instantly, then refresh.
+          this.post({ type: "balance", value: this.lastBalance });
+          void this.refreshBalance(true);
+        } catch (error) {
+          // One failed fetch must not kill the rest of the boot sequence (the
+          // state + ask card above already went out).
+          this.log(`ready handling failed: ${(error as Error).message}`);
+        }
         break;
       case "selectSession":
-        this.activeSessionId = message.sessionId;
-        // State first: the panel drops history frames for any session that is
-        // not its current activeSessionId, so switch the panel's identity
-        // before shipping history, or the page gets wiped to "no messages".
-        this.postState();
-        this.followActive();
-        await this.loadHistory(message.sessionId, undefined);
-        await this.postModels();
-        await this.postCommands();
-        this.postPermissions();
-        this.postPlanMode();
-        // An unanswered approval/question can outlive a session switch: the
-        // panel clears cards on switch, so re-post this session's pending
-        // waterfall or the agent stays blocked with no visible card.
-        for (const entry of this.pendingWaterfalls.values()) {
-          if (entry.sessionId === message.sessionId && entry.message.type === "interaction") {
-            this.post(entry.message);
-          }
-        }
+        await this.activateSession(message.sessionId);
         break;
       case "getModels":
         await this.postModels();
@@ -805,6 +940,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         // grant it; repair now instead of failing every tool call later.
         void ensureWorkspaceAcl(cwd, this.log);
         this.manualWorkspace = cwd;
+        void this.context.workspaceState.update("dsh.manualWorkspace", cwd);
         try {
           const { sessionId } = await this.client.createSession({ cwd });
           this.activeSessionId = sessionId;
@@ -841,7 +977,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           instruction = custom;
         }
         try {
-          await sendAsk(this.client, context, instruction, this.archivedSessionIds);
+          if (this.askMode && this.activeSessionId) {
+            // Dedicated ask conversation: straight into the pinned session
+            // (no most-recent-session heuristic).
+            await this.client.prompt(this.activeSessionId, [{ type: "text", text: askPromptText(context, instruction) }], "queue");
+          } else {
+            await sendAsk(this.client, context, instruction, this.archivedSessionIds);
+          }
         } catch (error) {
           this.post({ type: "error", message: describeHarnessFailure("发送失败", error) });
         }
@@ -934,6 +1076,16 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             this.log(`permission switch: ${message.permission} on ${this.activeSessionId}`);
             this.rememberPermission(this.activeSessionId, message.permission);
             this.postPermissions();
+            // Manual permission change while plan+read-only is engaged means
+            // the user is taking the wheel: silently downgrade the plan
+            // variant to soft so exiting plan mode will not restore a stale
+            // preset over the user's own pick.
+            const plan = this.planVariants.get(this.activeSessionId);
+            if (plan && plan.variant === "hard" && message.permission !== "read-only") {
+              this.planVariants.set(this.activeSessionId, { variant: "soft" });
+              this.log(`plan variant downgraded to soft (manual permission switch) on ${this.activeSessionId}`);
+              this.postPlanMode();
+            }
           }
         } catch (error) {
           this.post({ type: "error", message: describeHarnessFailure("切换权限失败", error) });
@@ -1589,6 +1741,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       sessions: this.sessions.map((s) => ({ ...s, title: this.titles.get(s.sessionId) ?? s.title })),
       activeSessionId: this.activeSessionId,
       workspace: this.workspaceCwd(),
+      mode: this.askMode ? "ask" : "main",
     });
   }
 
@@ -1819,6 +1972,142 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "providerKeys":
+        await this.postProviderKeys();
+        break;
+      case "setProviderKey": {
+        const provider = String(msg.provider ?? "").trim();
+        const value = typeof msg.value === "string" ? msg.value.trim() : "";
+        if (!provider) break;
+        if (!value) {
+          this.postSettingsError("请输入 API Key");
+          break;
+        }
+        if (provider === ACCOUNT_PROVIDER_ID) {
+          this.postSettingsError("该供应商由 DSH 账户登录管理，无需 API Key");
+          break;
+        }
+        try {
+          const keyRef = await this.resolveProviderKeyRef(provider, true);
+          await this.client.setCredential(keyRef, value);
+          this.postSettingsSaved(`API Key 已保存：${provider}`);
+          await this.postProviderKeys();
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("保存 API Key 失败", error));
+        }
+        break;
+      }
+      case "clearProviderKey": {
+        const provider = String(msg.provider ?? "").trim();
+        if (!provider) break;
+        try {
+          const keyRef = await this.resolveProviderKeyRef(provider, false);
+          await this.client.unsetCredential(keyRef);
+          this.postSettingsSaved(`已清除 API Key：${provider}`);
+          await this.postProviderKeys();
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("清除 API Key 失败", error));
+        }
+        break;
+      }
+      case "createProvider": {
+        // The official models page's custom-provider card, same rules: route id
+        // pattern, http(s) endpoint, a protocol, at least one model; the profile
+        // lands in llm-pi-ai providers.<route> and the key (when given) in the
+        // credentials service under the derived <ROUTE>_API_KEY ref.
+        const route = String(msg.route ?? "").trim();
+        const displayName = String(msg.displayName ?? "").trim();
+        const baseURL = String(msg.baseURL ?? "").trim();
+        const api = String(msg.api ?? "").trim();
+        const apiKey = typeof msg.apiKey === "string" ? msg.apiKey.trim() : "";
+        const models = Array.isArray(msg.models)
+          ? (msg.models as Record<string, unknown>[])
+              .map((m) => ({
+                id: String(m.id ?? "").trim(),
+                ...(typeof m.name === "string" && m.name.trim() ? { name: m.name.trim() } : {}),
+                ...(typeof m.contextWindow === "number" && Number.isFinite(m.contextWindow)
+                  ? { contextWindow: m.contextWindow }
+                  : {}),
+              }))
+              .filter((m) => m.id)
+          : [];
+        if (!ROUTE_ID_PATTERN.test(route)) {
+          this.postSettingsError("路由 id 需为小写字母开头、仅含小写字母/数字/连字符（如 my-provider）");
+          break;
+        }
+        if (!/^https?:\/\//i.test(baseURL)) {
+          this.postSettingsError("端点 URL 需以 http(s):// 开头");
+          break;
+        }
+        if (!api) {
+          this.postSettingsError("请选择协议");
+          break;
+        }
+        if (!models.length) {
+          this.postSettingsError("至少需要一个模型条目");
+          break;
+        }
+        try {
+          const settings = await this.client.settingsDescribe();
+          const piNs = settings.namespaces.find((n) => n.ns === "llm-pi-ai");
+          if (!piNs) {
+            this.postSettingsError("harness 未提供 llm-pi-ai 设置域，无法创建自定义供应商");
+            break;
+          }
+          const providersDict =
+            piNs.value && typeof piNs.value === "object" && !Array.isArray(piNs.value)
+              ? ((piNs.value as Record<string, unknown>).providers as Record<string, unknown> | undefined)
+              : undefined;
+          if (providersDict && Object.prototype.hasOwnProperty.call(providersDict, route)) {
+            this.postSettingsError(`路由 "${route}" 已存在，请换一个 id`);
+            break;
+          }
+          const derived = deriveKeyRef(route);
+          const profile: Record<string, unknown> = {
+            ...(displayName ? { displayName } : {}),
+            ...(apiKey ? { apiKeyEnv: derived } : {}),
+            api,
+            baseURL,
+            models,
+          };
+          await this.client.settingsMutate(
+            "llm-pi-ai",
+            [{ op: "set", path: ["providers", route], value: profile }],
+            piNs.revision
+          );
+          if (apiKey) await this.client.setCredential(derived, apiKey);
+          this.postSettingsSaved(`已创建供应商「${displayName || route}」${apiKey ? "，并保存 API Key" : ""}`);
+          this.postSettingsMessage({ type: "providerCreated", route });
+          await this.postSettingsData();
+          await this.postProviderKeys();
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("创建供应商失败", error));
+        }
+        break;
+      }
+      case "discoverProviderModels": {
+        const baseURL = String(msg.baseURL ?? "").trim();
+        const api = String(msg.api ?? "").trim();
+        const apiKey = typeof msg.apiKey === "string" && msg.apiKey.trim() ? msg.apiKey.trim() : undefined;
+        if (!baseURL || !api) {
+          this.postSettingsError("填写端点 URL 并选择协议后才能发现模型");
+          break;
+        }
+        try {
+          const models = await this.client.discoverModels("llm-pi-ai", {
+            baseURL,
+            api,
+            ...(apiKey ? { apiKey } : {}),
+          });
+          this.postSettingsMessage({
+            type: "providerModels",
+            models: models.map((m) => ({ id: m.id, name: m.name, contextWindow: m.contextWindow })),
+          });
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("发现模型失败", error));
+        }
+        break;
+      }
     }
   }
 
@@ -1955,4 +2244,161 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       /* panel disposed */
     }
   }
+
+  /* ---------- provider keys + custom providers (API tab) ---------- */
+
+  /** Full snapshot for the API tab: every provider row with its credential
+   *  state, mirroring the official settings-models directory rules. */
+  private async postProviderKeys(): Promise<void> {
+    if (!this.client) return;
+    try {
+      const [providers, configurable, settings] = await Promise.all([
+        this.client.listLlmProviders(),
+        this.client.listConfigurableProviders(),
+        this.client.settingsDescribe(),
+      ]);
+      const rows = buildProviderKeyRows(providers, configurable, settings);
+      const refs = Array.from(
+        new Set(rows.flatMap((r) => [r.ref, r.derivedRef]).filter((x): x is string => typeof x === "string" && x.length > 0))
+      );
+      const credentials = refs.length ? await this.client.describeCredentials(refs) : {};
+      for (const row of rows) {
+        const ref = row.ref ?? row.derivedRef;
+        const info = ref ? credentials[ref] : undefined;
+        row.configured = info?.configured === true;
+        row.source = info?.source;
+        row.writable = info === undefined || info.writable !== false;
+      }
+      this.settingsPanel?.webview.postMessage({ type: "providerKeys", rows, writable: settings.writable !== false });
+    } catch (error) {
+      this.postSettingsError(describeHarnessFailure("读取供应商列表失败", error));
+    }
+  }
+
+  /** The credential ref a provider's key lives under: the recorded apiKeyEnv,
+   *  else the derived <ROUTE>_API_KEY. `recordDerived` persists the derived ref
+   *  back into the profile first — the bootstrap the official page performs so
+   *  the harness resolves the key the same way on its next request. */
+  private async resolveProviderKeyRef(provider: string, recordDerived: boolean): Promise<string> {
+    const client = this.client!;
+    const [settings, configurable] = await Promise.all([client.settingsDescribe(), client.listConfigurableProviders()]);
+    const entry = configurable.find((c) => c.provider === provider);
+    let env: string | undefined;
+    if (entry) {
+      const profile = profileAtView(settings, entry);
+      if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) env = profile.apiKeyEnv;
+    }
+    if (env) return env;
+    const derived = deriveKeyRef(provider);
+    if (recordDerived && entry) {
+      const nsView = settings.namespaces.find((n) => n.ns === entry.settingsNs);
+      await client.settingsMutate(
+        entry.settingsNs,
+        [{ op: "set", path: [...entry.settingsPath, "apiKeyEnv"], value: derived }],
+        nsView?.revision
+      );
+    }
+    return derived;
+  }
+}
+
+/* ---------- API tab helpers (pure) ---------- */
+
+/** The harness account provider id: signed in through DSH, never here. */
+const ACCOUNT_PROVIDER_ID = "deepseek-account";
+
+/** Official route-id rule for a custom pi-ai provider (also a valid POSIX-ish
+ *  credential-ref stem; a digit-leading id would fail the credential service). */
+const ROUTE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** One provider row of the API tab (credential state filled after the batch
+ *  credentials/describe call). */
+interface ProviderKeyRow {
+  provider: string;
+  displayName: string;
+  declared?: boolean;
+  account?: boolean;
+  /** Recorded credential ref (profile apiKeyEnv); absent when none recorded. */
+  ref?: string;
+  /** Derived <ROUTE>_API_KEY ref (the fallback every provider gets). */
+  derivedRef?: string;
+  configured?: boolean;
+  source?: string;
+  writable?: boolean;
+  error?: string;
+}
+
+/** The derived credential ref for a provider without a recorded apiKeyEnv. */
+function deriveKeyRef(provider: string): string {
+  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
+}
+
+/** Display rank: account first, the built-in official route second. */
+function rankProvider(id: string): number {
+  if (id === ACCOUNT_PROVIDER_ID) return 0;
+  if (id === "deepseek-official") return 1;
+  return 2;
+}
+
+/** Walk a configurable entry's settingsPath inside the namespace value. */
+function profileAtView(settings: SettingsDescribeView, entry: LlmConfigurableProvider): Record<string, unknown> | null {
+  const nsView = settings.namespaces.find((n) => n.ns === entry.settingsNs);
+  let cur: unknown = nsView?.value;
+  for (const key of entry.settingsPath) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur && typeof cur === "object" && !Array.isArray(cur) ? (cur as Record<string, unknown>) : null;
+}
+
+/** Build the API tab rows from the three directory RPCs (the official page's
+ *  rows are exactly this union: registered providers sorted account → official
+ *  → rest, plus declared-but-unregistered routes). */
+function buildProviderKeyRows(
+  providers: LlmProviderInfo[],
+  configurable: LlmConfigurableProvider[],
+  settings: SettingsDescribeView
+): ProviderKeyRow[] {
+  const byId = new Map(configurable.map((c) => [c.provider, c]));
+  const rows: ProviderKeyRow[] = [];
+  const seen = new Set<string>();
+  const ordered = [...providers].sort((a, b) => rankProvider(a.id) - rankProvider(b.id));
+  for (const p of ordered) {
+    seen.add(p.id);
+    const entry = byId.get(p.id);
+    const row: ProviderKeyRow = {
+      provider: p.id,
+      displayName: entry?.displayName || p.name || p.id,
+      declared: entry?.declared === true,
+      error: entry?.error,
+    };
+    if (p.id === ACCOUNT_PROVIDER_ID) {
+      row.account = true;
+      rows.push(row);
+      continue;
+    }
+    if (entry) {
+      const profile = profileAtView(settings, entry);
+      if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) row.ref = profile.apiKeyEnv;
+    }
+    row.derivedRef = deriveKeyRef(p.id);
+    rows.push(row);
+  }
+  for (const entry of configurable) {
+    // Only user-declared providers get a key row: llm-pi-ai ships a large
+    // catalog of routing profiles (declared:false) that would drown the list.
+    if (entry.declared !== true) continue;
+    if (seen.has(entry.provider)) continue;
+    const row: ProviderKeyRow = {
+      provider: entry.provider,
+      displayName: entry.displayName || entry.provider,
+      declared: entry.declared === true,
+      error: entry.error,
+      derivedRef: deriveKeyRef(entry.provider),
+    };
+    const profile = profileAtView(settings, entry);
+    if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) row.ref = profile.apiKeyEnv;
+    rows.push(row);
+  }
+  return rows;
 }

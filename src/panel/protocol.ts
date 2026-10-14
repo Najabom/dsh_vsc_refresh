@@ -54,6 +54,9 @@ export type HostMessage =
       activeSessionId: string | null;
       /** Effective workspace folder (manual picker override or the open folder). */
       workspace?: string;
+      /** Surface mode: "ask" renders the dedicated question conversation
+       *  (session picker / workspace strip / utility buttons hidden). */
+      mode?: "main" | "ask";
     }
   | { type: "event"; sessionId: string; event: PanelEvent }
   | { type: "history"; sessionId: string; events: PanelEvent[]; hasMore: boolean; isOlder?: boolean; toolDiffs?: Record<string, ToolLineDiff> }
@@ -189,6 +192,7 @@ export type WebviewMessage =
   | { type: "selectPermission"; permission: string }
   | { type: "planMode"; action: "soft" | "hard" | "off" }
   | { type: "openExternal"; url: string }
+  | { type: "panelWidth"; px: number }
   | {
       /** Lazy fetch of one logged image's bytes (harness session.attachment). */
       type: "getAttachment";

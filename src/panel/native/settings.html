@@ -34,7 +34,7 @@
   .card h3 { margin: 0 0 8px; font-size: 13px; }
   .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
   .row label { color: var(--muted); font-size: 12px; min-width: 150px; }
-  input[type="text"], input[type="number"], select { background: var(--input-bg); color: var(--fg);
+  input[type="text"], input[type="password"], input[type="number"], select { background: var(--input-bg); color: var(--fg);
     border: 1px solid var(--border); border-radius: 2px; height: 28px; padding: 0 6px; font-size: 12px;
     width: 200px; max-width: 100%; }
   .perm-opt { display: inline-block; border: 1px solid var(--border); border-radius: 3px;
@@ -80,6 +80,23 @@
     border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
   .pl-row .pl-del.confirm { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
   .hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+  /* API 密钥 / 供应商 */
+  .pk-row { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; margin: 6px 0; }
+  .pk-row .pk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pk-row .pk-name { font-weight: 600; }
+  .pk-row .pk-tag { border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+    font-size: 10px; padding: 0 5px; }
+  .pk-row .pk-tag.on { color: var(--ok); border-color: var(--ok); }
+  .pk-row .pk-sub { color: var(--muted); font-size: 12px; margin-top: 3px; word-break: break-all; }
+  .pk-row .pk-edit { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  .pk-row .pk-edit input { width: 260px; }
+  .pk-row .pk-clr { background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
+  .cp-mrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
+  .cp-mrow input { width: 150px; }
+  .cp-mrow .cp-mdel { background: none; border: 1px solid var(--border); color: var(--err);
+    border-radius: 3px; height: 28px; padding: 0 8px; cursor: pointer; }
+  #cp-discovered .cp-cand { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
   #pl-incompat { border: 1px solid var(--err); border-radius: 4px; padding: 8px 10px; margin-top: 8px; }
   #pl-incompat-text { white-space: pre-line; }
   #pl-allow { margin-top: 8px; }
@@ -95,6 +112,7 @@
     <nav>
       <button class="tab sel" data-tab="general">通用设置</button>
       <button class="tab" data-tab="models">模型</button>
+      <button class="tab" data-tab="api">API</button>
       <button class="tab" data-tab="plugins">插件</button>
       <button class="tab" data-tab="presets">Agent 预设</button>
     </nav>
@@ -146,6 +164,34 @@
     <div id="llm-cards"></div>
     <h2>原始值（只读）</h2>
     <div id="raw-models"></div>
+  </section>
+
+  <!-- API 密钥 / 自定义供应商 -->
+  <section id="tab-api" hidden>
+    <p class="hint">为各供应商配置 API Key：值写入 harness 的 credentials 服务（加密存储、永不回读），与官方 web「模型」页同一机制。
+    内置渠道 <span class="mono">deepseek-official</span> 用 Platform API Key；<span class="mono">deepseek-account</span> 由 DSH 登录管理；
+    自定义/第三方供应商可在下方新建（端点 + 协议 + 模型，支持从端点一键发现模型）。</p>
+    <h2>供应商与 API Key</h2>
+    <div id="pk-rows"></div>
+    <h2>新建供应商</h2>
+    <div class="card">
+      <div class="row"><label>供应商</label><select id="cp-preset"></select></div>
+      <div class="row" id="cp-row-route" hidden><label>路由 id</label><input id="cp-route" type="text" placeholder="小写字母开头，如 my-provider"></div>
+      <div class="row"><label>显示名称（可选）</label><input id="cp-name" type="text" placeholder="My Provider"></div>
+      <div class="row"><label>端点 URL</label><input id="cp-baseurl" type="text" placeholder="https://api.example.com/v1"></div>
+      <div class="row" id="cp-row-api" hidden><label>协议</label><select id="cp-api"></select></div>
+      <div class="row"><label>API Key（可留空）</label><input id="cp-key" type="password" placeholder="创建时一并保存（之后可补）"></div>
+      <h3 style="margin:10px 0 4px;font-size:12px;color:var(--muted)">模型列表（至少 1 个）</h3>
+      <div id="cp-models"></div>
+      <div class="row">
+        <input id="cp-model-new" type="text" placeholder="模型 id，如 gpt-5">
+        <button class="save" id="cp-model-add">添加模型</button>
+        <button class="save" id="cp-discover">从端点发现</button>
+      </div>
+      <div id="cp-discovered" class="hint" hidden></div>
+      <button class="save" id="cp-create">创建供应商</button>
+      <div id="cp-msg" class="hint"></div>
+    </div>
   </section>
 
   <!-- 插件 -->
@@ -238,11 +284,14 @@
     t.addEventListener("click", function () {
       tabs.forEach(function (x) { x.classList.remove("sel"); });
       t.classList.add("sel");
-      ["general", "models", "plugins", "presets"].forEach(function (name) {
+      ["general", "models", "api", "plugins", "presets"].forEach(function (name) {
         $("tab-" + name).hidden = name !== t.getAttribute("data-tab");
       });
       if (t.getAttribute("data-tab") === "plugins") {
         vscode.postMessage({ type: "pluginsReady" });
+      }
+      if (t.getAttribute("data-tab") === "api") {
+        vscode.postMessage({ type: "providerKeys" });
       }
     });
   });
@@ -466,6 +515,267 @@
     vscode.postMessage({ type: "settingsMutate", ns: name, ops: ops, expectedRevision: revisions[name] });
     setStatus("保存 " + name + " …");
   }
+
+  /* ---------- API tab：供应商 API Key（credentials） + 自定义供应商（llm-pi-ai） ---------- */
+  var providerKeysWritable = true;
+  var cpModels = [];      // [{id, name?, contextWindow?}]
+  var cpDiscovered = [];  // candidates from providerModels
+
+  var CP_PROTOCOLS = [
+    { value: "openai-completions", label: "OpenAI Chat Completions" },
+    { value: "openai-responses", label: "OpenAI Responses" },
+    { value: "anthropic-messages", label: "Anthropic Messages" },
+  ];
+
+  /* 常用供应商预设：选中即自动填好路由 / 协议 / 端点，仅「自定义…」才展开完整配置。 */
+  var CP_PRESETS = [
+    { id: "openai", label: "OpenAI", route: "openai", name: "OpenAI", api: "openai-completions", baseURL: "https://api.openai.com/v1" },
+    { id: "anthropic", label: "Anthropic", route: "anthropic", name: "Anthropic", api: "anthropic-messages", baseURL: "https://api.anthropic.com" },
+    { id: "deepseek", label: "DeepSeek", route: "deepseek", name: "DeepSeek", api: "openai-completions", baseURL: "https://api.deepseek.com" },
+    { id: "ollama", label: "Ollama（本地）", route: "ollama", name: "Ollama", api: "openai-completions", baseURL: "http://localhost:11434/v1" },
+    { id: "custom", label: "自定义…", route: "", name: "", api: "", baseURL: "" },
+  ];
+
+  CP_PROTOCOLS.forEach(function (p) {
+    var o = document.createElement("option");
+    o.value = p.value;
+    o.textContent = p.label;
+    $("cp-api").appendChild(o);
+  });
+
+  CP_PRESETS.forEach(function (p) {
+    var o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.label;
+    $("cp-preset").appendChild(o);
+  });
+
+  function applyPreset() {
+    var preset = CP_PRESETS.find(function (p) { return p.id === $("cp-preset").value; }) || CP_PRESETS[0];
+    var custom = preset.id === "custom";
+    $("cp-row-route").hidden = !custom;
+    $("cp-row-api").hidden = !custom;
+    if (!custom) {
+      $("cp-route").value = preset.route;
+      $("cp-name").value = preset.name;
+      $("cp-baseurl").value = preset.baseURL;
+      $("cp-api").value = preset.api;
+    } else if (!$("cp-route").value) {
+      $("cp-name").value = "";
+      $("cp-baseurl").value = "";
+    }
+  }
+
+  $("cp-preset").addEventListener("change", applyPreset);
+
+  function pkTag(text, cls) {
+    var t = document.createElement("span");
+    t.className = "pk-tag" + (cls ? " " + cls : "");
+    t.textContent = text;
+    return t;
+  }
+
+  function renderProviderKeys(rows) {
+    var box = $("pk-rows");
+    box.innerHTML = "";
+    if (!rows || !rows.length) {
+      var empty = document.createElement("div");
+      empty.className = "hint";
+      empty.textContent = "（未读取到供应商；检查 harness 连接后重新打开本页）";
+      box.appendChild(empty);
+      return;
+    }
+    rows.forEach(function (r) {
+      var card = document.createElement("div");
+      card.className = "pk-row";
+      var head = document.createElement("div");
+      head.className = "pk-head";
+      var name = document.createElement("span");
+      name.className = "pk-name";
+      name.textContent = r.displayName || r.provider;
+      head.appendChild(name);
+      head.appendChild(pkTag(r.declared ? "自定义" : "内置"));
+      if (r.account) head.appendChild(pkTag("DSH 登录", "on"));
+      else if (r.configured) head.appendChild(pkTag("已配置 Key", "on"));
+      card.appendChild(head);
+
+      var sub = document.createElement("div");
+      sub.className = "pk-sub";
+      if (r.account) {
+        sub.textContent = "账户渠道：登录/登出与用量由 DSH 管理（见官方界面），此处无需 API Key。";
+      } else {
+        var refText = r.ref ? ("引用 " + r.ref) : ("将使用 " + r.derivedRef);
+        sub.textContent = "路由 " + r.provider + " · " + refText +
+          (r.configured ? (" · 已配置" + (r.source ? "（来源 " + r.source + "）" : "")) : " · 未配置") +
+          (r.error ? (" · " + r.error) : "");
+      }
+      card.appendChild(sub);
+
+      if (!r.account) {
+        var edit = document.createElement("div");
+        edit.className = "pk-edit";
+        var input = document.createElement("input");
+        input.type = "password";
+        input.placeholder = "输入 API Key";
+        var saveBtn = document.createElement("button");
+        saveBtn.className = "save";
+        saveBtn.textContent = "保存";
+        saveBtn.style.marginTop = "0";
+        saveBtn.addEventListener("click", function () {
+          if (!input.value.trim()) { setStatus("请输入 API Key", "err"); return; }
+          vscode.postMessage({ type: "setProviderKey", provider: r.provider, value: input.value.trim() });
+          setStatus("保存 " + r.provider + " 的 API Key …");
+          input.value = "";
+        });
+        var clearBtn = document.createElement("button");
+        clearBtn.className = "pk-clr";
+        clearBtn.textContent = "清除";
+        clearBtn.addEventListener("click", function () {
+          vscode.postMessage({ type: "clearProviderKey", provider: r.provider });
+          setStatus("清除 " + r.provider + " 的 API Key …");
+        });
+        edit.appendChild(input);
+        edit.appendChild(saveBtn);
+        edit.appendChild(clearBtn);
+        if (r.writable === false || !providerKeysWritable) {
+          input.disabled = true;
+          saveBtn.disabled = true;
+          clearBtn.disabled = true;
+          sub.textContent += " · 只读（由部署提供，扩展不可改）";
+        }
+        card.appendChild(edit);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  function cpMsg(text, kind) {
+    var el = $("cp-msg");
+    el.textContent = text || "";
+    el.style.color = kind === "err" ? "var(--err)" : (kind === "ok" ? "var(--ok)" : "");
+  }
+
+  function renderCpModels() {
+    var box = $("cp-models");
+    box.innerHTML = "";
+    if (!cpModels.length) {
+      var none = document.createElement("div");
+      none.className = "hint";
+      none.textContent = "（尚未添加模型）";
+      box.appendChild(none);
+      return;
+    }
+    cpModels.forEach(function (m, idx) {
+      var row = document.createElement("div");
+      row.className = "cp-mrow";
+      var id = document.createElement("input");
+      id.type = "text";
+      id.value = m.id;
+      id.placeholder = "模型 id（必填）";
+      var nm = document.createElement("input");
+      nm.type = "text";
+      nm.value = m.name || "";
+      nm.placeholder = "显示名（可选）";
+      nm.style.width = "120px";
+      var cw = document.createElement("input");
+      cw.type = "number";
+      cw.value = m.contextWindow === undefined ? "" : String(m.contextWindow);
+      cw.placeholder = "上下文 tokens";
+      cw.style.width = "110px";
+      id.addEventListener("input", function () { m.id = id.value.trim(); });
+      nm.addEventListener("input", function () { m.name = nm.value.trim() || undefined; });
+      cw.addEventListener("input", function () {
+        var n = Number(cw.value);
+        m.contextWindow = cw.value.trim() !== "" && !isNaN(n) ? n : undefined;
+      });
+      var del = document.createElement("button");
+      del.className = "cp-mdel";
+      del.textContent = "✕";
+      del.title = "移除该模型";
+      del.addEventListener("click", function () { cpModels.splice(idx, 1); renderCpModels(); });
+      row.appendChild(id);
+      row.appendChild(nm);
+      row.appendChild(cw);
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+
+  function renderCpDiscovered() {
+    var box = $("cp-discovered");
+    box.innerHTML = "";
+    if (!cpDiscovered.length) { box.hidden = true; return; }
+    box.hidden = false;
+    var head = document.createElement("div");
+    head.textContent = "发现 " + cpDiscovered.length + " 个模型（点击添加）:";
+    box.appendChild(head);
+    cpDiscovered.forEach(function (cand, idx) {
+      var row = document.createElement("div");
+      row.className = "cp-cand";
+      var label = document.createElement("span");
+      label.textContent = cand.name ? (cand.name + " (" + cand.id + ")") : cand.id;
+      var add = document.createElement("button");
+      add.className = "save";
+      add.textContent = "添加";
+      add.style.marginTop = "0";
+      add.addEventListener("click", function () {
+        if (!cpModels.some(function (m) { return m.id === cand.id; })) {
+          cpModels.push({ id: cand.id, name: cand.name, contextWindow: cand.contextWindow });
+          renderCpModels();
+        }
+        cpDiscovered.splice(idx, 1);
+        renderCpDiscovered();
+      });
+      row.appendChild(label);
+      row.appendChild(add);
+      box.appendChild(row);
+    });
+  }
+
+  $("cp-model-add").addEventListener("click", function () {
+    var v = $("cp-model-new").value.trim();
+    if (!v) return;
+    if (!cpModels.some(function (m) { return m.id === v; })) {
+      cpModels.push({ id: v });
+      renderCpModels();
+    }
+    $("cp-model-new").value = "";
+  });
+  $("cp-model-new").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); $("cp-model-add").click(); }
+  });
+
+  $("cp-discover").addEventListener("click", function () {
+    var baseURL = $("cp-baseurl").value.trim();
+    var api = $("cp-api").value;
+    if (!baseURL || !api) { cpMsg("填写端点 URL 并选择协议后才能发现模型", "err"); return; }
+    cpMsg("正在从端点发现模型 …");
+    vscode.postMessage({ type: "discoverProviderModels", baseURL: baseURL, api: api, apiKey: $("cp-key").value.trim() });
+  });
+
+  $("cp-create").addEventListener("click", function () {
+    var route = $("cp-route").value.trim();
+    var baseURL = $("cp-baseurl").value.trim();
+    var api = $("cp-api").value;
+    if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(route)) {
+      cpMsg("路由 id 需为小写字母开头、仅含小写字母/数字/连字符（如 my-provider）", "err");
+      return;
+    }
+    if (!/^https?:\/\//i.test(baseURL)) { cpMsg("端点 URL 需以 http(s):// 开头", "err"); return; }
+    if (!cpModels.length) { cpMsg("至少添加一个模型", "err"); return; }
+    cpMsg("正在创建供应商 …");
+    vscode.postMessage({
+      type: "createProvider",
+      route: route,
+      displayName: $("cp-name").value.trim(),
+      baseURL: baseURL,
+      api: api,
+      apiKey: $("cp-key").value.trim(),
+      models: cpModels.map(function (m) { return { id: m.id, name: m.name, contextWindow: m.contextWindow }; }),
+    });
+  });
+  renderCpModels();
+  applyPreset();
 
   /* ---------- 插件 tab：pluginManager（检索 / 安装 / 开关 / 删除） ---------- */
   var pluginBundles = [];
@@ -883,6 +1193,25 @@
     }
     else if (msg.type === "settingsError") { setStatus(msg.message, "err"); }
     else if (msg.type === "settingsSaved") { setStatus(msg.message || "已保存", "ok"); }
+    else if (msg.type === "providerKeys") {
+      providerKeysWritable = msg.writable !== false;
+      renderProviderKeys(msg.rows);
+    }
+    else if (msg.type === "providerModels") {
+      cpDiscovered = msg.models || [];
+      renderCpDiscovered();
+      cpMsg(cpDiscovered.length ? "" : "端点未返回任何模型", cpDiscovered.length ? "" : "err");
+    }
+    else if (msg.type === "providerCreated") {
+      cpModels = [];
+      cpDiscovered = [];
+      $("cp-route").value = "";
+      $("cp-key").value = "";
+      applyPreset();
+      renderCpModels();
+      renderCpDiscovered();
+      cpMsg("供应商已创建；可在上方为其配置 API Key，或在模型选择器中使用其模型。", "ok");
+    }
     else if (msg.type === "settingsPlugins") {
       pluginBundles = (msg.bundles || []).slice();
       pluginEntries = (msg.plugins || []).slice();

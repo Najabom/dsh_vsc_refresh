@@ -54,7 +54,7 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 - **Update center**: checks for new DSH versions on activation; before updating, it *preflights* the new version (official release-notes scan + a static interface check of the new package) and recommends updating the extension first when an interface it relies on is at risk; after updating, it restarts the harness and verifies communication — with one-click rollback if the self-test fails.
 - **Workspace-aware**: the harness runs in your opened folder; sessions are grouped by workspace; a workspace strip keeps you oriented; one button switches the folder.
 - **Windows sandbox friendly**: auto-repairs the directory permission the DSH sandbox needs (workspace ACL), prompting for a one-time elevated fix only when it truly cannot do it alone.
-- **Follow agent edits**: when DSH edits a file, the editor opens it and the cursor lands on the first changed line — covering direct file tools *and* nested PTC dispatches.
+- **Follow agent edits**: when DSH edits a file, the editor opens it and the cursor lands on the first changed line — covering direct file tools *and* nested PTC dispatches, plus files written on disk by other means (e.g. shell commands) while a turn runs, captured by a workspace file watcher.
 - **Quality-of-life**: session hard-delete, archiving, "always allow" approvals, plan mode, Chinese context menu, per-turn model label, a modern status row (context usage, live tok/s, cache stats), unified control sizing, opencode-style output coloring.
 
 ## Features
@@ -81,9 +81,10 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 
 **Native editor bridge**
 
-- **Ask DSH about a selection** — select code → right-click → *DSH: Ask about selection* (localized), with a structured context card (file / selection / workspace / branch).
+- **Ask DSH about a selection** — select code → right-click → *DSH: Ask about selection* (localized), with a structured context card (file / selection / workspace / branch). The ask lands in the workspace's own **question-conversation window** (side editor split), so questions never interleave with the coding chat; its session title stays pinned to 「问题对话」 (official rename), and the window carries full send / ✕-stop controls.
 - **Review Agent Changes** — per-turn changed-file list → native VS Code **git diff** in one click.
-- **Follow agent edits** — auto-open + first-changed-line cursor (preview tab, no focus steal); toggle with `dshVsc.followAgentEdits`.
+- **Follow agent edits** — auto-open + first-changed-line cursor (preview tab, no focus steal); also catches external writes (e.g. `pwsh`) while a turn runs; toggle with `dshVsc.followAgentEdits`.
+- **Nested tool calls at a glance** — shell/fs calls inside a `run_code` program (`pwsh`, `read`, `write`, …) render as indented ↳ sub-cards with args, result and live timing, bundled with their parent card.
 
 **Update center**
 
@@ -95,6 +96,7 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 
 - **Model picker** with reasoning effort; channels (official / account) are whatever DSH routes.
 - **Plugin manager** — search & install from the registry, enable/disable, remove; an `incompatible-version` refusal can be answered with a **version exemption** (explicit risk acknowledgement), and pending-build approvals are surfaced for confirmation.
+- **API & custom providers** — settings page *API* tab: per-provider API keys (environment variable or DSH credential store — set and clear), and one-click custom-provider creation (route, display name, protocol, base URL, model list + *discover models*); saved providers join the session model catalog immediately.
 
 **Harness lifecycle**
 
@@ -134,7 +136,7 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 
 - **VS Code `^1.90.0`** — Windows / macOS / Linux.
 - **DSH installed globally**: `npm i -g @deepseek-ai/dsh` (0.1.7-rc.2 or newer; tested through 0.2.0-rc.2). The extension reuses a running `dsh web` or auto-starts its own instance on the same port and the same history (`~/.dsh`) — one history, never a second server. If DSH is missing, the “DSH Bridge” output channel tells you what to install.
-- **No API key is entered in the extension.** Keys and account sign-in live on the DSH side (`dsh web`); the extension only reads what DSH exposes.
+- **API keys live in DSH's credential store** (managed from the extension's settings page *API* tab; an environment variable always wins). Account sign-in stays on the DSH side (`dsh web` browser login).
 - **Windows**: the workspace-write sandbox needs the workspace folder to be *grantable* (the sandbox writes a low-integrity label, which requires full control). The extension repairs this automatically (`dshVsc.autoFixWorkspaceAcl`) and asks for a one-time elevated fix only when it cannot.
 
 ## Installation
@@ -216,11 +218,11 @@ A full, reader-friendly deep-dive — written for someone who doesn't know the d
 
 ## Limitations & deliberately out of scope
 
-- No rewritten chat UI, no event truncation/whitelisting, no API-key or account sign-in inside the extension — the key lives on the DSH side.
+- No rewritten chat UI, no event truncation/whitelisting; account sign-in stays on the DSH side (API keys are written through to DSH's credential store from the settings page).
 - No second harness — reuse first, auto-start only when none exists; the owned instance stops with VS Code, a manually started one is left running.
-- Change tracking & follow-edits cover the file tools (`write` / `edit` / `apply_patch` / `str_replace_editor`) including their nested PTC dispatches; files changed **via a shell command** (e.g. `pwsh` writing a file) are not detected.
-- The `+N-M` counter covers only those file tools; the live timer is display-only (finalized to history when the turn ends).
-- Ask-about-selection targets the most recently updated session that is not archived.
+- Change tracking & follow-edits cover the file tools (`write` / `edit` / `apply_patch` / `str_replace_editor`) including their nested PTC dispatches; while a turn runs, files written on disk by anything else (e.g. `pwsh` scripts) are captured by a workspace file watcher and count into the changed-files badge the same way.
+- The `+N-M` counter is exact for those file tools; external writes are counted at file granularity (the badge lists them, per-file line counts come from the tool metadata only).
+- Ask-about-selection opens the workspace's dedicated **question-conversation window** (side editor split); every later ask in that workspace reuses the same conversation; the title is pinned to 「问题对话」 and the window can send or ✕-stop turns directly.
 - Approval/question cards replay when you switch back to a session that is waiting on you (the agent stays blocked until answered).
 
 ## Development

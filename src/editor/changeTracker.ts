@@ -90,6 +90,36 @@ export class ChangeTracker implements vscode.Disposable {
     }
   }
 
+  /**
+   * Merge externally detected file changes (shell writes etc.) into the batch
+   * of the given turn. Files already captured by tool events — or merged
+   * earlier — are skipped. Returns the newly added paths so callers can
+   * reveal only what is genuinely new.
+   */
+  addExternalFiles(sessionId: string, turn: number, files: string[]): string[] {
+    const key = (file: string): string => (process.platform === "win32" ? file.toLowerCase() : file);
+    const known = new Set(this.batches.flatMap((b) => b.files.map(key)));
+    const fresh: string[] = [];
+    for (const file of files) {
+      const canonical = key(file);
+      if (known.has(canonical)) continue;
+      known.add(canonical);
+      fresh.push(file);
+    }
+    if (fresh.length === 0) return [];
+    let batch = this.batches.find((b) => b.sessionId === sessionId && b.turn === turn);
+    if (!batch) {
+      batch = { sessionId, turn, files: [], endedAt: Date.now() };
+      this.batches.push(batch);
+      if (this.batches.length > this.maxBatches) {
+        this.batches.splice(0, this.batches.length - this.maxBatches);
+      }
+    }
+    batch.files.push(...fresh);
+    this.onBatchCb(batch);
+    return fresh;
+  }
+
   /** Deduplicated union of every captured change. */
   latestFiles(): string[] {
     return [...new Set(this.batches.flatMap((b) => b.files))];
