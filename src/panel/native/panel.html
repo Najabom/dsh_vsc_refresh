@@ -508,6 +508,29 @@
      permission chip; pend = a queued switch, landing on the next step. */
   #plan-btn.on { color: var(--vscode-textLink-foreground, #3794ff); }
   #plan-btn.pend { opacity: .65; border-style: dashed; }
+  /* Composer attachments: non-image files render as name·size chips. */
+  .attach-item.attach-file { flex: 0 0 auto; width: auto; }
+  .attach-file-chip { display: flex; align-items: center; gap: 6px; height: 64px; max-width: 240px;
+                      padding: 0 12px; border: 1px solid var(--border); border-radius: 6px;
+                      background: var(--input-bg); font-size: 12px; overflow: hidden; }
+  .attach-file-chip .af-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-file-chip .af-size { color: var(--muted); flex: none; }
+  /* Drag-and-drop affordance while files hover the panel. */
+  body.dropping #input-row { outline: 2px dashed var(--vscode-focusBorder, #3794ff); outline-offset: -3px; }
+  /* Companion screenshots render large inline (own row, no fold). */
+  .shot { display: flex; flex-direction: column; align-items: flex-start; padding: 0 10px; margin: 4px 0; }
+  .shot .u-images { justify-content: flex-start; }
+  .shot .u-image { border-radius: 6px; }
+  .shot .u-image img { max-width: min(560px, 82vw); max-height: 420px; }
+  .shot .u-image-ph { width: 320px; height: 180px; }
+  .shot-cap { margin-top: 2px; font-size: 11px; color: var(--muted); white-space: pre-wrap; }
+  /* Tool-result images (page_screenshot, read_image, ...). */
+  .tool-images { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px; }
+  .tool-images .u-image img { max-width: min(420px, 78vw); max-height: 300px; }
+  /* User file chips in the transcript. */
+  .u-files { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 4px; }
+  .u-file { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px;
+            border: 1px solid var(--border); background: var(--input-bg); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -546,7 +569,7 @@
     </section>
     <section id="interact-card" hidden></section>
     <div id="input-row">
-      <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；Ctrl+V 粘图片）"></textarea>
+      <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
       <div id="composer-btns">
         <button id="perm-btn" title="权限预设" hidden></button>
         <button id="plan-btn" title="计划模式" hidden></button>
@@ -554,9 +577,11 @@
         <div class="in-spacer"></div>
         <button id="model-btn" title="模型" hidden></button>
         <button id="effort-btn" title="推理等级" hidden></button>
+        <button id="attach-btn" title="添加图片或文件（也可粘贴、从资源管理器拖入）">📎</button>
         <button id="send" class="btn primary" title="发送">➤</button>
         <button id="cancel" class="btn" title="停止当前回合" hidden>✕</button>
       </div>
+      <input id="attach-file" type="file" multiple hidden />
     </div>
     <div id="perm-menu" class="combo-popup" hidden></div>
     <div id="plan-menu" class="combo-popup" hidden></div>
@@ -799,7 +824,19 @@
         // The harness injects bookkeeping as user messages — runtime-context
         // snapshots, model-changed notices, approval-policy changes. Only
         // real turns (source.kind === "user") belong in the transcript.
-        if (msg.source && msg.source.kind && msg.source.kind !== "user") break;
+        // EXCEPTION: the companion plugin's deferred tool images (its
+        // exec.deferContext) ride a user-role message too — surface those as
+        // their own big screenshot row instead of dropping them.
+        if (msg.source && msg.source.kind && msg.source.kind !== "user") {
+          if (msg.source.kind === "companion") {
+            var simgs = imageBlocksOf(msg);
+            if (simgs.length) {
+              state.items.push({ kind: "shot", text: textBlocksOf(msg), turn: d.turn, images: simgs });
+              scheduleRender();
+            }
+          }
+          break;
+        }
         var u = textBlocksOf(msg);
         var imgs = imageBlocksOf(msg);
         if (u || imgs.length) {
@@ -880,6 +917,8 @@
           tool.status = isError ? "error" : "ok";
           var resultContent = Array.isArray(msg.content) && msg.content.length ? msg.content : (v3block && v3block.content);
           tool.resultText = summarizeResult(resultContent);
+          var rImgs = imageBlocksOf(msg);
+          if (rImgs.length) tool.images = (tool.images || []).concat(rImgs);
           tool.version = (tool.version || 0) + 1;
         }
         if (state.activeRound && state.activeRound.kind === "tool" && state.activeRound.callId === String(callId)) {
@@ -1028,10 +1067,17 @@
         }
         case "user/message": {
           var msg = d.message || d;
-          // Same as live rendering: bookkeeping user messages (runtime-context,
-          // model-selection, user-approval) stay out of the transcript.
-          if (msg.source && msg.source.kind && msg.source.kind !== "user") break;
           var u = textBlocksOf(msg);
+          // Same as live rendering: bookkeeping user messages (runtime-context,
+          // model-selection, user-approval) stay out of the transcript — except
+          // companion tool images, which become their own screenshot row.
+          if (msg.source && msg.source.kind && msg.source.kind !== "user") {
+            if (msg.source.kind === "companion") {
+              var shimgs = imageBlocksOf(msg);
+              if (shimgs.length) out.push({ kind: "shot", text: u, turn: d.turn, images: shimgs });
+            }
+            break;
+          }
           var himgs = imageBlocksOf(msg);
           if (u || himgs.length) out.push({ kind: "user", text: u, turn: d.turn,
                                             images: himgs.length ? himgs : undefined });
@@ -1062,6 +1108,8 @@
           t.status = (m.isError === true || !!(v3b && v3b.isError)) ? "error" : "ok";
           var rc = Array.isArray(m.content) && m.content.length ? m.content : (v3b && v3b.content);
           t.resultText = summarizeResult(rc);
+          var rImgs2 = imageBlocksOf(m);
+          if (rImgs2.length) t.images = (t.images || []).concat(rImgs2);
           if (t === curTool) curTool = null;
           break;
         }
@@ -1509,7 +1557,12 @@
           var wantHead = (w.open ? "▾" : "▸") + " 思考";
           if (head && head.textContent !== wantHead) head.textContent = wantHead;
           if (body && body.hidden !== !w.open) body.hidden = !w.open;
-          if (pre && pre.textContent !== w.text) pre.textContent = w.text;
+          if (pre && pre.textContent !== w.text) {
+            pre.textContent = w.text;
+            // Live follow: an expanded thinking box the user has not scrolled
+            // away from stays pinned to the bottom while deltas stream in.
+            if (body && !body.hidden && body.__follow !== false) body.scrollTop = body.scrollHeight;
+          }
         } else {
           node.innerHTML = renderMd(w.text);
           var sc = node.querySelector(".stream-cursor");
@@ -1778,6 +1831,26 @@
     return wrap;
   }
 
+  /** Human-readable byte size for attachment chips. */
+  function fmtBytes(n) {
+    if (!n || n < 1024) return (n || 0) + " B";
+    if (n < 1024 * 1024) return Math.round(n / 1024) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  /** Non-image attachment chips on a user bubble (name · size). */
+  function userFilesEl(files) {
+    var wrap = document.createElement("div");
+    wrap.className = "u-files";
+    files.forEach(function (fl) {
+      var chip = document.createElement("span");
+      chip.className = "u-file";
+      chip.textContent = "📄 " + (fl.name || "文件") + (fl.size ? " · " + fmtBytes(fl.size) : "");
+      wrap.appendChild(chip);
+    });
+    return wrap;
+  }
+
   /** When the replayed refs line up 1:1 with the bytes the user just pasted,
    *  keep those bytes: the message you sent never needs an attachment fetch. */
   function mergeImageRefs(local, refs) {
@@ -1893,6 +1966,7 @@
           setTimeout(function () { ta.focus(); ta.select(); }, 0);
         } else {
           if (item.images && item.images.length) el.appendChild(userImagesEl(item.images));
+          if (item.files && item.files.length) el.appendChild(userFilesEl(item.files));
           if (item.text) {
             var ub = document.createElement("div");
             ub.className = "body";
@@ -1998,6 +2072,14 @@
         det.appendChild(sum);
         if (item.argsText) det.appendChild(toolBlock("参数", item.argsText));
         if (item.resultText) det.appendChild(toolBlock("结果", item.resultText));
+        if (item.images && item.images.length) {
+          // Image blocks in the tool result (companion page_screenshot,
+          // read_image, ...): render inline, click to zoom.
+          var iwrap = document.createElement("div");
+          iwrap.className = "tool-images";
+          for (var ii = 0; ii < item.images.length; ii++) iwrap.appendChild(imageCell(item.images[ii]));
+          det.appendChild(iwrap);
+        }
         el.appendChild(det);
         break;
       }
@@ -2045,6 +2127,19 @@
         el.textContent = item.text;
         break;
       }
+      case "shot": {
+        // Companion screenshot (deferred user-role image message from the
+        // bridge plugin): a big inline image with the tool's own caption.
+        el.className = "shot";
+        if (item.images && item.images.length) el.appendChild(userImagesEl(item.images));
+        if (item.text) {
+          var shotCap = document.createElement("div");
+          shotCap.className = "shot-cap";
+          shotCap.textContent = item.text;
+          el.appendChild(shotCap);
+        }
+        break;
+      }
       case "error": {
         el.className = "sys-err";
         el.textContent = item.text;
@@ -2074,10 +2169,27 @@
     var wasHidden = body.hidden;
     body.hidden = !wasHidden;
     head.textContent = (wasHidden ? "▾" : "▸") + " 思考";
+    var key = host.getAttribute("data-key");
+    var ri = parseInt(head.getAttribute("data-ri") || "0", 10);
+    var item = null;
+    for (var i = 0; i < state.items.length; i++) {
+      var cand = state.items[i];
+      if (cand.kind === "assistant" && String(cand.id) === key) { item = cand; break; }
+    }
+    if (item) {
+      if (!item.reasoningOpen) item.reasoningOpen = {};
+      item.reasoningOpen[ri] = wasHidden;
+    }
     // Expanding reveals content below the fold — bring it into view so the user
     // actually sees the thinking instead of it opening off-screen (and mark the
     // user's intent as "follow" so a streamed continuation keeps it visible).
     if (wasHidden) {
+      if (item && item.streaming) {
+        // Live box: jump to the current thinking frontier and keep following
+        // it; a finished (history) box opens at its beginning instead.
+        body.__follow = true;
+        body.scrollTop = body.scrollHeight;
+      }
       var boxTop = box.getBoundingClientRect().top;
       var viewBottom = messagesEl.getBoundingClientRect().bottom;
       if (boxTop > viewBottom - 8) {
@@ -2085,17 +2197,19 @@
         atBottom = true; // user just interacted with live content → re-arm follow
       }
     }
-    var key = host.getAttribute("data-key");
-    var ri = parseInt(head.getAttribute("data-ri") || "0", 10);
-    for (var i = 0; i < state.items.length; i++) {
-      var it = state.items[i];
-      if (it.kind === "assistant" && String(it.id) === key) {
-        if (!it.reasoningOpen) it.reasoningOpen = {};
-        it.reasoningOpen[ri] = wasHidden;
-        break;
-      }
-    }
   });
+
+  /* Reasoning bodies scroll internally (max-height + overflow-y). Scroll
+     events do not bubble, so track them in the capture phase: leaving the
+     bottom means the user wants to read back — stop the live follow; coming
+     back to the bottom re-arms it. Same anti-hijack contract as the message
+     list itself, one level down. */
+  messagesEl.addEventListener("scroll", function (ev) {
+    var t = ev.target;
+    if (t && t.classList && t.classList.contains("reasoning-body")) {
+      t.__follow = t.scrollHeight - t.scrollTop - t.clientHeight < 8;
+    }
+  }, true);
 
   /* ---------- markdown links: open externally (never navigate the webview) ---------- */
   messagesEl.addEventListener("click", function (ev) {
@@ -2271,6 +2385,23 @@
           }
         }
         scheduleRender();
+        break;
+      }
+      case "attachmentFileRead": {
+        // Host answer to a dropped Explorer file (readAttachmentFile).
+        var pendingRead = attachmentReadWaiters[msg.requestId];
+        delete attachmentReadWaiters[msg.requestId];
+        if (!pendingRead) break;
+        if (msg.error) {
+          statusEl.textContent = "添加文件失败：" + (msg.name || "") + "（" + msg.error + "）";
+          break;
+        }
+        if (/^image\//.test(msg.mediaType || "")) {
+          attachments.push({ kind: "image", mediaType: msg.mediaType, data: msg.data, name: msg.name || "", size: msg.size || 0 });
+        } else {
+          attachments.push({ kind: "file", mediaType: msg.mediaType || "", data: msg.data, name: msg.name || "文件", size: msg.size || 0 });
+        }
+        renderAttachments();
         break;
       }
       case "models": {
@@ -3594,7 +3725,7 @@
     inputEl.style.height = Math.max(min, Math.min(inputEl.scrollHeight + bt + bb, max)) + "px";
     // The footer grows upward; if the message area was pinned to the bottom,
     // keep it pinned so the newest content (incl. turn summaries) stays visible.
-    if (scrollPos()) messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (nearBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
   inputEl.addEventListener("input", function () { autoGrow(); maybeTriggerMention(); });
   inputEl.addEventListener("keydown", function (e) {
@@ -3725,6 +3856,37 @@
     attachments.forEach(function (a, i) {
       var item = document.createElement("div");
       item.className = "attach-item";
+      if (a.kind === "file") {
+        // Non-image file: a named chip instead of a thumbnail.
+        item.className = "attach-item attach-file";
+        var chip = document.createElement("div");
+        chip.className = "attach-file-chip";
+        chip.title = (a.name || "文件") + " · " + fmtBytes(a.size || 0);
+        var nmEl = document.createElement("span");
+        nmEl.className = "af-name";
+        nmEl.textContent = "📄 " + (a.name || "文件");
+        var szEl = document.createElement("span");
+        szEl.className = "af-size";
+        szEl.textContent = fmtBytes(a.size || 0);
+        chip.appendChild(nmEl);
+        chip.appendChild(szEl);
+        var fx = document.createElement("button");
+        fx.type = "button";
+        fx.className = "attach-x";
+        fx.textContent = "×";
+        fx.title = "移除这个文件";
+        fx.onclick = function (idx) {
+          return function (ev) {
+            if (ev) ev.stopPropagation();
+            attachments.splice(idx, 1);
+            renderAttachments();
+          };
+        }(i);
+        item.appendChild(chip);
+        item.appendChild(fx);
+        attachEl.appendChild(item);
+        return;
+      }
       var src = "data:" + a.mediaType + ";base64," + a.data;
       var caption = a.name || (a.mediaType.replace("image/", "") + " 图片");
       var thumb = document.createElement("button");
@@ -3792,31 +3954,106 @@
     lightboxEl.hidden = true;
     lightboxEl.querySelector(".lb-img").src = "";
   }
+  /* ---------- composer attachments: paste, drag-drop, file picker ----------
+     Images ride the prompt inline (harness admission); non-image files are
+     uploaded once (fileUploads/upload) and referenced by receipt. Dropped
+     Explorer files arrive as file:// paths with no bytes — the host reads
+     them (readAttachmentFile) and answers attachmentFileRead. */
+  var MAX_ATTACH_IMAGE_BYTES = 10 * 1024 * 1024;
+  var MAX_ATTACH_FILE_BYTES = 25 * 1024 * 1024;
+  var attachmentReadWaiters = {};
+  var attachReadSeq = 1;
+  function readToAttachment(file, kind) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var result = String(reader.result || "");
+      var comma = result.indexOf(",");
+      if (comma < 0) return;
+      if (kind === "file") {
+        attachments.push({ kind: "file", mediaType: file.type || "application/octet-stream",
+                           data: result.slice(comma + 1), name: file.name || "文件", size: file.size });
+      } else {
+        attachments.push({ kind: "image", mediaType: file.type,
+                           data: result.slice(comma + 1), name: file.name || "", size: file.size });
+      }
+      renderAttachments();
+    };
+    reader.readAsDataURL(file);
+  }
+  function addAttachmentFiles(files) {
+    Array.prototype.forEach.call(files || [], function (file) {
+      if (!file) return;
+      var isImg = /^image\/(png|jpeg|webp|gif)$/.test(file.type || "");
+      var limit = isImg ? MAX_ATTACH_IMAGE_BYTES : MAX_ATTACH_FILE_BYTES;
+      if (file.size > limit) {
+        statusEl.textContent = (isImg ? "图片" : "文件") + "过大（>" + Math.round(limit / (1024 * 1024)) + "MB）：" + (file.name || "");
+        return;
+      }
+      readToAttachment(file, isImg ? "image" : "file");
+    });
+  }
   inputEl.addEventListener("paste", function (e) {
     var items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
-    var got = false;
+    var files = [];
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
-      if (it.kind === "file" && it.type && /^image\/(png|jpeg|webp|gif)$/.test(it.type)) {
+      if (it.kind === "file") {
         var file = it.getAsFile();
-        if (!file) continue;
-        got = true;
-        var reader = new FileReader();
-        reader.onload = (function (f, mt) { return function () {
-          var result = String(reader.result || "");
-          var comma = result.indexOf(",");
-          if (comma < 0) return;
-          // Attach as-is: admission is the harness's call, so the request (and
-          // the harness's own refusal log) always happens exactly as it would
-          // without this panel.
-          attachments.push({ mediaType: mt, data: result.slice(comma + 1), name: f.name || "" });
-          renderAttachments();
-        }; })(file, it.type);
-        reader.readAsDataURL(file);
+        if (file) files.push(file);
       }
     }
-    if (got) e.preventDefault();
+    if (files.length) { e.preventDefault(); addAttachmentFiles(files); }
+  });
+  var attachBtn = $("attach-btn");
+  var attachFileEl = $("attach-file");
+  if (attachBtn && attachFileEl) {
+    attachBtn.addEventListener("click", function (ev) {
+      if (ev) ev.stopPropagation();
+      attachFileEl.click();
+    });
+    attachFileEl.addEventListener("change", function () {
+      addAttachmentFiles(attachFileEl.files);
+      attachFileEl.value = "";
+    });
+  }
+  // Drag-and-drop: system drops carry File objects; VS Code Explorer drops
+  // carry file:// URIs instead — those go through the host file reader.
+  var dropDepth = 0;
+  function dragHasFiles(e) {
+    return !!(e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0);
+  }
+  document.addEventListener("dragenter", function (e) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dropDepth++;
+    document.body.classList.add("dropping");
+  });
+  document.addEventListener("dragover", function (e) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  });
+  document.addEventListener("dragleave", function (e) {
+    if (dropDepth > 0) dropDepth--;
+    if (!dropDepth) document.body.classList.remove("dropping");
+  });
+  document.addEventListener("drop", function (e) {
+    dropDepth = 0;
+    document.body.classList.remove("dropping");
+    if (!e.dataTransfer) return;
+    e.preventDefault();
+    var dropped = e.dataTransfer.files;
+    if (dropped && dropped.length) { addAttachmentFiles(dropped); return; }
+    var uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+    (uri || "").split(/\r?\n/).forEach(function (line) {
+      line = line.trim();
+      if (!line || line.charAt(0) === "#" || !/^file:\/\//i.test(line)) return;
+      var p = decodeURIComponent(line.replace(/^file:\/\//i, "").replace(/^\/([A-Za-z]:)/, "$1"));
+      var reqId = attachReadSeq++;
+      attachmentReadWaiters[reqId] = true;
+      post({ type: "readAttachmentFile", requestId: reqId, path: p.replace(/\//g, "\\") });
+    });
   });
 
   function send() {
@@ -3837,15 +4074,20 @@
     if (text) {
       // Carry the pasted bytes on the optimistic bubble so the image shows the
       // moment you hit send (your own message never needs a ref round-trip).
-      var localImages = attachments.map(function (a) {
-        return { attachmentId: "", mediaType: a.mediaType, name: a.name || "", data: a.data };
+      var localImages = [];
+      var localFiles = [];
+      attachments.forEach(function (a) {
+        if (a.kind === "file") localFiles.push({ name: a.name || "文件", size: a.size || 0 });
+        else localImages.push({ attachmentId: "", mediaType: a.mediaType, name: a.name || "", data: a.data });
       });
       state.items.push({ kind: "user", text: text, pending: true, turn: state.lastTurn,
-                         images: localImages.length ? localImages : undefined });
+                         images: localImages.length ? localImages : undefined,
+                         files: localFiles.length ? localFiles : undefined });
       scheduleRender();
     }
     post({ type: "send", text: text, attachments: attachments.slice(), mode: "queue" });
-    history.push(text || ("📷 " + attachments.length + " 张图片"));
+    var fileCount = attachments.filter(function (a) { return a.kind === "file"; }).length;
+    history.push(text || (fileCount ? ("📎 " + fileCount + " 个附件") : ("📷 " + attachments.length + " 张图片")));
     if (history.length > 200) history.shift();
     historyIndex = -1;
     historyDraft = "";

@@ -9,5 +9,6 @@
   "dsh.config.url": "扩展连接的 DSH harness 地址。默认 3080 即网页端的 harness：扩展以共享客户端接入，绝不自起或杀掉它。无人应答时扩展会自启自己的实例（PID 记录在 %TEMP%\\dsh-vsc-harness.pid，VS Code 退出时关闭），并注入绕过 dsh 0.1.7 启动令牌鉴权的运行时 overlay。也认 DSH_WEB_URL。",
   "dsh.config.autoStart": "配置地址无人应答时自动启动 `dsh web`。",
   "dsh.config.followAgentEdits": "DSH 修改文件时自动在编辑器打开对应文件，并把光标定位到第一个修改行（跟随 agent 编辑：预览标签、不抢焦点，磁盘更新实时刷新）。覆盖直接写入/编辑工具、代码执行内的嵌套调用（tools.write/edit 等），以及任务运行期间经 shell 命令等外部方式的写入（工作区文件监控捕获）。",
-  "dsh.config.autoFixWorkspaceAcl": "打开或切换工作区时，自动修复 DSH workspace-write 沙箱所需的目录权限（授予当前用户完全控制）；无法自动修复时提示以管理员身份修复一次。关闭后沙箱在权限不完整的工作区（如从其他电脑拷贝的文件夹）中会启动失败。"
+  "dsh.config.autoFixWorkspaceAcl": "打开或切换工作区时，自动修复 DSH workspace-write 沙箱所需的目录权限（授予当前用户完全控制）；无法自动修复时提示以管理员身份修复一次。关闭后沙箱在权限不完整的工作区（如从其他电脑拷贝的文件夹）中会启动失败。",
+  "dsh.config.companion": "自动安装并随扩展升级维护 VSIX 内置的配套插件包（dsh-vsc-companion）：实时任务清单注入（逐步更新、中断重建）+ 宿主侧 page_screenshot / page_eval 工具（不受命令沙箱限制）。安装走官方插件管理器；受管 harness 会在空闲时自动重启以载入。"
 }

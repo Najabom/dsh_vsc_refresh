@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
+import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -140,6 +140,19 @@ export class HarnessClient {
   sessionAttachment(sessionId: string, attachmentId: string): Promise<SessionAttachmentValue> {
     return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, {
       request: { sessionId, attachmentId },
+    });
+  }
+
+  /**
+   * Upload one durable (non-image) file for a session's prompt. The harness
+   * stores it content-addressed and returns a one-shot receiptId; reference
+   * it from prompt content as `{type:'file', receiptId}` — admission resolves
+   * the receipt into the durable attachment ref.
+   */
+  uploadFile(sessionId: string, data: string, name?: string): Promise<FileUploadValue> {
+    return this.call<FileUploadValue>(METHODS.fileUpload, {
+      agentId: sessionId,
+      request: { data, ...(name ? { name } : {}) },
     });
   }
 

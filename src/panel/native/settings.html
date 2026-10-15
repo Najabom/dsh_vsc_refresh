@@ -80,6 +80,7 @@
     border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
   .pl-row .pl-del.confirm { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
   .hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .err-text { color: #e06c75; }
   /* API 密钥 / 供应商 */
   .pk-row { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; margin: 6px 0; }
   .pk-row .pk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -199,6 +200,7 @@
     <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>：检索 → 安装 → 开关 / 删除，与官方 web 的插件面板同一机制。<br>
     spec 可以是 npm 包名（从 registry 解析）、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
     说明：客户端 UI 类 bundle（如 <span class="mono">dsh-drop-caret</span>、<span class="mono">dsh-webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设等其余插件与 web 共用同一个 harness，两边都生效。</p>
+    <div id="pl-companion" class="hint"></div>
     <div class="card">
       <h3>安装插件包</h3>
       <div class="row"><label>registry</label><select id="pl-registry"></select></div>
@@ -780,6 +782,7 @@
   /* ---------- 插件 tab：pluginManager（检索 / 安装 / 开关 / 删除） ---------- */
   var pluginBundles = [];
   var pluginEntries = [];
+  var pluginCompanion = null;
   var pluginRegistries = null;
   var inspectValue = null;
   var installBusy = false;
@@ -822,6 +825,32 @@
       sel.appendChild(el);
     });
     if (cur && opts.some(function (o) { return o.value === cur; })) sel.value = cur;
+  }
+
+  function renderCompanion() {
+    var el = $("pl-companion");
+    if (!el) return;
+    var state = pluginCompanion && pluginCompanion.state ? String(pluginCompanion.state) : "";
+    if (state === "current") {
+      el.textContent = "配套插件 dsh-vsc-companion v" + (pluginCompanion.installedVersion || "?") +
+        "：已启用（随扩展自动安装与升级；提供实时任务清单注入与宿主侧 page_screenshot / page_eval 工具）。";
+      el.className = "hint";
+    } else if (state === "installed" || state === "updated") {
+      el.textContent = "配套插件 dsh-vsc-companion v" + (pluginCompanion.installedVersion || "?") +
+        "：已" + (state === "updated" ? "更新" : "安装") + "，重启 DSH 服务后生效。";
+      el.className = "hint";
+    } else if (state === "disabled") {
+      el.textContent = "配套插件 dsh-vsc-companion：已停用（在下方 bundle 列表或设置 dshVsc.companion 中恢复）。";
+      el.className = "hint";
+    } else if (state === "missing") {
+      el.textContent = "配套插件：VSIX 中未找到内置包（请重新安装扩展）。";
+      el.className = "hint err-text";
+    } else if (state === "error") {
+      el.textContent = "配套插件异常：" + (pluginCompanion.message || "未知错误");
+      el.className = "hint err-text";
+    } else {
+      el.textContent = "";
+    }
   }
 
   function renderPluginBundles() {
@@ -1216,9 +1245,11 @@
       pluginBundles = (msg.bundles || []).slice();
       pluginEntries = (msg.plugins || []).slice();
       pluginExemptions = msg.exemptions || {};
+      pluginCompanion = msg.companion || null;
       refillRegistries(msg.registries);
       renderExemptions();
       renderPlugins();
+      renderCompanion();
     }
     else if (msg.type === "pluginInspectResult") {
       if (msg.spec !== $("pl-spec").value.trim()) return;

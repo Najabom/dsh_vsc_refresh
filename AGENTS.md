@@ -27,6 +27,7 @@ Debug via F5 (`.vscode/launch.json`) → Extension Development Host.
 - `src/events/` — `HarnessEventStream` (WebSocket event-stream client).
 - `src/harness/` — protocol client, discovery, launcher, and the `overlay/` runtime patch.
 - `src/panel/` — sidebar: `NativePanelProvider.ts`, native `panel.html`, embedded webview.
+- `companion/` — the built-in DSH plugin (`dsh-vsc-companion`, pure ESM JS, no build step). It is **loaded by DSH, not by the extension**: a zero-dependency bundle that the extension installs/updates into the user's DSH profile on connect (`src/harness/companion.ts`). It provides the live todo-steward context section and the host-side `page_screenshot` / `page_eval` tools (playwright-core is its only runtime dependency, resolved inside the DSH profile). Keep it dependency-light and defensive — a throw there can break the harness boot. Packaged inside the VSIX via the default `files` list; do not add it to `.vscodeignore`.
 - `internal/` — private maintainer docs (plan, playbook, upstream tracking, overlay contract). **git-ignored; never publish or commit to git.**
 - `scratch/` — throwaway probes/tests against a live harness (real events); not production code.
 - `docs/` — public user docs + screenshots.

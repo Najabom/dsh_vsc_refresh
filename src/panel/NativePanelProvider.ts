@@ -11,6 +11,22 @@ import { INTENT_CHOICES, askPromptText, sendAsk } from "../editor/askSelection";
 import { askSessionIdSet } from "../editor/askSessions";
 import { deleteSessionStorage } from "../harness/storage";
 import { ensureWorkspaceAcl } from "../harness/workspaceAcl";
+import type { CompanionStatus } from "../harness/companion";
+
+/** Composer file attachments ride the prompt as one upload each; cap matches
+ *  the panel-side check so the two ends agree. */
+const MAX_ATTACHMENT_FILE_BYTES = 25 * 1024 * 1024;
+
+/** Image media type for an attachment file name (only the raster images the
+ *  harness admits); everything else becomes a generic durable file. */
+function attachmentMediaTypeFor(name: string): string {
+  const ext = path.extname(name).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "application/octet-stream";
+}
 
 /**
  * Display copy for the four shipped agent presets — the official zh text from
@@ -856,6 +872,40 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "readAttachmentFile": {
+        // Explorer drag-and-drop: the webview only has the dropped file's
+        // path — read it here (25MB cap) and answer with base64 for the
+        // composer's attachment rail.
+        const name = path.basename(message.path);
+        try {
+          const stat = await fs.promises.stat(message.path);
+          if (!stat.isFile()) {
+            this.post({ type: "attachmentFileRead", requestId: message.requestId, name, error: "不是常规文件" });
+            break;
+          }
+          if (stat.size > MAX_ATTACHMENT_FILE_BYTES) {
+            this.post({
+              type: "attachmentFileRead",
+              requestId: message.requestId,
+              name,
+              error: `文件超过 ${Math.floor(MAX_ATTACHMENT_FILE_BYTES / (1024 * 1024))}MB`,
+            });
+            break;
+          }
+          const data = await fs.promises.readFile(message.path);
+          this.post({
+            type: "attachmentFileRead",
+            requestId: message.requestId,
+            name,
+            size: stat.size,
+            mediaType: attachmentMediaTypeFor(name),
+            data: data.toString("base64"),
+          });
+        } catch (error) {
+          this.post({ type: "attachmentFileRead", requestId: message.requestId, name, error: (error as Error).message });
+        }
+        break;
+      }
       case "newSession": {
         try {
           const cwd = this.workspaceCwd();
@@ -1171,12 +1221,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       }
       case "send": {
         const text = message.text.trim();
-        const content: PromptContentPart[] = [];
-        for (const a of message.attachments ?? []) {
-          content.push({ type: "image", mediaType: a.mediaType, data: a.data, name: a.name });
-        }
-        if (text) content.push({ type: "text", text });
-        if (content.length === 0) return;
+        const atts = message.attachments ?? [];
+        if (!text && atts.length === 0) return;
         const mode = message.mode ?? "queue";
         let sessionId = this.activeSessionId;
         if (!sessionId) {
@@ -1191,9 +1237,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
             return;
           }
         }
-        // A leading-slash line is a real slash command — dispatch it through the
-        // commands domain instead of sending it to the agent as plain text.
-        if (mode === "queue" && text && text.startsWith("/") && content.length === 1) {
+        // A leading-slash line with no attachments is a real slash command —
+        // dispatch it through the commands domain instead of sending it to the
+        // agent as plain text.
+        if (mode === "queue" && text && text.startsWith("/") && atts.length === 0) {
           try {
             const outcome = await this.client.commandExecute(sessionId, text);
             this.post({
@@ -1207,6 +1254,24 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           }
           return;
         }
+        const content: PromptContentPart[] = [];
+        try {
+          for (const a of atts) {
+            if (a.kind === "file") {
+              // Durable file: upload once (content-addressed), then reference
+              // the one-shot receipt the host resolves during admission.
+              const up = await this.client.uploadFile(sessionId, a.data, a.name);
+              content.push({ type: "file", receiptId: up.receiptId });
+            } else {
+              content.push({ type: "image", mediaType: a.mediaType ?? "image/png", data: a.data, name: a.name });
+            }
+          }
+        } catch (error) {
+          this.post({ type: "error", message: describeHarnessFailure("附件上传失败", error) });
+          return;
+        }
+        if (text) content.push({ type: "text", text });
+        if (content.length === 0) return;
         try {
           await this.client.prompt(sessionId, content, mode);
           this.post({ type: "running", sessionId, running: true });
@@ -1770,6 +1835,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   /* ---------- settings panel (editor-area tab, opened by the ⚙ button) ---------- */
 
   private settingsPanel?: vscode.WebviewPanel;
+  /** VSIX-shipped companion bundle status (owned by extension.ts). */
+  private companionStatus: CompanionStatus | null = null;
 
   /** Active plugin install (requestId) so the cancel button can reach it. */
   private pluginInstallRequestId: string | null = null;
@@ -2223,10 +2290,17 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         registries,
         exemptions: exemptions.exemptions,
         exemptionWarnings: exemptions.warnings,
+        companion: this.companionStatus,
       });
     } catch (error) {
       this.postSettingsError(describeHarnessFailure("读取插件列表失败", error));
     }
+  }
+
+  /** Companion bundle status shown in the settings 插件 tab (extension-owned). */
+  setCompanionStatus(status: CompanionStatus): void {
+    this.companionStatus = status;
+    if (this.settingsPanel) void this.postPlugins();
   }
 
   private postSettingsMessage(message: unknown): void {

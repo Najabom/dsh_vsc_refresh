@@ -7,6 +7,7 @@ import { NativePanelProvider } from "./panel/NativePanelProvider";
 import { renderEmbedHtml } from "./panel/embed";
 import { DshStatusBar } from "./status";
 import { HarnessClient } from "./harness/client";
+import { syncCompanion, type CompanionStatus } from "./harness/companion";
 import { configuredBase, discover, portOf } from "./harness/discover";
 import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
 import { ensureWorkspaceAcl, repairWorkspaceAclElevated } from "./harness/workspaceAcl";
@@ -65,6 +66,16 @@ export function activate(context: vscode.ExtensionContext): void {
   let consecutiveSpawnFailures = 0;
   let checkTimer: NodeJS.Timeout | null = null;
   let authNoticeShown = false;
+  // Companion bundle (companion/dsh-vsc-companion): synced into profile
+  // storage through the official plugin manager whenever the VSIX copy
+  // changes. A fresh install/update needs a harness restart to load, which
+  // we perform only while every session is idle.
+  let companionStatus: CompanionStatus = { state: "unknown" };
+  let companionSyncedClient: HarnessClient | null = null;
+  let companionSyncRunning = false;
+  let pendingCompanionRestart = false;
+  let companionRestartInFlight = false;
+  const busySessions = new Set<string>();
 
   // Shutdown guard: dispose clears the pending probe so no timer fires after
   // deactivation (deactivate() also flips shuttingDown for the async paths).
@@ -386,12 +397,77 @@ export function activate(context: vscode.ExtensionContext): void {
       panel.setClient(client, d.version);
       askProvider.setClient(client, d.version);
       ensureStream(d.base);
+      void runCompanionSync();
       return;
     }
     client = null;
     panel.setClient(null);
     askProvider.setClient(null);
     await checkHarness();
+  }
+
+  /** Install/upgrade the VSIX-shipped companion bundle through the official
+   *  plugin manager; restart the owned harness (when idle) so it loads. */
+  async function runCompanionSync(): Promise<void> {
+    const harness = client;
+    if (!harness || shuttingDown) return;
+    if (companionSyncRunning || companionSyncedClient === harness) return;
+    companionSyncRunning = true;
+    try {
+      const enabled = vscode.workspace.getConfiguration("dshVsc").get<boolean>("companion", true);
+      if (!enabled) {
+        companionStatus = { state: "disabled" };
+        panel.setCompanionStatus(companionStatus);
+        return;
+      }
+      const previous = companionStatus;
+      const result = await syncCompanion({
+        extensionPath: context.extensionPath,
+        storageDir: context.globalStorageUri.fsPath,
+        client: harness,
+      });
+      companionStatus = result;
+      panel.setCompanionStatus(companionStatus);
+      if (
+        (result.state === "installed" || result.state === "updated") &&
+        (previous.state !== result.state || previous.installedVersion !== result.installedVersion)
+      ) {
+        log.appendLine(
+          `companion ${result.state}: ${result.installedVersion ?? "?"} (bundled ${result.bundledVersion ?? "?"})`
+        );
+        if (harnessRunning()) {
+          if (busySessions.size === 0) void restartHarnessForCompanion();
+          else {
+            pendingCompanionRestart = true;
+            log.appendLine("companion: harness busy — restart deferred until every turn ends");
+          }
+        } else {
+          void vscode.window.showInformationMessage(
+            "DSH Bridge：配套插件（任务清单 + 页面截图工具）已安装；重启 DSH 服务后生效。"
+          );
+        }
+      }
+    } catch (error) {
+      companionStatus = { state: "error", message: (error as Error).message };
+      panel.setCompanionStatus(companionStatus);
+      log.appendLine(`companion sync failed: ${(error as Error).message}`);
+    } finally {
+      companionSyncRunning = false;
+      companionSyncedClient = harness;
+    }
+  }
+
+  async function restartHarnessForCompanion(): Promise<void> {
+    if (companionRestartInFlight || shuttingDown) return;
+    companionRestartInFlight = true;
+    pendingCompanionRestart = false;
+    try {
+      log.appendLine("companion: restarting the owned harness to load the bundle");
+      await stopHarness();
+      await ensureRunning();
+    } finally {
+      companionRestartInFlight = false;
+    }
   }
 
   let streamBase = "";
@@ -409,6 +485,11 @@ export function activate(context: vscode.ExtensionContext): void {
       tracker.handleEvent(sessionId, event);
       followEdits.handleEvent(sessionId, event);
       externalChanges.handleEvent(sessionId, event);
+      if (event.type === "turn/start") busySessions.add(sessionId);
+      else if (event.type === "turn/end") {
+        busySessions.delete(sessionId);
+        if (pendingCompanionRestart && busySessions.size === 0) void restartHarnessForCompanion();
+      }
       panelListeners.forEach((cb) => cb(sessionId, event as PanelEvent));
     };
     // Control-plane channels (0.1.7): projections, workspace archived set,
@@ -458,6 +539,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // period, then check whether the harness is actually gone and respawn.
       // Only bother while we were connected: once refresh() found the harness
       // down (client === null) the slow OFFLINE_RECHECK poll owns recovery.
+      busySessions.clear();
       if (client) scheduleHarnessCheck(DISCONNECT_RECHECK_MS);
     };
     stream.start();

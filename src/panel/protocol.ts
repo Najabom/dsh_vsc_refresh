@@ -143,6 +143,17 @@ export type HostMessage =
       bytes?: number;
       name?: string;
       error?: string;
+    }
+  | {
+      /** Host-read payload for one dropped Explorer file (readAttachmentFile). */
+      type: "attachmentFileRead";
+      requestId: number;
+      name?: string;
+      size?: number;
+      mediaType?: string;
+      /** base64 payload; absent when `error` is set. */
+      data?: string;
+      error?: string;
     };
 
 /** Webview → host messages. */
@@ -154,7 +165,7 @@ export type WebviewMessage =
   | { type: "deleteSession"; sessionId: string }
   | { type: "deletePermanently"; sessionId: string }
   | { type: "pickWorkspace" }
-  | { type: "send"; text: string; mode?: "queue" | "steer"; attachments?: { mediaType: string; data: string; name?: string }[] }
+  | { type: "send"; text: string; mode?: "queue" | "steer"; attachments?: { kind?: "image" | "file"; mediaType?: string; data: string; name?: string }[] }
   | { type: "loadOlder"; beforeSeq: number }
   | { type: "cancel" }
   | { type: "refresh" }
@@ -199,6 +210,13 @@ export type WebviewMessage =
       requestId: number;
       sessionId: string;
       attachmentId: string;
+    }
+  | {
+      /** Explorer drag-and-drop: the webview only knows the dropped file://
+       *  path — the host reads it and answers attachmentFileRead. */
+      type: "readAttachmentFile";
+      requestId: number;
+      path: string;
     }
   | { type: "openSettings" };
 

@@ -36,6 +36,7 @@ Read this in: **English** · [简体中文](README.zh.md)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Design philosophy — "pure bridge"](#design-philosophy--pure-bridge)
+- [Built-in companion plugin](#built-in-companion-plugin)
 - [Commands](#commands)
 - [Configuration](#configuration)
 - [Limitations & deliberately out of scope](#limitations--deliberately-out-of-scope)
@@ -70,6 +71,8 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 - **Account balance** — right of the plan toggle: the signed-in DeepSeek-account wallet as plain read-only text (CNY first, two-decimal display, slightly bold; hover for bonus detail; auto-refreshes after each turn and whenever the panel opens).
 - **Task-list records** — every `todo_write` snapshot stays in the transcript as an expandable card, so a list wiped by an interruption is never lost.
 - **Composer takeover**: the input bar locks while the agent is asking, so you can't send mid-question. Dismissing a question card submits a completed batch of skipped answers (the official skip semantics), so the agent carries on instead of thinking the question never arrived.
+- **Attachments** — paste or drop images straight into the composer (sent inline exactly like the web UI); drop documents from the system or the Explorer (or pick them with 📎) to send them as durable file references. A draft rail shows thumbnails and sizes (click a thumbnail for the lightbox), and attached images render in the transcript.
+- **Browser tools** — the companion plugin's `page_screenshot` renders page images **in the chat** (the model actually sees them) and `page_eval` runs render assertions — sandbox-proof, see [Built-in companion plugin](#built-in-companion-plugin).
 - Bookkeeping messages (runtime context, model-change notices) are hidden — the transcript keeps what you and the agent actually said.
 
 **Sessions & workspaces**
@@ -193,6 +196,15 @@ A full, reader-friendly deep-dive — written for someone who doesn't know the d
 - **Don't start a second DSH** → two processes sharing one history corrupt each other.
 - When you *must* patch (overlay), make it **verifiable and degradable** — verify, guard with canaries, fail safe, retire when upstream catches up.
 
+## Built-in companion plugin
+
+The VSIX ships a small DSH plugin (`dsh-vsc-companion`, source in [`companion/`](companion/)) and the extension **installs and keeps it updated in your DSH profile automatically** — no manual configuration, no profile editing. It adds two capabilities that the plain protocol cannot provide:
+
+- **Live task lists.** DSH injects todos only into *its own* UI, so the model tends to batch-update its checklist at the very end of a task. The companion feeds a **live checklist snapshot** into every request's runtime context, with the increment discipline spelled out ("the moment a step finishes, update it — don't batch"), and after an interruption it reminds the model to **rebuild the list before continuing**. Toggle with `dshVsc.companion`; status is shown on the settings *Plugins* tab.
+- **Host-side browser tools** (`page_screenshot`, `page_eval`). Sandboxed shells on Windows cannot start a browser (the sandbox forbids the named-pipe/mojo machinery Chromium needs), so visual checks fail inside the command sandbox. These tools run **in the harness host process** instead: `page_screenshot` renders a workspace HTML file (or URL) with your installed Edge (playwright-core, channel `msedge`; falls back to the Edge headless CLI) and returns a PNG — written into the workspace *and* attached to the tool result as an **image the model can see**; `page_eval` runs a JS snippet inside the page and returns JSON plus captured console output.
+
+The plugin is an ordinary, removable DSH bundle: it shows up in **Settings → Plugins** like any other, `removeBundle` removes it, and DSH's version-exemption flow applies if a future DSH ever refuses it.
+
 ## Commands
 
 | Command | What it does |
@@ -214,6 +226,7 @@ A full, reader-friendly deep-dive — written for someone who doesn't know the d
 | `dshVsc.url` | `http://127.0.0.1:3080` | Base URL of the DSH harness. Also honors `DSH_WEB_URL`. |
 | `dshVsc.autoStart` | `true` | Auto-start the harness when no instance answers at the configured URL. |
 | `dshVsc.followAgentEdits` | `true` | Open files in the editor (preview tab, cursor on the first changed line) as the agent edits them; covers direct file tools and nested PTC dispatches. |
+| `dshVsc.companion` | `true` | Ship/auto-install the built-in `dsh-vsc-companion` DSH plugin (live task-list discipline + host-side `page_screenshot` / `page_eval`). |
 | `dshVsc.autoFixWorkspaceAcl` | `true` | On opening/switching a workspace, auto-grant the directory permission the Windows sandbox needs; if it cannot, offer a one-time elevated fix. |
 
 ## Limitations & deliberately out of scope

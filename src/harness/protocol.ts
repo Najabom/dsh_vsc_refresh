@@ -78,15 +78,19 @@ export const METHODS = {
   credentialsDescribe: "credentials/describe",
   credentialsSet: "credentials/set",
   credentialsUnset: "credentials/unset",
+  fileUpload: "fileUploads/upload",
   eventsResult: "$events/result",
 } as const;
 
 /** session.prompt content part: text and raster images both ride the same
  *  typed content array (images carry inline base64 on the wire; the harness
- *  admits them into its durable attachment store and the log keeps a ref). */
+ *  admits them into its durable attachment store and the log keeps a ref).
+ *  Durable files ride a receipt: upload once via fileUploads/upload, then
+ *  reference the receiptId the host resolves during prompt admission. */
 export type PromptContentPart =
   | { type: "text"; text: string }
-  | { type: "image"; mediaType: string; data: string; name?: string };
+  | { type: "image"; mediaType: string; data: string; name?: string }
+  | { type: "file"; receiptId: string };
 
 /** Durable image reference as it appears in a logged content block. */
 export interface ImageAttachmentRef {
@@ -96,6 +100,20 @@ export interface ImageAttachmentRef {
   width: number;
   height: number;
   name?: string;
+}
+
+/** Durable (non-image) file reference as it appears in a logged content block. */
+export interface FileAttachmentRef {
+  attachmentId: string;
+  name: string;
+  bytes: number;
+}
+
+/** fileUploads/upload value: the one-shot receiptId (referenced from prompt
+ *  content) plus the durable file ref the harness stored. */
+export interface FileUploadValue {
+  receiptId: string;
+  file: FileAttachmentRef;
 }
 
 /** session/attachment value: the ref plus the decoded base64 payload. */
