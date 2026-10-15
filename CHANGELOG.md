@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - _(nothing yet)_
 
+## [1.1.3] - 2026-10-15
+
+- **计费余额完整显示**：余额 chip 与官方账户面板一致——充值余额之外，赠送余额以
+  「赠 ¥x」可见展示（title 内分「余额/赠送余额」两行）；钱包通用渲染（按接口返回
+  顺序显示所有币种，不再硬绑首个 CNY 钱包），适用于所有账户渠道；**无赠金时完全
+  不显示赠金部分**。
+- **拖拽彻底修复**（根因：VS Code webview 宿主的拖拽窃取——内层 host 把文件拖拽
+  上报 `drag-start` 后外层把 iframe 设为 `pointer-events:none`，"闪一下即失效"）：
+  捕获拦截 + `stopImmediatePropagation` 使宿主状态机不会启动；补齐 VS Code Explorer
+  的 `ResourceURLs`（JSON 数组）与 `application/vnd.code.*` 类型、仅有
+  `DataTransferItemList` 的数据源、空类型拖拽；drop 时全类型兜底扫描；未识别内容的
+  诊断提示。系统/资源管理器/VS Code 资源管理器拖入均可用，纯文本不被劫持。
+- **输入框**：余额作为框内最下一行（不可输入，左对齐，整个输入框共享焦点环）；
+  附件条高度自适应——含图片时文件 chip 与缩略图同高并使用大图标，纯文件时保持
+  紧凑；已发送的文件行位于气泡上方独立一行，chip 高度与单行气泡一致、与气泡
+  间隔半个行高；回形针按钮改为跟随主题着色的内联 SVG（此前保持浏览器默认白底）。
+- **模式下拉详情**：窄面板下提示框自动移到悬停行下方，不再遮挡光标所在的模式项。
+
 ## [1.1.2] - 2026-10-15
 
 - **内置伴生插件 `dsh-vsc-companion`**（VSIX 内置、自动安装与更新、随扩展版本走，

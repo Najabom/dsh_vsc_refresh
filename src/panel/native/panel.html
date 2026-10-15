@@ -46,6 +46,7 @@
   body.ask-mode #balance-chip,
   body.ask-mode #model-btn,
   body.ask-mode #effort-btn { display: none !important; }
+  body.ask-mode #input-foot { display: none; }
   /* connection dot — compact: no text, color carries the state */
   .pill { flex: none; width: 10px; height: 10px; border-radius: 50%; font-size: 0; }
   .pill.on { background: var(--ok); }
@@ -313,16 +314,22 @@
   #input-status .st-i + .st-i { margin-left: 10px; }
   #input-row { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
   #input-row[hidden] { display: none; } /* explicit display wins over [hidden]'s default; re-assert it */
-  #input { flex: none; resize: none; background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
-           border-radius: 3px; padding: 6px 8px; font-family: inherit; font-size: 13px; line-height: 18px;
-           max-height: 260px; overflow-y: auto; } /* height rides autoGrow(): 5 lines min, 10 lines max, then scroll */
-  #input:focus { outline: 1px solid var(--accent); }
+  /* The input visual box owns border/background so the non-editable balance
+     line reads as the last line INSIDE the box, not a strip below it. */
+  .input-box { display: flex; flex-direction: column; background: var(--input-bg);
+               border: 1px solid var(--border); border-radius: 3px; }
+  .input-box:focus-within { outline: 1px solid var(--accent); }
+  #input { flex: none; resize: none; background: transparent; color: var(--fg); border: none;
+           border-radius: 0; padding: 6px 8px 2px; font-family: inherit; font-size: 13px; line-height: 18px;
+           max-height: 260px; overflow-y: auto; outline: none; } /* height rides autoGrow(): 5 lines min, 10 lines max, then scroll */
   /* composer buttons live on their OWN row BELOW the textarea (mirrors the web
      composer: the input seat is one level higher, buttons sit lower) — so a
      multi-line input never crowds them */
   #composer-btns { display: flex; gap: 6px; align-items: center; }
   .btn { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--fg); cursor: pointer; flex: none; }
   .btn:hover { background: var(--input-bg); }
+  #attach-btn { display: flex; align-items: center; justify-content: center; padding: 0; }
+  #attach-btn svg { display: block; }
   .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
   .btn.primary:disabled { opacity: .5; cursor: default; }
   #cancel { color: var(--err); }
@@ -504,19 +511,36 @@
   #balance-chip { flex: none; color: var(--muted); font-size: 12px; font-weight: 600;
                   font-variant-numeric: tabular-nums; padding: 0 4px;
                   white-space: nowrap; }
+  /* Input foot row: the last non-editable line INSIDE the input area (above
+     the button row); the left side hosts the balance readout. */
+  #input-foot { display: flex; align-items: center; min-height: 18px; padding: 0 8px 4px; }
   /* Plan-mode toggle (right of the permission chip). Active = blue like the
      permission chip; pend = a queued switch, landing on the next step. */
   #plan-btn.on { color: var(--vscode-textLink-foreground, #3794ff); }
   #plan-btn.pend { opacity: .65; border-style: dashed; }
-  /* Composer attachments: non-image files render as name·size chips. */
-  .attach-item.attach-file { flex: 0 0 auto; width: auto; }
-  .attach-file-chip { display: flex; align-items: center; gap: 6px; height: 64px; max-width: 240px;
-                      padding: 0 12px; border: 1px solid var(--border); border-radius: 6px;
+  /* Composer attachments: non-image files render as name·size chips. The strip
+     adapts its height to the content: when image thumbnails are present the
+     file chips match the thumbnail height and switch to a large icon. */
+  .attach-item.attach-file { flex: 0 0 auto; width: auto; height: auto; }
+  .attach-file-chip { display: flex; align-items: center; gap: 6px; height: 28px; max-width: 240px;
+                      padding: 0 10px; border: 1px solid var(--border); border-radius: 4px;
                       background: var(--input-bg); font-size: 12px; overflow: hidden; }
+  .attach-file-chip .af-icon { flex: none; font-size: 13px; line-height: 1; }
+  .attach-file-chip .af-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .attach-file-chip .af-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attach-file-chip .af-size { color: var(--muted); flex: none; }
+  #attach-row.has-images .attach-file-chip { height: 64px; border-radius: 6px; }
+  #attach-row.has-images .attach-file-chip .af-icon { font-size: 26px; }
+  #attach-row.has-images .attach-file-chip .af-meta { flex-direction: column; align-items: flex-start; gap: 2px; }
   /* Drag-and-drop affordance while files hover the panel. */
   body.dropping #input-row { outline: 2px dashed var(--vscode-focusBorder, #3794ff); outline-offset: -3px; }
+  /* Drag trace: stays visible through a claimed drag; if VS Code's webview
+     shell hijacks the drag (iframe pointer-events flips off) the hint lingers
+     for 5s as visible evidence instead of a silent nothing. */
+  #drag-hint { position: fixed; right: 10px; bottom: 34px; z-index: 900; max-width: 70vw;
+    padding: 4px 9px; font-size: 11px; color: var(--vscode-editorWidget-foreground, #ccc);
+    background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--border);
+    border-radius: 4px; pointer-events: none; }
   /* Companion screenshots render large inline (own row, no fold). */
   .shot { display: flex; flex-direction: column; align-items: flex-start; padding: 0 10px; margin: 4px 0; }
   .shot .u-images { justify-content: flex-start; }
@@ -527,9 +551,14 @@
   /* Tool-result images (page_screenshot, read_image, ...). */
   .tool-images { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px; }
   .tool-images .u-image img { max-width: min(420px, 78vw); max-height: 300px; }
-  /* User file chips in the transcript. */
-  .u-files { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 4px; }
-  .u-file { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px;
+  /* User file chips in the transcript: their own full-width row directly
+     above the text bubble (right-aligned), never inside or beside it. */
+  /* Sent file chips: the row sits directly above the text bubble — each chip
+     is as tall as a single-line bubble (18 + 7 + 7 + 2 border = 34px) and the
+     gap down to the bubble is half of that line. */
+  .msg.user .u-files { flex: 1 1 100%; }
+  .u-files { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 17px; }
+  .u-file { display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 4px; line-height: 18px;
             border: 1px solid var(--border); background: var(--input-bg); font-size: 12px; }
 </style>
 </head>
@@ -569,19 +598,22 @@
     </section>
     <section id="interact-card" hidden></section>
     <div id="input-row">
-      <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
+      <div class="input-box">
+        <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
+        <div id="input-foot"><span id="balance-chip" title="账户余额" hidden></span></div>
+      </div>
       <div id="composer-btns">
         <button id="perm-btn" title="权限预设" hidden></button>
         <button id="plan-btn" title="计划模式" hidden></button>
-        <span id="balance-chip" title="账户余额" hidden></span>
         <div class="in-spacer"></div>
         <button id="model-btn" title="模型" hidden></button>
         <button id="effort-btn" title="推理等级" hidden></button>
-        <button id="attach-btn" title="添加图片或文件（也可粘贴、从资源管理器拖入）">📎</button>
+        <button id="attach-btn" class="btn" title="添加图片或文件（也可粘贴、从资源管理器拖入）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <button id="send" class="btn primary" title="发送">➤</button>
         <button id="cancel" class="btn" title="停止当前回合" hidden>✕</button>
       </div>
       <input id="attach-file" type="file" multiple hidden />
+    <div id="drag-hint" hidden></div>
     </div>
     <div id="perm-menu" class="combo-popup" hidden></div>
     <div id="plan-menu" class="combo-popup" hidden></div>
@@ -1966,6 +1998,7 @@
           setTimeout(function () { ta.focus(); ta.select(); }, 0);
         } else {
           if (item.images && item.images.length) el.appendChild(userImagesEl(item.images));
+          // Files get their own row directly above the text bubble.
           if (item.files && item.files.length) el.appendChild(userFilesEl(item.files));
           if (item.text) {
             var ub = document.createElement("div");
@@ -3026,6 +3059,13 @@
     var left = r.right + 8;
     if (left + w > window.innerWidth - 4) left = Math.max(4, r.left - w - 8);
     var top = Math.max(4, r.top);
+    // On narrow panels the clamp can pull the tip back over the menu itself;
+    // when it overlaps the hovered row horizontally, drop it below the row so
+    // the mode under the cursor stays readable.
+    if (left < r.right && left + w > r.left) {
+      var h = modeTipEl.offsetHeight || 60;
+      top = r.bottom + 4 + h <= window.innerHeight - 4 ? r.bottom + 4 : Math.max(4, r.top - h - 4);
+    }
     modeTipEl.style.left = left + "px";
     modeTipEl.style.top = top + "px";
   }
@@ -3162,21 +3202,24 @@
   function renderBalance() {
     var b = state.balance;
     var wallets = b && Array.isArray(b.wallets) ? b.wallets : [];
-    var main = null;
-    for (var bi = 0; bi < wallets.length; bi++) {
-      if (wallets[bi].currency === "CNY") { main = wallets[bi]; break; }
-    }
-    if (!main && wallets.length) main = wallets[0];
-    if (!main) { balanceChipEl.hidden = true; balanceChipEl.textContent = ""; return; }
-    var sign = CURRENCY_SIGN[main.currency] || main.currency + " ";
-    balanceChipEl.textContent = sign + fmtMoney(main.balance);
-    var bonusText = "";
-    (b.bonusWallets || []).forEach(function (w) {
-      if (w.currency === main.currency && Number(w.balance) > 0) {
-        bonusText = "（含赠金 " + (CURRENCY_SIGN[w.currency] || w.currency + " ") + fmtMoney(w.balance) + "）";
-      }
-    });
-    balanceChipEl.title = "账户余额：" + sign + fmtMoney(main.balance) + bonusText;
+    // Bonus wallets only show while a positive amount exists; zero/absent
+    // bonuses stay hidden entirely (no "赠" tag, no title line).
+    var bonuses = b && Array.isArray(b.bonusWallets)
+      ? b.bonusWallets.filter(function (w) { var n = Number(w && w.balance); return isFinite(n) && n > 0; })
+      : [];
+    if (!wallets.length && !bonuses.length) { balanceChipEl.hidden = true; balanceChipEl.textContent = ""; return; }
+    function amountText(w) { return (CURRENCY_SIGN[w.currency] || w.currency + " ") + fmtMoney(w.balance); }
+    var mainText = wallets.map(amountText).join(" ");
+    var bonusText = bonuses.map(amountText).join(" ");
+    // Visible chip = wallet balances + a compact bonus tag; the title carries
+    // the full breakdown (mirrors the official account panel's separate
+    // 余额 / 赠送余额 rows). Wallets are generic: every currency is rendered
+    // in wire order, not just the first one.
+    balanceChipEl.textContent = mainText + (bonusText ? (mainText ? " " : "") + "赠 " + bonusText : "");
+    var titleLines = [];
+    if (mainText) titleLines.push("余额：" + mainText);
+    if (bonusText) titleLines.push("赠送余额：" + bonusText);
+    balanceChipEl.title = titleLines.join("\n");
     balanceChipEl.hidden = false;
   }
 
@@ -3851,8 +3894,11 @@
    */
   function renderAttachments() {
     attachEl.innerHTML = "";
-    if (!attachments.length) { attachEl.hidden = true; return; }
+    if (!attachments.length) { attachEl.hidden = true; attachEl.classList.remove("has-images"); return; }
     attachEl.hidden = false;
+    // The strip grows to thumbnail height when images are present; file chips
+    // follow along (taller chip + large icon).
+    attachEl.classList.toggle("has-images", attachments.some(function (a) { return a.kind !== "file"; }));
     attachments.forEach(function (a, i) {
       var item = document.createElement("div");
       item.className = "attach-item";
@@ -3862,14 +3908,21 @@
         var chip = document.createElement("div");
         chip.className = "attach-file-chip";
         chip.title = (a.name || "文件") + " · " + fmtBytes(a.size || 0);
+        var icEl = document.createElement("span");
+        icEl.className = "af-icon";
+        icEl.textContent = "📄";
+        var metaEl = document.createElement("span");
+        metaEl.className = "af-meta";
         var nmEl = document.createElement("span");
         nmEl.className = "af-name";
-        nmEl.textContent = "📄 " + (a.name || "文件");
+        nmEl.textContent = a.name || "文件";
         var szEl = document.createElement("span");
         szEl.className = "af-size";
         szEl.textContent = fmtBytes(a.size || 0);
-        chip.appendChild(nmEl);
-        chip.appendChild(szEl);
+        metaEl.appendChild(nmEl);
+        metaEl.appendChild(szEl);
+        chip.appendChild(icEl);
+        chip.appendChild(metaEl);
         var fx = document.createElement("button");
         fx.type = "button";
         fx.className = "attach-x";
@@ -4019,42 +4072,163 @@
   }
   // Drag-and-drop: system drops carry File objects; VS Code Explorer drops
   // carry file:// URIs instead — those go through the host file reader.
+  // Webview-hardened state machine: only a dragleave whose relatedTarget is
+  // truly outside the window hides the outline (child enter/leave pairs move
+  // the pointer within the page and used to flicker it off); dragover
+  // self-heals a lost dragleave, and drop/dragend always reset.
   var dropDepth = 0;
-  function dragHasFiles(e) {
-    return !!(e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0);
+  function normDragTypes(e) {
+    var out = [];
+    var types = e.dataTransfer && e.dataTransfer.types;
+    if (types) for (var i = 0; i < types.length; i++) out.push(String(types[i]).toLowerCase());
+    return out;
   }
-  document.addEventListener("dragenter", function (e) {
-    if (!dragHasFiles(e)) return;
-    e.preventDefault();
-    dropDepth++;
-    document.body.classList.add("dropping");
-  });
-  document.addEventListener("dragover", function (e) {
-    if (!dragHasFiles(e)) return;
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-  });
-  document.addEventListener("dragleave", function (e) {
-    if (dropDepth > 0) dropDepth--;
-    if (!dropDepth) document.body.classList.remove("dropping");
-  });
-  document.addEventListener("drop", function (e) {
-    dropDepth = 0;
-    document.body.classList.remove("dropping");
-    if (!e.dataTransfer) return;
-    e.preventDefault();
-    var dropped = e.dataTransfer.files;
-    if (dropped && dropped.length) { addAttachmentFiles(dropped); return; }
-    var uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
-    (uri || "").split(/\r?\n/).forEach(function (line) {
+  function dragLooksDroppable(e) {
+    var types = normDragTypes(e);
+    // Explorer drags arrive as uri-list flavors, OS file drags as "files".
+    // Some hosts expose an empty type list during enter/over — accept anyway;
+    // the drop handler decides whether anything is actually usable.
+    if (types.length === 0) return true;
+    for (var i = 0; i < types.length; i++) {
+      var t = types[i];
+      // uri flavors: OS/Explorer file drops. "resource"/vnd.code.*: VS Code's
+      // own Explorer tree drags (ResourceURLs payload, JSON list of file URIs).
+      if (t === "files" || t.indexOf("uri-list") >= 0 || t.indexOf("resource") >= 0 ||
+          t.indexOf("application/vnd.code") >= 0) return true;
+    }
+    return false;
+  }
+  function setDropping(on) {
+    if (on) document.body.classList.add("dropping");
+    else document.body.classList.remove("dropping");
+  }
+  function fileUriToPath(line) {
+    var p = line.replace(/^file:\/+/i, "");
+    try { p = decodeURIComponent(p); } catch (err) {}
+    return p.replace(/^\/([A-Za-z]:)/, "$1");
+  }
+  function attachPathLines(raw) {
+    var text = String(raw || "").trim();
+    // VS Code Explorer drags carry "ResourceURLs": a JSON array of file URIs.
+    if (text.charAt(0) === "[") {
+      try {
+        var arr = JSON.parse(text);
+        if (Array.isArray(arr)) {
+          var joined = arr.filter(function (u) { return typeof u === "string"; }).join("\n");
+          if (joined) return attachPathLines(joined);
+        }
+      } catch (err) { /* not JSON — fall through to plain line parsing */ }
+    }
+    var handled = false;
+    (raw || "").split(/\r?\n/).forEach(function (line) {
       line = line.trim();
-      if (!line || line.charAt(0) === "#" || !/^file:\/\//i.test(line)) return;
-      var p = decodeURIComponent(line.replace(/^file:\/\//i, "").replace(/^\/([A-Za-z]:)/, "$1"));
+      if (!line || line.charAt(0) === "#") return;
+      var p = "";
+      if (/^file:\/\//i.test(line)) p = fileUriToPath(line);
+      else if (/^[A-Za-z]:[\\/]/.test(line) || /^\\\\/.test(line)) p = line;
+      if (!p) return;
+      handled = true;
       var reqId = attachReadSeq++;
       attachmentReadWaiters[reqId] = true;
       post({ type: "readAttachmentFile", requestId: reqId, path: p.replace(/\//g, "\\") });
     });
-  });
+    return handled;
+  }
+  // Window-level capture: survives any intermediate stopPropagation and reaches
+  // the events even when the pointer sits on the textarea or a button.
+  // VS Code's webview host hijacks file drags at dragenter: its inner host
+  // posts drag-start to the shell (only when the event was NOT marked handled)
+  // and the shell then sets this iframe pointer-events:none until the drag
+  // ends — the panel would see one dragenter and nothing else (the "flash").
+  // preventDefault() flips that official guard; stopImmediatePropagation()
+  // additionally guarantees the host's bubble-phase listener never runs in
+  // this dispatch, whatever the listener registration order.
+  var dragHintEl = $("drag-hint");
+  var dragHintTimer = null;
+  function dragHint(text) {
+    if (!dragHintEl) return;
+    if (dragHintTimer) { clearTimeout(dragHintTimer); dragHintTimer = null; }
+    if (text) {
+      dragHintEl.textContent = text;
+      dragHintEl.hidden = false;
+      dragHintTimer = setTimeout(function () { dragHintEl.hidden = true; dragHintTimer = null; }, 5000);
+    } else {
+      dragHintEl.hidden = true;
+      dragHintEl.textContent = "";
+    }
+  }
+  window.addEventListener("dragenter", function (e) {
+    if (!dragLooksDroppable(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    dropDepth++;
+    setDropping(true);
+    dragHint("拖入检测 " + (normDragTypes(e).join(",") || "(无类型)"));
+  }, true);
+  window.addEventListener("dragover", function (e) {
+    if (!dragLooksDroppable(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.dataTransfer) { try { e.dataTransfer.dropEffect = "copy"; } catch (err) {} }
+    dropDepth = Math.max(dropDepth, 1);
+    setDropping(true);
+  }, true);
+  window.addEventListener("dragleave", function (e) {
+    var to = e.relatedTarget;
+    if (to && document.documentElement.contains(to)) return; // still inside the page
+    dropDepth = 0;
+    setDropping(false);
+  }, true);
+  window.addEventListener("dragend", function () {
+    dropDepth = 0;
+    setDropping(false);
+    dragHint(null);
+  }, true);
+  window.addEventListener("drop", function (e) {
+    e.stopImmediatePropagation();
+    dropDepth = 0;
+    setDropping(false);
+    dragHint(null);
+    if (!e.dataTransfer) return;
+    var dropped = e.dataTransfer.files;
+    if (dropped && dropped.length) { e.preventDefault(); addAttachmentFiles(dropped); return; }
+    // Some drag sources populate only the DataTransferItemList entries.
+    var items = e.dataTransfer.items;
+    if (items && items.length) {
+      var fromItems = [];
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].kind === "file") { var f = items[k].getAsFile(); if (f) fromItems.push(f); }
+      }
+      if (fromItems.length) { e.preventDefault(); addAttachmentFiles(fromItems); return; }
+    }
+    // Explorer / host paths: sweep every offered flavor — uri/text flavors
+    // first, then any remaining custom type (VS Code ResourceURLs rides one).
+    var handled = false;
+    var types = e.dataTransfer.types || [];
+    var order = [], tail = [];
+    for (var i = 0; i < types.length; i++) {
+      var name = String(types[i]);
+      var lower = name.toLowerCase();
+      if (lower === "files") continue;
+      if (lower.indexOf("uri-list") >= 0 || lower.indexOf("resource") >= 0 ||
+          lower === "text/plain" || lower === "text") order.push(name);
+      else tail.push(name);
+    }
+    order = order.concat(tail);
+    for (var j = 0; j < order.length && !handled; j++) {
+      try { handled = attachPathLines(e.dataTransfer.getData(order[j])); } catch (err) {}
+    }
+    if (!handled) {
+      // Last resort: some drag sources only expose the default text flavor.
+      try { handled = attachPathLines(e.dataTransfer.getData("text")); } catch (err) {}
+    }
+    if (handled) {
+      e.preventDefault();
+    } else if (types.length > 0) {
+      var shown = Array.prototype.slice.call(types).join(", ");
+      statusEl.textContent = "拖入内容无法识别（" + shown + "）";
+    }
+  }, true);
 
   function send() {
     var text = inputEl.value.trim();
