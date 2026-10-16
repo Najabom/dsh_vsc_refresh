@@ -24,6 +24,18 @@ function overlayRegisterPath(): string | undefined {
 }
 
 /**
+ * Multi-window guard entry (bundled from src/harness/guard.ts). The harness is
+ * spawned THROUGH this wrapper so it cannot outlive every dsh-vsc window: the
+ * guard polls the client heartbeats under %TEMP%\dsh-vsc-clients and kills the
+ * tree when the last window goes stale, and dies with the harness otherwise.
+ */
+const GUARD_SCRIPT = join(__dirname, "harness-guard.mjs");
+
+function guardScriptPath(): string | undefined {
+  return existsSync(GUARD_SCRIPT) ? GUARD_SCRIPT : undefined;
+}
+
+/**
  * Persistent record of the harness this extension auto-started, so a detached
  * background instance is never "invisible": the file names the PID, port and
  * start time, and deactivate clears it. Re-run of the shutdown logic reads it
@@ -266,14 +278,23 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
     );
   }
   const args = ["web", "--no-open", "--port", String(port)];
-  log.appendLine(`$ ${l.node} ${l.script} ${args.join(" ")} (direct node, windowless, detached, shared ~/.dsh)`);
+  // Wrap in the multi-window guard when available: the guard supervises the
+  // heartbeat liveness contract and kills the harness after an all-windows
+  // crash. Missing bundle (dev runs) falls back to the direct spawn — still
+  // correct, only the crash-cleanup path is lost.
+  const guard = guardScriptPath();
+  const spawnArgv = guard ? [guard, l.script, ...args] : [l.script, ...args];
+  log.appendLine(
+    `$ ${l.node} ${spawnArgv.join(" ")} (direct node, windowless, detached, shared ~/.dsh${guard ? ", guard-wrapped" : ""})`
+  );
+  if (!guard) log.appendLine("multi-window guard missing (dist/harness-guard.mjs) — direct spawn without crash cleanup");
   if (cwd) log.appendLine(`harness cwd: ${cwd} (VS Code workspace folder — new sessions and the web GUI start here)`);
   log.appendLine(
     env.GITHUB_TOKEN
       ? `GITHUB_TOKEN: ${env.GITHUB_TOKEN.length} chars (${process.env.GITHUB_TOKEN ? "process env" : "Windows user env fallback"})`
       : "GITHUB_TOKEN: MISSING — dsh web will fail to boot (mcp-github config)"
   );
-  const proc = spawn(l.node, [l.script, ...args], {
+  const proc = spawn(l.node, spawnArgv, {
     shell: false,
     windowsHide: true,
     detached: true,
@@ -285,6 +306,8 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
     ...(cwd ? { cwd } : {}),
   });
   child = proc;
+  // The record names the GUARD pid: its command line carries `--port <N>` and
+  // taskkill /T on it tears down guard + harness together.
   writePidRecord({ pid: proc.pid ?? 0, port, startedAt: new Date().toISOString(), args: [l.script, ...args] });
   // Exit/error handlers only clear state that still belongs to THIS process:
   // after a stop→start (or reload→start) the old child's async exit event

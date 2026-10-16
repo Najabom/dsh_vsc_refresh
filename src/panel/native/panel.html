@@ -334,12 +334,16 @@
   .btn.primary:disabled { opacity: .5; cursor: default; }
   #cancel { color: var(--err); }
 
+  /* Pending-send strip: docked directly above the input box. Queued/steering
+     messages appear ONLY here until the harness delivers them; 排队 is green
+     and the text wraps with the same line-height logic as the transcript. */
   #queue-row { display: flex; flex-direction: column; gap: 4px; padding-bottom: 4px; }
-  .q-item { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 3px;
-            padding: 3px 6px; background: var(--input-bg); font-size: 12px; }
-  .q-item .qtag { font-size: 10px; color: var(--muted); flex: none; }
-  .q-item .qtext { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
-  .q-item .qbtn { flex: none; cursor: pointer; color: var(--muted); padding: 0 3px; border: none; background: none; font-size: 11px; }
+  .q-item { display: flex; align-items: flex-start; gap: 6px; border: 1px solid var(--border); border-radius: 3px;
+            padding: 4px 8px; background: var(--input-bg); font-size: 13px; }
+  .q-item .qtag { font-size: 13px; line-height: 1.55; color: var(--muted); flex: none; }
+  .q-item .qtag.queued { color: var(--vscode-charts-green, #89d185); }
+  .q-item .qtext { flex: 1; white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.55; color: var(--fg); }
+  .q-item .qbtn { flex: none; cursor: pointer; color: var(--muted); padding: 0 3px; border: none; background: none; font-size: 12px; line-height: 1.55; }
   .q-item .qbtn:hover { color: var(--fg); }
   .q-item .qbtn.danger:hover { color: var(--err); }
 
@@ -582,7 +586,6 @@
   <footer>
     <div id="mention-menu" hidden></div>
     <div id="attach-row" hidden></div>
-    <div id="queue-row" hidden></div>
     <section id="todo-bar" hidden>
       <button id="todo-toggle" title="展开/折叠任务">☑ 任务 <span class="tcount" id="todo-count"></span> <span id="todo-chevron">▸</span></button>
       <ul id="todo-list" hidden></ul>
@@ -597,6 +600,7 @@
       </div>
     </section>
     <section id="interact-card" hidden></section>
+    <div id="queue-row" hidden></div>
     <div id="input-row">
       <div class="input-box">
         <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
@@ -665,6 +669,8 @@
     queue: [],               // session/queue snapshot for the active session
     commands: [],            // slash-command catalog (commands/list)
     todos: [],               // todos projection for the active session
+    todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
+    todoPrevAll: false,      // previous snapshot fully completed (carry reset rule)
     todoCache: null,         // { sessionId, items } — latest todos seen, survives session switches
     todoOpen: false,         // task-bar expanded?
     hasMore: false,          // older history pages available
@@ -726,6 +732,14 @@
       var a = b.attachment;
       return { attachmentId: String(a.attachmentId), mediaType: String(a.mediaType || "image/png"),
                name: a.name ? String(a.name) : "", width: a.width, height: a.height, bytes: a.bytes, data: "" };
+    });
+  }
+  function fileBlocksOf(message) {
+    return blocksOf(message).filter(function (b) {
+      return b && b.type === "file" && b.attachment && b.attachment.attachmentId;
+    }).map(function (b) {
+      var a = b.attachment;
+      return { attachmentId: String(a.attachmentId), name: a.name ? String(a.name) : "文件", bytes: a.bytes };
     });
   }
   function contentBlocks(message) {
@@ -871,23 +885,14 @@
         }
         var u = textBlocksOf(msg);
         var imgs = imageBlocksOf(msg);
-        if (u || imgs.length) {
-          // Update the newest PENDING user bubble wherever it sits in the
-          // list. send() optimistically inserts a pending bubble, and a
-          // history replay right after prompt can push a turn item past it —
-          // matching only the LAST item would then create a duplicate bubble.
-          var pend = null;
-          for (var ui = state.items.length - 1; ui >= 0; ui--) {
-            if (state.items[ui].kind === "user" && state.items[ui].pending) { pend = state.items[ui]; break; }
-          }
-          if (pend) {
-            if (u) pend.text = u;
-            if (imgs.length) pend.images = mergeImageRefs(pend.images, imgs);
-            pend.pending = false; pend.turn = d.turn; pend.version = (pend.version || 0) + 1;
-          } else {
-            state.items.push({ kind: "user", text: u, turn: d.turn,
-                               images: imgs.length ? imgs : undefined });
-          }
+        var files = fileBlocksOf(msg);
+        if (u || imgs.length || files.length) {
+          // Pending sends (queue/steer) never enter the transcript: they live
+          // in the queue strip until the harness actually delivers them, and
+          // only then a real bubble is appended at its chronological position.
+          state.items.push({ kind: "user", text: u, turn: d.turn,
+                             images: imgs.length ? imgs : undefined,
+                             files: files.length ? files : undefined });
         }
         break;
       }
@@ -1111,8 +1116,10 @@
             break;
           }
           var himgs = imageBlocksOf(msg);
-          if (u || himgs.length) out.push({ kind: "user", text: u, turn: d.turn,
-                                            images: himgs.length ? himgs : undefined });
+          var hfiles = fileBlocksOf(msg);
+          if (u || himgs.length || hfiles.length) out.push({ kind: "user", text: u, turn: d.turn,
+                                            images: himgs.length ? himgs : undefined,
+                                            files: hfiles.length ? hfiles : undefined });
           break;
         }
         case "assistant/message": {
@@ -1883,18 +1890,6 @@
     return wrap;
   }
 
-  /** When the replayed refs line up 1:1 with the bytes the user just pasted,
-   *  keep those bytes: the message you sent never needs an attachment fetch. */
-  function mergeImageRefs(local, refs) {
-    if (!local || local.length !== refs.length) return refs;
-    return refs.map(function (r, i) {
-      if (!local[i] || !local[i].data) return r;
-      return { attachmentId: r.attachmentId, mediaType: r.mediaType || local[i].mediaType,
-               name: r.name || local[i].name, width: r.width, height: r.height,
-               bytes: r.bytes, data: local[i].data };
-    });
-  }
-
   /** Tool-category tone (opencode-style colors): exec=amber, write=green, read=blue, agent=purple. */
   function toolTone(name) {
     var n = String(name || "");
@@ -2127,12 +2122,12 @@
         var tname2 = document.createElement("span");
         tname2.className = "tname";
         var tlist = item.todos || [];
-        var tdone = 0, tact = 0;
-        tlist.forEach(function (t) {
+        var tdone = 0, tact = [];
+        tlist.forEach(function (t, ti) {
           if (t.status === "completed") tdone++;
-          else if (t.status === "in_progress") tact++;
+          else if (t.status === "in_progress") tact.push((ti + 1) + "#");
         });
-        tname2.textContent = "☑ 任务清单 : " + (tact ? tact + " 进行中 · " : "") + tdone + "/" + tlist.length;
+        tname2.textContent = "☑ 任务清单 : " + (tact.length ? tact.join(",") + " 进行中 · " : "") + tdone + "/" + tlist.length;
         tsum2.appendChild(tdot2);
         tsum2.appendChild(tname2);
         tdet.appendChild(tsum2);
@@ -2276,7 +2271,7 @@
       var row = document.createElement("div");
       row.className = "q-item";
       var tag = document.createElement("span");
-      tag.className = "qtag";
+      tag.className = "qtag" + (it.placement === "queued" ? " queued" : "");
       tag.textContent = it.placement === "steering" ? "插入中" : "排队";
       var txt = document.createElement("span");
       txt.className = "qtext";
@@ -2294,7 +2289,13 @@
       };
       row.appendChild(qbtn("copy", "复制", function () { post({ type: "copyText", text: it.text }); }));
       if (it.placement === "queued") {
-        row.appendChild(qbtn("steer", "在下一个 LLM 回复后插入（打断）", function () { post({ type: "queueSteer", itemId: it.id }); }));
+        row.appendChild(qbtn("steer", "在下一个 LLM 回复后插入（打断）", function () {
+          // Optimistic flip: the row immediately reads 插入中; the next
+          // session/queue snapshot is authoritative and keeps or corrects it.
+          it.placement = "steering";
+          renderQueue();
+          post({ type: "queueSteer", itemId: it.id });
+        }));
         row.appendChild(qbtn("del", "撤回（从队列移除）", function () { post({ type: "queueRemove", itemId: it.id }); }, true));
       }
       queueEl.appendChild(row);
@@ -2306,10 +2307,22 @@
   function renderTodos() {
     var has = state.todos && state.todos.length > 0;
     todoBarEl.hidden = !has;
-    if (!has) return;
-    var active = state.todos.filter(function (t) { return t.status === "in_progress"; }).length;
-    var done = state.todos.filter(function (t) { return t.status === "completed"; }).length;
-    todoCountEl.innerHTML = (active ? "<b>" + active + " 进行中</b> · " : "") + done + "/" + state.todos.length;
+    if (!has) return; // keep the carry: an empty list is the turn-reset, not a new task
+    var activeIdx = [];
+    var done = 0;
+    state.todos.forEach(function (t, i) {
+      if (t.status === "in_progress") activeIdx.push((i + 1) + "#");
+      else if (t.status === "completed") done++;
+    });
+    // x accumulates across "继续": each turn resets the projection, and the
+    // rebuilt list must never read lower than what we already saw. Reset only
+    // for a brand-new task — a fresh list with nothing done arriving right
+    // after the previous list had finished.
+    if (done === 0 && state.todoPrevAll) state.todoDoneCarry = 0;
+    state.todoDoneCarry = Math.max(state.todoDoneCarry || 0, done);
+    state.todoPrevAll = done === state.todos.length;
+    var x = Math.min(state.todoDoneCarry, state.todos.length);
+    todoCountEl.innerHTML = (activeIdx.length ? "<b>" + activeIdx.join(",") + " 进行中</b> · " : "") + x + "/" + state.todos.length;
     todoListEl.hidden = !state.todoOpen;
     todoChevronEl.textContent = state.todoOpen ? "▾" : "▸";
     if (!state.todoOpen) return;
@@ -2374,7 +2387,8 @@
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; renderQueue();
-          state.todos = []; renderTodos();   // host re-pushes via todos message
+          state.todos = []; state.todoDoneCarry = 0; state.todoPrevAll = false;
+          renderTodos();   // host re-pushes via todos message
           state.diffByCall = {}; state.activeRound = null;
           // Clear EVERY live-timing field: leaving any of them behind made the
           // bottom bar blend this session's clock with the previous session's.
@@ -4245,20 +4259,11 @@
       }
     }
     hideMenu();
-    if (text) {
-      // Carry the pasted bytes on the optimistic bubble so the image shows the
-      // moment you hit send (your own message never needs a ref round-trip).
-      var localImages = [];
-      var localFiles = [];
-      attachments.forEach(function (a) {
-        if (a.kind === "file") localFiles.push({ name: a.name || "文件", size: a.size || 0 });
-        else localImages.push({ attachmentId: "", mediaType: a.mediaType, name: a.name || "", data: a.data });
-      });
-      state.items.push({ kind: "user", text: text, pending: true, turn: state.lastTurn,
-                         images: localImages.length ? localImages : undefined,
-                         files: localFiles.length ? localFiles : undefined });
-      scheduleRender();
-    }
+    // Pending sends do NOT get an optimistic transcript bubble: parking one
+    // mid-flow made the running turn look truncated (its stream kept updating
+    // above the parked bubble while later tool cards appended below it). The
+    // queue strip above the input is the only pending view; the bubble enters
+    // the transcript when the harness delivers the message for real.
     post({ type: "send", text: text, attachments: attachments.slice(), mode: "queue" });
     var fileCount = attachments.filter(function (a) { return a.kind === "file"; }).length;
     history.push(text || (fileCount ? ("📎 " + fileCount + " 个附件") : ("📷 " + attachments.length + " 张图片")));

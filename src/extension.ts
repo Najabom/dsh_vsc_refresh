@@ -10,6 +10,7 @@ import { HarnessClient } from "./harness/client";
 import { syncCompanion, type CompanionStatus } from "./harness/companion";
 import { configuredBase, discover, portOf } from "./harness/discover";
 import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
+import { isLocalBase, liveOtherClients, pruneStale, removeHeartbeat, writeHeartbeat } from "./harness/clientRegistry";
 import { ensureWorkspaceAcl, repairWorkspaceAclElevated } from "./harness/workspaceAcl";
 import { checkForUpdate, installedDshVersion, installDsh, runDshUpdate, DSH_PACKAGE, type UpdateInfo } from "./harness/updater";
 import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
@@ -40,6 +41,16 @@ const VERIFY_RETRY_WINDOW_MS = 45000; // extra retry window for the gateway rout
  *  detached orphan nobody could ever stop). */
 let shuttingDown = false;
 
+/**
+ * Multi-window liveness: this window writes a 5s heartbeat (via
+ * clientRegistry) naming the harness base it is connected to. Shutdown uses
+ * it to tell "other windows still need the service" (leave it) apart from
+ * "we are the last one" (stop it), and dist/harness-guard.mjs uses the same
+ * files to clean up after an all-windows crash.
+ */
+let heartbeatTimer: NodeJS.Timeout | undefined;
+let heartbeatBase: string | undefined;
+
 export function activate(context: vscode.ExtensionContext): void {
   shuttingDown = false;
   const log = vscode.window.createOutputChannel("DSH Bridge");
@@ -65,6 +76,20 @@ export function activate(context: vscode.ExtensionContext): void {
   let autoRetryDisabled = false; // too many consecutive spawn failures this session
   let consecutiveSpawnFailures = 0;
   let checkTimer: NodeJS.Timeout | null = null;
+  heartbeatTimer = setInterval(() => {
+    if (heartbeatBase) {
+      pruneStale();
+      writeHeartbeat(heartbeatBase);
+    }
+  }, 5000);
+  context.subscriptions.push({
+    dispose: () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
+    },
+  });
   let authNoticeShown = false;
   // Companion bundle (companion/dsh-vsc-companion): synced into profile
   // storage through the official plugin manager whenever the VSIX copy
@@ -397,6 +422,11 @@ export function activate(context: vscode.ExtensionContext): void {
       panel.setClient(client, d.version);
       askProvider.setClient(client, d.version);
       ensureStream(d.base);
+      // Liveness: name ourselves for this base now and every 5s (covers the
+      // "which window is still using the shared harness" decision in
+      // deactivate, and the guard's crash cleanup).
+      heartbeatBase = d.base;
+      writeHeartbeat(d.base);
       void runCompanionSync();
       return;
     }
@@ -825,25 +855,46 @@ function logDeactivate(line: string): void {
  * record left by a previous session after an extension reload). A
  * pre-existing/shared harness is never killed.
  *
- * dsh 0.1.7 removed host.describe — and with it the clientCount reference
- * count that used to tell us "a browser tab is still attached, leave it
- * running". With no way to ask, the owned instance (windowless, detached, no
- * UI of its own) is stopped deterministically: an orphan would outlive its
- * owner with nothing left to shut it down.
+ * Multi-window rules (several VS Code windows share ONE harness on the same
+ * port + ~/.dsh):
+ * - First drop our heartbeat file so we no longer count ourselves.
+ * - If any OTHER live window (fresh heartbeat, alive pid) is connected to the
+ *   same local base, leave the harness running — closing one of several
+ *   windows must not take the service away from the others.
+ * - Otherwise stop the owned instance (windowless, detached spawn owned by
+ *   this extension; an orphan would outlive its owner).
+ *
+ * All-windows-crash cleanup is NOT here (no deactivate runs then): the
+ * dist/harness-guard.mjs wrapper spawned in front of `dsh web` kills the tree
+ * ~45s after the last heartbeat went stale.
  */
 export function deactivate(): Promise<void> {
   shuttingDown = true;
   // Older temp diff dirs would otherwise accumulate one per reviewed file.
   cleanupTempDirs();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  }
+  removeHeartbeat(); // leave the liveness set BEFORE deciding
+  const base = heartbeatBase;
+  heartbeatBase = undefined;
   logDeactivate("deactivate called");
   const owned = harnessRunning();
   const record = readPidRecord();
-  logDeactivate(`owned=${owned} pidRecord=${JSON.stringify(record)}`);
+  logDeactivate(`owned=${owned} pidRecord=${JSON.stringify(record)} base=${base ?? "(none)"}`);
   if (!owned) {
     logDeactivate("shared or no harness — nothing to stop");
     return Promise.resolve();
   }
-  logDeactivate("stopping owned instance");
+  if (base && isLocalBase(base)) {
+    const others = liveOtherClients(base);
+    if (others.length > 0) {
+      logDeactivate(`leaving shared harness alive — other dsh-vsc windows: ${others.join(", ")}`);
+      return Promise.resolve();
+    }
+  }
+  logDeactivate("stopping owned instance (last live dsh-vsc window)");
   return stopHarness().then((result) => {
     logDeactivate(`stopHarness -> ${JSON.stringify(result)}`);
   });

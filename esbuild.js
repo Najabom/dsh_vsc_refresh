@@ -79,6 +79,20 @@ async function main() {
     logLevel: "info",
   };
 
+  // Multi-window guard: spawned in front of `dsh web` (see
+  // src/harness/guard.ts) so the harness cannot outlive every dsh-vsc window.
+  // Plain node, bundling keeps it dependency-free like overlay-register.mjs.
+  const guardOptions = {
+    entryPoints: ["src/harness/guard.ts"],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node20",
+    outfile: "dist/harness-guard.mjs",
+    sourcemap: true,
+    logLevel: "info",
+  };
+
   copyDir("src/panel/media", "dist/media");
   copyDir("src/panel/native", "dist/media/native");
   await injectRenderer();
@@ -103,7 +117,7 @@ async function main() {
     await Promise.all([ctx.watch(), ctxOverlay.watch(), ctxRenderer.watch()]);
     console.log("[esbuild] watching…");
   } else {
-    await Promise.all([esbuild.build(options), esbuild.build(overlayOptions)]);
+    await Promise.all([esbuild.build(options), esbuild.build(overlayOptions), esbuild.build(guardOptions)]);
   }
 }
 

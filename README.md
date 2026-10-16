@@ -103,7 +103,8 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 
 **Harness lifecycle**
 
-- Reuses a running DSH (shared client — **never a second server**); auto-starts its own windowless instance only when none is reachable. That instance is **owned**: it is stopped deterministically when VS Code exits. A manually started harness is never touched.
+- Reuses a running DSH (shared client — **never a second server**); auto-starts its own windowless instance only when none is reachable. That instance is **owned**: a manually started harness is never touched.
+- **Multiple VS Code windows** share the one harness. Every window writes a small heartbeat; closing one of several windows leaves the service running for the others, closing the **last** window stops it. If every window dies at once (crash / force-kill), a guard wrapper in front of the harness kills the tree ~45 seconds later — a background instance can never be orphaned.
 
 ## Screenshots
 
