@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.1.4",
+  "version": "1.1.5",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -143,6 +143,28 @@
           "type": "boolean",
           "default": true,
           "description": "%dsh.config.companion%"
+        },
+        "dshVsc.statusBarEntry": {
+          "type": "boolean",
+          "default": true,
+          "description": "%dsh.config.statusBarEntry%"
+        },
+        "dshVsc.nativeWebAuth": {
+          "type": "boolean",
+          "default": true,
+          "description": "%dsh.config.nativeWebAuth%"
+        },
+        "dshVsc.dshUpdateChannel": {
+          "type": "string",
+          "enum": ["auto", "stable", "next", "alpha"],
+          "default": "auto",
+          "description": "%dsh.config.dshUpdateChannel%",
+          "enumDescriptions": [
+            "%dsh.config.dshUpdateChannel.auto%",
+            "%dsh.config.dshUpdateChannel.stable%",
+            "%dsh.config.dshUpdateChannel.next%",
+            "%dsh.config.dshUpdateChannel.alpha%"
+          ]
         }
       }
     }

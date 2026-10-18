@@ -154,6 +154,8 @@ DSH 官方界面 = **runtime + 插件集**。官方每换一次 UI，本质是**
 
 它不是插件，是**对官方进程内部的一次临时侵入（monkey-patch）**。详见下一节——怎么让它「侵入」得可控、可回滚、绝不坏事。
 
+补充（1.1.5 起）：**你启动的原生 `dsh web` 不必关闭。** DSH 的浏览器会话签名密钥持久保存在本机 `~/.dsh/.credentials.yaml`（`client-connection/browser-session`），扩展据此按官方格式自签一个短时 Cookie（仅回环地址、30 分钟、绝不记录）即可接入，原生实例与浏览器界面可以继续并用。overlay 只负责**扩展自启的受管实例**（那样既不依赖本机凭据，也不要求用户先登录过浏览器）。`dshVsc.nativeWebAuth` 可关闭该自动鉴别，退回「提示后请用户自行关闭」的行为。
+
 ---
 
 ## 4. 唯一的技术取舍：overlay 补丁
@@ -210,13 +212,16 @@ DSH 有一套**运行时补丁机制（overlay）**：在官方进程**加载模
 
 DSH 更新很频繁，而每一次协议改动都可能让扩展失配。所以「更新 DSH」在这里不是一句话的事：
 
-1. **检查**：启动时查 npm registry，发现新版本弹窗（「暂不更新」记忆到下一个版本）。
+1. **检查**：启动时、以及窗口存续期间每 6 小时查 npm registry，发现新版本弹窗（「暂不更新」记忆到下一个版本）；harness 重连后 30 分钟限频内补查。
+   - **通道感知**：npm 的 `latest` 标签长期停在旧版，而 rc/alpha 安装永远「已最新」——所以默认 `auto`：用预发布版的安装跟随全量版本里的最新预发布，稳定版安装对照 `latest`；也可显式选择 `stable` / `next` / `alpha`（`dshVsc.dshUpdateChannel`），比较规则集中在纯模块 `src/harness/updateChannel.ts`。
 2. **接口预检**（升级前）：
    - **通告扫描**：把官方 Release Notes 里当前版本 → 目标版本之间的说明抓下来（GitHub API，失败回退 atom），逐条扫本扩展用到的**接口标识**（33 个：全部 RPC 端点 + 事件流协议名 + 鉴权协议名）。
    - **包内核验**：把目标版本的 tarball 拉下来，**静态**检查这些接口是否真的存在于三个关键官方包里（`dsh-api-remotes` / `dsh-api-gateway` / `dsh-client-connection`）。
    - **三分支**：有风险 → 警告并建议「先更新扩展，等适配」；通过 → 正常弹更新；预检不可用（断网等）→ 照常弹更新，但如实说明「预检未完成」。无论如何都保留逃生通道：*仍要更新（自检失败自动回滚）*。
 3. **执行**：停掉从属 harness → `npm install -g` 目标版本（超时保护、输出留日志）。
 4. **自检**：重启 harness → 探活 → **验证 RPC 与事件流都通了**才算成功；失败 → 提供「回滚到原版本」按钮（重装旧版 + 重启 + 再验证）。
+
+手动入口：命令面板 `DSH: 检查 DSH 更新`（立即复查，忽略 30 分钟限频）、`DSH: 更新 DSH`；以及设置页通用页的**扩展更新 / DSH 更新**两张卡（检测 / 安装）。扩展自身的更新走 GitHub Release：下载 VSIX → 通过 VS Code CLI `--install-extension --force` 安装，运行中的窗口在重载后生效。
 
 ### 5.3 Windows 沙箱 ACL：一次性把地修平
 
@@ -363,6 +368,8 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | `src/harness/overlay/pristine.ts` | 官方 SHA256 表 + 完整性自检 | §4.2 |
 | `src/harness/launcher.ts` | 启动 DSH（注入 overlay、PID 记录、无窗口） | §5.1 |
 | `src/harness/updater.ts` | 更新检查 / 安装 / 版本比较 | §5.2 |
+| `src/harness/updateChannel.ts` | 通道感知的版本比较（auto/stable/next/alpha，纯模块） | §5.2 |
+| `src/harness/pluginUpdater.ts` | 扩展自更新（GitHub Release VSIX → code CLI） | §5.2 |
 | `src/harness/updatePreflight.ts` | 接口预检（通告扫描 + 包内静态核验） | §5.2 |
 | `src/harness/workspaceAcl.ts` | Windows 沙箱工作区 ACL 自动修复 | §5.3 |
 | `src/editor/followEdits.ts` | 跟随编辑（改动定位） | §5.4 |

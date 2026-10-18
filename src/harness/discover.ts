@@ -28,7 +28,12 @@ export interface DiscoveryResult {
 export function configuredBase(): string {
   const fromConfig = vscode.workspace.getConfiguration("dshVsc").get<string>("url");
   const fromEnv = process.env.DSH_WEB_URL;
-  return (fromConfig?.trim() || fromEnv?.trim() || "http://127.0.0.1:3080").replace(/\/+$/, "");
+  // The browser-session cookie is authority-bound; `localhost` and
+  // `127.0.0.1` are DIFFERENT authorities, so normalize the loopback alias to
+  // the address native instances actually bind (the default).
+  return (fromConfig?.trim() || fromEnv?.trim() || "http://127.0.0.1:3080")
+    .replace(/\/+$/, "")
+    .replace(/^(https?:\/\/)localhost(?=[:/]|$)/i, "$1127.0.0.1");
 }
 
 /** Port implied by a base URL (default 3080). */

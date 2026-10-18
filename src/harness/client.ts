@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { nativeAuthHeaders } from "./nativeAuth";
 import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
@@ -29,7 +30,11 @@ export class HarnessClient {
     try {
       res = await fetch(`${this.base}/api/${method}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        // A native `dsh web` demands a browser-session cookie even for local
+        // protocol clients; mint one from this home's stored signing secret
+        // (loopback only). Managed instances ignore it — their overlay bypass
+        // already admits us.
+        headers: { "content-type": "application/json", ...(nativeAuthHeaders(this.base) ?? {}) },
         body: JSON.stringify(request),
         signal,
       });
@@ -59,7 +64,7 @@ export class HarnessClient {
     try {
       const res = await fetch(`${this.base}/api/${METHODS.sessionList}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(nativeAuthHeaders(this.base) ?? {}) },
         body: JSON.stringify({ type: "client-request", rpcId: randomUUID(), method: METHODS.sessionList, payload: { args: { _request: {} } } }),
         signal: AbortSignal.timeout(timeoutMs),
       });

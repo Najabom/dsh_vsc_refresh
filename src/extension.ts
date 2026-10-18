@@ -11,8 +11,24 @@ import { syncCompanion, type CompanionStatus } from "./harness/companion";
 import { configuredBase, discover, portOf } from "./harness/discover";
 import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
 import { isLocalBase, liveOtherClients, pruneStale, removeHeartbeat, writeHeartbeat } from "./harness/clientRegistry";
+import { setNativeWebAuthEnabled } from "./harness/nativeAuth";
 import { ensureWorkspaceAcl, repairWorkspaceAclElevated } from "./harness/workspaceAcl";
-import { checkForUpdate, installedDshVersion, installDsh, runDshUpdate, DSH_PACKAGE, type UpdateInfo } from "./harness/updater";
+import {
+  checkForUpdateDetailed,
+  installedDshVersion,
+  installDsh,
+  runDshUpdate,
+  DSH_PACKAGE,
+  type DshUpdateChannel,
+  type UpdateInfo,
+} from "./harness/updater";
+import {
+  checkPluginUpdate,
+  cleanupUpdateTemp,
+  installedPluginVersion,
+  installPluginUpdate,
+  restartHost,
+} from "./harness/pluginUpdater";
 import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
 import { HarnessEventStream } from "./events/eventStream";
 import { ChangeTracker } from "./editor/changeTracker";
@@ -35,6 +51,7 @@ const DISCONNECT_RECHECK_MS = 3000; // grace before probing after the event stre
 // path before it is allowed to call the update a failure.
 const RESTART_BOOT_TIMEOUT_MS = 90000;
 const VERIFY_RETRY_WINDOW_MS = 45000; // extra retry window for the gateway routes after the port answers
+const DSH_UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000; // long-running windows must not miss releases
 
 /** Set on deactivate: stops every lifecycle callback from spawning or probing
  *  after the extension is going away (a late timer would otherwise spawn a
@@ -55,6 +72,30 @@ export function activate(context: vscode.ExtensionContext): void {
   shuttingDown = false;
   const log = vscode.window.createOutputChannel("DSH Bridge");
   const status = new DshStatusBar();
+  // Fallback entry when the activity-bar icon gets hidden (right-click → hide
+  // is per-window UI state that the extension cannot detect or undo).
+  const statusEntry = vscode.window.createStatusBarItem("dsh.sidebar", vscode.StatusBarAlignment.Right, 100);
+  statusEntry.name = "DSH";
+  statusEntry.text = "$(comment-discussion) DSH";
+  statusEntry.tooltip = "打开 DSH 面板（活动栏图标被隐藏时的入口）";
+  statusEntry.command = "dsh.openSidebar";
+  const syncStatusEntry = (): void => {
+    const enabled = vscode.workspace.getConfiguration("dshVsc").get<boolean>("statusBarEntry", true);
+    if (enabled) statusEntry.show();
+    else statusEntry.hide();
+  };
+  syncStatusEntry();
+  const syncNativeWebAuth = (): void => {
+    setNativeWebAuthEnabled(vscode.workspace.getConfiguration("dshVsc").get<boolean>("nativeWebAuth", true));
+  };
+  syncNativeWebAuth();
+  context.subscriptions.push(statusEntry);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("dshVsc.statusBarEntry")) syncStatusEntry();
+      if (e.affectsConfiguration("dshVsc.nativeWebAuth")) syncNativeWebAuth();
+    })
+  );
   const makeLog = (message: string): void => {
     log.appendLine(message);
     console.log("[dsh-vsc]", message); // lands in the exthost log for headless diagnosis
@@ -76,6 +117,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let autoRetryDisabled = false; // too many consecutive spawn failures this session
   let consecutiveSpawnFailures = 0;
   let checkTimer: NodeJS.Timeout | null = null;
+  let dshUpdateTimer: NodeJS.Timeout | null = null;
+  let lastDshUpdateCheckAt = 0;
   heartbeatTimer = setInterval(() => {
     if (heartbeatBase) {
       pruneStale();
@@ -111,10 +154,30 @@ export function activate(context: vscode.ExtensionContext): void {
         clearTimeout(checkTimer);
         checkTimer = null;
       }
+      if (dshUpdateTimer) {
+        clearInterval(dshUpdateTimer);
+        dshUpdateTimer = null;
+      }
     },
   });
 
-  const panel = new NativePanelProvider(context, makeLog, () => client, (cb) => panelListeners.add(cb));
+  const panel = new NativePanelProvider(context, makeLog, () => client, (cb) => panelListeners.add(cb), false, {
+    // Settings-page update center: the extension owns the GitHub/CLI side so
+    // the provider only drives phases and status lines.
+    updateCenter: {
+      installedVersion: installedPluginVersion,
+      check: () => checkPluginUpdate(makeLog),
+      install: () => installPluginUpdate(makeLog),
+      restart: restartHost,
+    },
+    dshUpdates: {
+      installedVersion: async () => (await installedDshVersion()) ?? "",
+      check: (channel) => checkForUpdateDetailed(makeLog, channel as DshUpdateChannel),
+      update: async () => {
+        await vscode.commands.executeCommand("dsh.updateDsh");
+      },
+    },
+  });
 
   // Dedicated per-workspace ask conversation, shown in its own editor-area
   // split to the side, hugging the existing DSH sidebar (not a bottom panel).
@@ -296,14 +359,35 @@ export function activate(context: vscode.ExtensionContext): void {
       reviewFiles(tracker.latestFiles());
       // The review is open — drop the badge back to the online indicator.
       status.setChanges(0);
+    }),
+    vscode.commands.registerCommand("dsh.checkDshUpdates", () => {
+      // Manual check from the settings page / palette: lift the throttle.
+      lastDshUpdateCheckAt = 0;
+      void offerDshUpdate();
+    }),
+    vscode.commands.registerCommand("dsh.updateDsh", async () => {
+      const channel = dshUpdateChannel();
+      const info = await checkForUpdateDetailed(makeLog, channel);
+      if (info.kind === "update") {
+        await performDshUpdate(info);
+      } else if (info.kind === "uptodate") {
+        void vscode.window.showInformationMessage(
+          `DSH 已是最新版本（${info.installed ?? "?"}，通道 ${info.channel ?? channel}）。`
+        );
+      } else {
+        void vscode.window.showWarningMessage(`检查 DSH 更新失败：${info.detail ?? "未知错误"}`);
+      }
     })
   );
 
   void refresh();
 
-  // Update check: once per window start, delayed so the dialog does not race
-  // the harness startup sequence.
+  // DSH update check: once per window start (delayed so the dialog does not
+  // race the harness startup sequence), then every 6 hours — a window left
+  // open for days must not keep reporting the release it booted with. The
+  // channel setting decides which release line is compared (see updater.ts).
   setTimeout(() => void offerDshUpdate(), 5000);
+  dshUpdateTimer = setInterval(() => void offerDshUpdate(), DSH_UPDATE_RECHECK_MS);
 
   // Dev-host autotest hook (only when launched with DSH_VSC_AUTOTEST=1): open the
   // right sidebar a few seconds after startup so resolveWebviewView runs and its
@@ -408,7 +492,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (authNoticeShown || shuttingDown) return;
     authNoticeShown = true;
     void vscode.window.showWarningMessage(
-      `DSH Bridge：${base} 已有原生 dsh web 在运行（需要浏览器鉴权，扩展无法连接）。` +
+      `DSH Bridge：${base} 已有原生 dsh web 在运行，但无法自动鉴别（本机凭据不可用，或 dshVsc.nativeWebAuth 已关闭）。` +
         `请关闭它，扩展会自动启动并接管一个受管实例；或改用命令 “dsh: Start Web Harness”。`
     );
   }
@@ -563,6 +647,10 @@ export function activate(context: vscode.ExtensionContext): void {
       void discover().then((d) => {
         if (d.alive) status.setOnline(d.version ?? "?");
       });
+      // The harness may have been upgraded by another window or by hand since
+      // this window started — re-check the release line (throttled inside
+      // offerDshUpdate, so a flapping socket cannot hammer the registry).
+      void offerDshUpdate();
     };
     stream.onDisconnect = () => {
       // Stream dropped. The stream itself keeps retrying; give it a grace
@@ -656,17 +744,38 @@ export function activate(context: vscode.ExtensionContext): void {
     return { ok: true, detail: "" };
   }
 
-  /** Once per window: check the npm registry for a newer DSH; when one exists
-   *  ask 立即更新/暂不更新 (a skip is remembered per version). Choosing update
-   *  runs the full update → restart → communication-verification flow with an
-   *  automatic rollback offer when the new version cannot be driven. */
+  /** Throttle shared by the startup check, the 6h timer and every reconnect:
+   *  a long-lived window must not miss releases, but a flapping harness must
+   *  not hammer the registry either. */
+  const DSH_UPDATE_THROTTLE_MS = 30 * 60 * 1000;
+
+  function dshUpdateChannel(): DshUpdateChannel {
+    const value = vscode.workspace.getConfiguration("dshVsc").get<string>("dshUpdateChannel", "auto");
+    return value === "stable" || value === "next" || value === "alpha" ? value : "auto";
+  }
+
+  /** Ask the npm registry for the newest DSH on the tracked channel and, when
+   *  one exists, offer 立即更新/暂不更新 (a skip is remembered per version).
+   *  Choosing update runs the full update → restart → verification flow with a
+   *  rollback offer when the new version cannot be driven. */
   async function offerDshUpdate(): Promise<void> {
+    if (shuttingDown || updatingDsh) return;
+    const now = Date.now();
+    if (now - lastDshUpdateCheckAt < DSH_UPDATE_THROTTLE_MS) return;
+    lastDshUpdateCheckAt = now;
+    const channel = dshUpdateChannel();
+    const info = await checkForUpdateDetailed(makeLog, channel);
     if (shuttingDown) return;
-    const info = await checkForUpdate(makeLog);
-    if (!info || shuttingDown) return;
+    if (info.kind !== "update") {
+      if (info.kind === "error") log.appendLine(`update check failed: ${info.detail ?? "unknown error"}`);
+      return;
+    }
+    const installed = info.installed;
+    const latest = info.latest;
+    if (!installed || !latest) return;
     const skipped = context.globalState.get<string>("dshVsc.skippedDshVersion");
-    if (skipped === info.latest) {
-      log.appendLine(`dsh v${info.latest} is available but was skipped before — not asking again`);
+    if (skipped === latest) {
+      log.appendLine(`dsh v${latest} is available but was skipped before — not asking again`);
       return;
     }
 
@@ -675,14 +784,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // harness/updatePreflight.ts). A missing signal only downgrades the dialog
     // copy — the runtime verification after an actual update stays the gate.
     const [notesInfo, staticResult] = await Promise.all([
-      fetchReleaseNotes(info.installed, info.latest, makeLog),
-      staticInterfaceCheck(info.latest, makeLog),
+      fetchReleaseNotes(installed, latest, makeLog),
+      staticInterfaceCheck(latest, makeLog),
     ]);
     if (shuttingDown) return;
     const alerts = notesInfo ? scanInterfaceAlerts(notesInfo.notes) : null;
     if (notesInfo) {
       log.appendLine(
-        `release notes: interval (${info.installed}, ${info.latest}] = [${notesInfo.versions.join(", ") || "no entries"}]`
+        `release notes: interval (${installed}, ${latest}] = [${notesInfo.versions.join(", ") || "no entries"}]`
       );
       for (const hit of alerts?.hits ?? []) {
         log.appendLine(`release note mention: ${hit.id} (v${hit.versions.join(", ")})`);
@@ -697,7 +806,7 @@ export function activate(context: vscode.ExtensionContext): void {
         parts.push(`官方通告提及：${noteHits.map((h) => `${h.id}（v${h.versions.join(", ")}）`).join("、")}`);
       }
       const choice = await vscode.window.showWarningMessage(
-        `DSH 新版本 v${info.latest}（当前 v${info.installed}）接口预检未通过：${parts.join("；")}。` +
+        `DSH 新版本 v${latest}（当前 v${installed}，通道 ${info.channel ?? channel}）接口预检未通过：${parts.join("；")}。` +
           `建议先更新 dsh-vsc 插件适配该版本后再升级 DSH。`,
         "暂不更新（等待插件适配）",
         "仍要更新（自检失败自动回滚）"
@@ -707,7 +816,7 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         // Deliberately NOT remembered: a future plugin update is exactly the
         // thing that changes this verdict, and the user must be asked again.
-        log.appendLine(`user deferred dsh ${info.latest} (interface preflight risk)`);
+        log.appendLine(`user deferred dsh ${latest} (interface preflight risk)`);
       }
       return;
     }
@@ -717,13 +826,13 @@ export function activate(context: vscode.ExtensionContext): void {
         ? "接口预检通过（官方通告未提及本扩展所用接口，新版本包内接口核验存在）。"
         : `接口预检未能完成（${staticResult.verified ? "未能获取官方通告" : "未能下载新版本包核验"}）。`;
     const choice = await vscode.window.showInformationMessage(
-      `DSH 有新版本 v${info.latest}（当前 v${info.installed}）。${preflightNote}更新后会自动验证通信兼容性，失败可一键回滚。`,
+      `DSH 有新版本 v${latest}（当前 v${installed}，通道 ${info.channel ?? channel}）。${preflightNote}更新后会自动验证通信兼容性，失败可一键回滚。`,
       "立即更新",
       "暂不更新"
     );
     if (choice === "暂不更新") {
-      await context.globalState.update("dshVsc.skippedDshVersion", info.latest);
-      log.appendLine(`user chose to skip dsh ${info.latest}`);
+      await context.globalState.update("dshVsc.skippedDshVersion", latest);
+      log.appendLine(`user chose to skip dsh ${latest}`);
       return;
     }
     if (choice !== "立即更新" || shuttingDown) return;
@@ -732,19 +841,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
   async function performDshUpdate(info: UpdateInfo): Promise<void> {
     if (updatingDsh || shuttingDown) return;
+    const target = info.latest;
+    const previous = info.installed ?? "?";
+    if (!target) return;
     updatingDsh = true;
     try {
       const owned = harnessRunning();
       await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `DSH：正在更新到 v${info.latest}…` },
+        { location: vscode.ProgressLocation.Notification, title: `DSH：正在更新到 v${target}…` },
         async (progress) => {
           if (owned) {
             // Never replace files under a live harness tree.
             log.appendLine("update: stopping the owned harness before npm install");
             await stopHarness();
           }
-          progress.report({ message: "npm install -g @deepseek-ai/dsh@latest" });
-          const result = await runDshUpdate(makeLog);
+          progress.report({ message: `npm install -g @deepseek-ai/dsh@${target}` });
+          const result = await runDshUpdate(makeLog, target);
           if (!result.ok) {
             void vscode.window.showErrorMessage(
               `DSH 更新失败：${result.error ?? "未知错误"}（详见 “DSH Bridge” 输出日志）`
@@ -756,7 +868,7 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             return;
           }
-          const newVersion = (await installedDshVersion()) ?? info.latest;
+          const newVersion = (await installedDshVersion()) ?? target;
           log.appendLine(`update: npm install finished, installed version is now ${newVersion}`);
           if (!owned) {
             void vscode.window.showInformationMessage(
@@ -773,7 +885,7 @@ export function activate(context: vscode.ExtensionContext): void {
             );
             return;
           }
-          const rollbackLabel = `回滚到 v${info.installed}`;
+          const rollbackLabel = `回滚到 v${previous}`;
           const choice = await vscode.window.showWarningMessage(
             `DSH 已更新到 v${newVersion}，但通信验证失败：${verdict.detail}。` +
               `新版本可能变更了协议或鉴权行为（扩展的兼容层尚未适配）。`,
@@ -781,10 +893,10 @@ export function activate(context: vscode.ExtensionContext): void {
             "保持新版本"
           );
           if (choice !== rollbackLabel) return;
-          log.appendLine(`update: rolling back to v${info.installed}`);
-          progress.report({ message: `回滚到 v${info.installed}…` });
+          log.appendLine(`update: rolling back to v${previous}`);
+          progress.report({ message: `回滚到 v${previous}…` });
           await stopHarness();
-          const back = await installDsh(`${DSH_PACKAGE}@${info.installed}`, makeLog);
+          const back = await installDsh(`${DSH_PACKAGE}@${previous}`, makeLog);
           if (!back.ok) {
             void vscode.window.showErrorMessage(
               `回滚失败：${back.error ?? "未知错误"}（详见 “DSH Bridge” 输出日志）`
@@ -794,8 +906,8 @@ export function activate(context: vscode.ExtensionContext): void {
           const verdict2 = await restartAndVerify();
           void vscode.window.showInformationMessage(
             verdict2.ok
-              ? `已回滚到 v${info.installed}，通信恢复正常。`
-              : `已回滚到 v${info.installed}，但通信仍异常：${verdict2.detail}（详见 “DSH Bridge” 输出日志）`
+              ? `已回滚到 v${previous}，通信恢复正常。`
+              : `已回滚到 v${previous}，但通信仍异常：${verdict2.detail}（详见 “DSH Bridge” 输出日志）`
           );
         }
       );
@@ -872,6 +984,8 @@ export function deactivate(): Promise<void> {
   shuttingDown = true;
   // Older temp diff dirs would otherwise accumulate one per reviewed file.
   cleanupTempDirs();
+  // Downloaded update VSIX files: one temp dir per version.
+  cleanupUpdateTemp();
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = undefined;

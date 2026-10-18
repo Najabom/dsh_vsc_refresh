@@ -122,6 +122,35 @@
 
   <!-- 通用设置 -->
   <section id="tab-general">
+    <div class="card" id="upd-plugin">
+      <h3>扩展更新 <span class="mono">(dsh_vsc_refresh)</span></h3>
+      <div class="row"><label>当前版本</label><span class="mono" id="ext-ver">—</span></div>
+      <div class="row"><label>最新版本</label><span class="mono" id="ext-latest">—</span></div>
+      <div class="row">
+        <button class="save" id="ext-check">检测更新</button>
+        <button class="save" id="ext-install" disabled>安装更新</button>
+        <button class="save" id="ext-restart" hidden>重启窗口</button>
+      </div>
+      <div class="hint" id="ext-msg"></div>
+    </div>
+    <div class="card" id="upd-dsh">
+      <h3>DSH 更新 <span class="mono">(@deepseek-ai/dsh)</span></h3>
+      <div class="row"><label>当前版本</label><span class="mono" id="dsh-ver">—</span></div>
+      <div class="row"><label>最新版本</label><span class="mono" id="dsh-latest">—</span></div>
+      <div class="row"><label>通道</label>
+        <select id="dsh-channel">
+          <option value="auto">auto（跟随已安装）</option>
+          <option value="stable">stable</option>
+          <option value="next">next</option>
+          <option value="alpha">alpha</option>
+        </select>
+      </div>
+      <div class="row">
+        <button class="save" id="dsh-check">检测更新</button>
+        <button class="save" id="dsh-install" disabled>安装更新</button>
+      </div>
+      <div class="hint" id="dsh-msg"></div>
+    </div>
     <div class="card">
       <h3>默认模型 <span class="mono">(agent-default-model)</span></h3>
       <div class="row"><label>provider</label><select id="in-def-provider"></select></div>
@@ -1210,10 +1239,56 @@
     mutate("ui-theme", [{ op: "set", path: ["preference"], value: $("in-theme").value }], "保存主题偏好");
   });
 
+  /* ---------- update center (plugin self-update + DSH npm) ---------- */
+  function updateEls(target) {
+    return {
+      ver: $(target + "-ver"),
+      latest: $(target + "-latest"),
+      check: $(target + "-check"),
+      install: $(target + "-install"),
+      msg: $(target + "-msg"),
+    };
+  }
+  function renderUpdateStatus(msg) {
+    var target = msg.target === "dsh" ? "dsh" : "ext";
+    var els = updateEls(target);
+    if (!els.ver) return;
+    if (msg.installed) els.ver.textContent = msg.installed;
+    if (msg.latest) els.latest.textContent = msg.latest;
+    var phase = msg.phase || "";
+    els.check.disabled = phase === "checking" || phase === "installing";
+    if (phase === "available") els.install.disabled = false;
+    if (phase === "checking" || phase === "installing" || phase === "uptodate" || phase === "done" || phase === "error") {
+      els.install.disabled = true;
+    }
+    if (phase === "done" && target === "ext") $("ext-restart").hidden = false;
+    els.msg.textContent = msg.message || "";
+  }
+  $("ext-check").addEventListener("click", function () {
+    vscode.postMessage({ type: "pluginUpdateCheck" });
+  });
+  $("ext-install").addEventListener("click", function () {
+    vscode.postMessage({ type: "pluginUpdateInstall" });
+  });
+  $("ext-restart").addEventListener("click", function () {
+    vscode.postMessage({ type: "pluginUpdateRestart" });
+  });
+  $("dsh-check").addEventListener("click", function () {
+    vscode.postMessage({ type: "dshUpdateCheck", channel: $("dsh-channel").value });
+  });
+  $("dsh-install").addEventListener("click", function () {
+    vscode.postMessage({ type: "dshUpdateInstall", channel: $("dsh-channel").value });
+  });
+
   window.addEventListener("message", function (ev) {
     var msg = ev.data;
     if (!msg) return;
-    if (msg.type === "settingsData") { applyData(msg.value); }
+    if (msg.type === "updateStatus") { renderUpdateStatus(msg); }
+    else if (msg.type === "updateVersions") {
+      if (msg.plugin) $("ext-ver").textContent = msg.plugin;
+      if (msg.dsh) $("dsh-ver").textContent = msg.dsh;
+    }
+    else if (msg.type === "settingsData") { applyData(msg.value); }
     else if (msg.type === "settingsAgentPresets") { applyPresets(msg.value); }
     else if (msg.type === "settingsCatalog") {
       catalog = { models: msg.models, permissions: msg.permissions };

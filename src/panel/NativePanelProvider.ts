@@ -5,13 +5,20 @@ import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
 import type { LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionSummary, SettingsDescribeView } from "../harness/protocol";
 import type { WaterfallFrame, WorkspaceState } from "../events/eventStream";
-import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, WebviewMessage } from "./protocol";
+import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
 import { INTENT_CHOICES, askPromptText, sendAsk } from "../editor/askSelection";
 import { askSessionIdSet } from "../editor/askSessions";
 import { deleteSessionStorage } from "../harness/storage";
 import { ensureWorkspaceAcl } from "../harness/workspaceAcl";
 import type { CompanionStatus } from "../harness/companion";
+import type { DshUpdateHooks } from "./protocol";
+
+/** Normalize the settings-page channel picker value (free-form string on the
+ *  wire) to a channel the updater understands; unknown → auto. */
+function normalizeUpdateChannel(value: unknown): string {
+  return value === "stable" || value === "next" || value === "alpha" ? value : "auto";
+}
 
 /** Composer file attachments ride the prompt as one upload each; cap matches
  *  the panel-side check so the two ends agree. */
@@ -221,7 +228,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     private readonly onSessionEvent: (cb: (sessionId: string, event: PanelEvent) => void) => void,
     /** Ask surface: the whole pipeline with a pinned session and a slimmer
      *  chrome (panel.html ask mode). */
-    private readonly askMode = false
+    private readonly askMode = false,
+    /** Extension-owned update center (plugin self-update + DSH package hooks;
+     *  omit in tests). */
+    private readonly options: { updateCenter?: UpdateCenterHooks; dshUpdates?: DshUpdateHooks } = {}
   ) {
     this.manualWorkspace = context.workspaceState.get<string>("dsh.manualWorkspace");
   }
@@ -1873,6 +1883,29 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async onSettingsMessage(msg: Record<string, unknown>): Promise<void> {
+    // Update-center messages work without a harness connection (the plugin
+    // check talks to GitHub); everything else below needs the harness.
+    const updateType = String(msg.type ?? "");
+    if (
+      updateType === "pluginUpdateCheck" ||
+      updateType === "pluginUpdateInstall" ||
+      updateType === "pluginUpdateRestart" ||
+      updateType === "dshUpdateCheck" ||
+      updateType === "dshUpdateInstall"
+    ) {
+      await this.handleUpdateCenterMessage(updateType, msg);
+      return;
+    }
+    if (updateType === "settingsReady") {
+      // Installed versions come from the extension host, not the harness —
+      // answer before the client check below can bail out.
+      const dshVersion = this.options.dshUpdates ? await this.options.dshUpdates.installedVersion() : "";
+      this.postSettingsMessage({
+        type: "updateVersions",
+        plugin: this.options.updateCenter?.installedVersion() ?? "",
+        dsh: dshVersion,
+      });
+    }
     if (!this.client) {
       this.postSettingsError("harness 未连接");
       return;
@@ -2308,6 +2341,90 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       void this.settingsPanel?.webview.postMessage(message);
     } catch {
       /* panel disposed */
+    }
+  }
+
+  /** Update-center flow (settings page): plugin self-update on GitHub and the
+   *  DSH npm package. Runs without a harness connection where possible. */
+  private async handleUpdateCenterMessage(type: string, msg: Record<string, unknown>): Promise<void> {
+    const hooks = this.options.updateCenter;
+    const status = (
+      target: "plugin" | "dsh",
+      phase: "checking" | "uptodate" | "available" | "installing" | "done" | "error",
+      extra: { installed?: string; latest?: string; message?: string } = {}
+    ): void => {
+      this.postSettingsMessage({ type: "updateStatus", target, phase, ...extra });
+    };
+    if (type === "pluginUpdateRestart") {
+      await hooks?.restart();
+      return;
+    }
+    if (type === "pluginUpdateCheck" || type === "pluginUpdateInstall") {
+      if (!hooks) {
+        status("plugin", "error", { message: "更新中心不可用" });
+        return;
+      }
+      if (type === "pluginUpdateCheck") {
+        status("plugin", "checking", { installed: hooks.installedVersion(), message: "正在检查 GitHub 发布…" });
+        try {
+          const result = await hooks.check();
+          status("plugin", result.update ? "available" : "uptodate", {
+            installed: result.installed,
+            latest: result.latest,
+            message: result.update ? "发现新版本" : "已是最新版本",
+          });
+        } catch (error) {
+          status("plugin", "error", { installed: hooks.installedVersion(), message: (error as Error).message });
+        }
+        return;
+      }
+      status("plugin", "installing", { installed: hooks.installedVersion(), message: "正在下载并安装…" });
+      try {
+        const result = await hooks.install();
+        if (result.ok) {
+          status("plugin", "done", {
+            installed: hooks.installedVersion(),
+            message: "已安装新版本，重启窗口后生效。",
+          });
+        } else {
+          status("plugin", "error", { message: result.error ?? "安装失败" });
+        }
+      } catch (error) {
+        status("plugin", "error", { message: (error as Error).message });
+      }
+      return;
+    }
+    const channel = normalizeUpdateChannel(msg.channel);
+    const dshHooks = this.options.dshUpdates;
+    if (!dshHooks) {
+      status("dsh", "error", { message: "更新中心不可用" });
+      return;
+    }
+    if (type === "dshUpdateCheck") {
+      status("dsh", "checking", { message: `通道 ${channel}` });
+      const info = await dshHooks.check(channel);
+      if (info.kind === "error") {
+        status("dsh", "error", { installed: info.installed, message: info.detail ?? "检查失败" });
+      } else {
+        status("dsh", info.kind === "update" ? "available" : "uptodate", {
+          installed: info.installed,
+          latest: info.latest,
+          message: `通道 ${info.channel ?? channel}`,
+        });
+      }
+      return;
+    }
+    // dshUpdateInstall: extension.ts owns the stop → npm → restart → verify
+    // flow (and its dialogs); the card just follows along.
+    status("dsh", "installing", { installed: await dshHooks.installedVersion(), message: "正在更新 DSH（会重启 harness）…" });
+    try {
+      await dshHooks.update();
+      status("dsh", "done", {
+        installed: await dshHooks.installedVersion(),
+        message: "已完成更新（若提示重启窗口请照做）。",
+      });
+    } catch (error) {
+      status("dsh", "error", { message: (error as Error).message });
     }
   }
 

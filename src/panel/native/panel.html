@@ -4070,7 +4070,18 @@
         if (file) files.push(file);
       }
     }
-    if (files.length) { e.preventDefault(); addAttachmentFiles(files); }
+    if (files.length) { e.preventDefault(); addAttachmentFiles(files); return; }
+    // Pasting a bare URL followed directly by text: append a full-width
+    // semicolon so the markdown autolinker stops at the URL boundary instead
+    // of swallowing the following sentence (same behavior as typing it).
+    var pasted = (e.clipboardData.getData("text/plain") || "").trim();
+    if (!/^https?:\/\/[^\s]+$/i.test(pasted) || /[；;]$/.test(pasted)) return;
+    var after = inputEl.value.charAt(inputEl.selectionEnd);
+    if (after && !/[\s，。；：！？、,.!?;:]/.test(after)) {
+      e.preventDefault();
+      inputEl.setRangeText(pasted + "；", inputEl.selectionStart, inputEl.selectionEnd, "end");
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   });
   var attachBtn = $("attach-btn");
   var attachFileEl = $("attach-file");

@@ -129,6 +129,22 @@ export type HostMessage =
       /** Agent-preset roster for the new-session mode picker (id → display copy). */
       presets: { id: string; name?: string; description?: string; isDefault?: boolean; trust?: string; broken?: string }[];
     }
+  | {
+      /** Update-center status for the settings page (plugin or DSH target). */
+      type: "updateStatus";
+      target: "plugin" | "dsh";
+      phase: "checking" | "uptodate" | "available" | "installing" | "done" | "error";
+      installed?: string;
+      latest?: string;
+      /** Extra line for surfaces that show details (channel, errors, notes). */
+      message?: string;
+    }
+  | {
+      /** Installed versions shown at the top of the settings update cards. */
+      type: "updateVersions";
+      plugin: string;
+      dsh: string;
+    }
   | { type: "error"; message: string }
   | {
       /** One resolved transcript image (session.attachment round-trip). */
@@ -218,6 +234,12 @@ export type WebviewMessage =
       requestId: number;
       path: string;
     }
+  | { type: "pluginUpdateCheck" }
+  | { type: "pluginUpdateInstall" }
+  | { type: "pluginUpdateRestart" }
+  /** DSH (harness npm package) update check/install from the settings page. */
+  | { type: "dshUpdateCheck"; channel?: string }
+  | { type: "dshUpdateInstall"; channel?: string }
   | { type: "openSettings" };
 
 export interface PanelSession {
@@ -254,4 +276,26 @@ export interface PanelSession {
     pressureTokens?: number;
     contextWindow?: number;
   };
+}
+
+/** Extension-owned update center hooks (plugin self-update; extension.ts owns
+ *  the GitHub/CLI implementation so the provider stays testable). */
+export interface UpdateCenterHooks {
+  installedVersion(): string;
+  check(): Promise<{ installed: string; latest?: string; update: boolean }>;
+  install(): Promise<{ ok: boolean; error?: string }>;
+  restart(): Promise<void>;
+}
+
+/** DSH package update hooks (extension.ts owns the lifecycle-aware flow). */
+export interface DshUpdateHooks {
+  installedVersion(): Promise<string>;
+  check(channel: string): Promise<{
+    installed?: string;
+    latest?: string;
+    kind?: "update" | "uptodate" | "error";
+    detail?: string;
+    channel?: string;
+  }>;
+  update(): Promise<void>;
 }

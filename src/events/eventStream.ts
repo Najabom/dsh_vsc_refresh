@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 // Explicit dependency (bundled by esbuild): the global WebSocket only exists in
 // Node ≥ 22 extension hosts, while engines still allow VS Code ^1.90 (Node 20).
 import { WebSocket } from "ws";
+import { nativeAuthHeaders } from "../harness/nativeAuth";
 
 /** A session event from the follow stream, in the vocabulary the panel renders
  *  (durable journal events pass through; assistant-stream chunks are folded
@@ -104,7 +105,8 @@ export class HarnessEventStream implements vscode.Disposable {
     if (this.disposed) return;
     try {
       const url = `${this.base.replace(/^http/, "ws")}${MUX_PATH}`;
-      const ws = new WebSocket(url);
+      const auth = nativeAuthHeaders(this.base);
+      const ws = new WebSocket(url, auth ? { headers: auth } : undefined);
       this.ws = ws;
       ws.onopen = () => {
         this.retries = 0;
