@@ -180,8 +180,8 @@ DSH 有一套**运行时补丁机制（overlay）**：在官方进程**加载模
 补丁危险，所以给它上了三把锁：
 
 1. **内存篡改，不碰磁盘**：补丁在官方模块**加载进内存的一瞬间**换掉源码，**磁盘上的官方文件全程只读、一行不改**。进程退出，补丁就消失。官方安装树始终是「字节级一致」的 npm 原版。
-2. **SHA 校验，不对就整体放弃**：启动时校验官方文件的 SHA256，万一跟 npm 发布版对不上（官方升级了、被别人改过），**整个补丁跳过**，进入降级模式——绝不硬着头皮去 patch 一个不认识的文件。
-3. **金丝雀锚点，变了就退**：哪怕 SHA 通过了，patch 前还要确认「官方源码里我认识的那几行还在」。找不到，就记一条 `CANARY-FAIL`，**放弃这次补丁**，正常降级跑。
+2. **SHA 校验，不对就整体放弃**：完整性表**按 dsh 版本记录**（`pristine.ts` 中的 `PRISTINE_HOST_VERSION`）；装的是记录过的版本才逐文件比对 SHA256（对不上 → 补丁跳过），版本比表新时如实报告「此版本尚未核验」而**不**误报「文件被改」——升级 dsh 后先 `npm run record-pristine` 更新记录即可。
+3. **金丝雀锚点，变了就退**：哪怕 SHA 通过了，patch 前还要确认「官方源码里我认识的那几行还在」。找不到，就记一条 `CANARY-FAIL`，**放弃这次补丁**，正常降级跑。锚点覆盖已核实的上游形状范围（v0.1.7-rc.2 的 `void` 返回与 v0.2.1-rc.3 的 `Peer` 返回都能命中同一 delta）。
 
 > 降级后最坏会发生什么：连接被 401 挡在门外，面板显示「API 拒绝访问」，并提示「overlay 补丁与当前 DSH 版本不匹配，请更新扩展」——**看得见、说得清、不静默**。校验失败永远不致命。
 
@@ -212,13 +212,18 @@ DSH 有一套**运行时补丁机制（overlay）**：在官方进程**加载模
 
 DSH 更新很频繁，而每一次协议改动都可能让扩展失配。所以「更新 DSH」在这里不是一句话的事：
 
-1. **检查**：启动时、以及窗口存续期间每 6 小时查 npm registry，发现新版本弹窗（「暂不更新」记忆到下一个版本）；harness 重连后 30 分钟限频内补查。
+1. **检查**：启动时、以及窗口存续期间每 6 小时查 npm registry，发现新版本弹窗（「暂不更新」记忆到下一个版本）；harness 重连后 30 分钟限频内补查，结果同步写入状态栏提示（上次检测时间/结果）。
    - **通道感知**：npm 的 `latest` 标签长期停在旧版，而 rc/alpha 安装永远「已最新」——所以默认 `auto`：用预发布版的安装跟随全量版本里的最新预发布，稳定版安装对照 `latest`；也可显式选择 `stable` / `next` / `alpha`（`dshVsc.dshUpdateChannel`），比较规则集中在纯模块 `src/harness/updateChannel.ts`。
 2. **接口预检**（升级前）：
    - **通告扫描**：把官方 Release Notes 里当前版本 → 目标版本之间的说明抓下来（GitHub API，失败回退 atom），逐条扫本扩展用到的**接口标识**（33 个：全部 RPC 端点 + 事件流协议名 + 鉴权协议名）。
    - **包内核验**：把目标版本的 tarball 拉下来，**静态**检查这些接口是否真的存在于三个关键官方包里（`dsh-api-remotes` / `dsh-api-gateway` / `dsh-client-connection`）。
    - **三分支**：有风险 → 警告并建议「先更新扩展，等适配」；通过 → 正常弹更新；预检不可用（断网等）→ 照常弹更新，但如实说明「预检未完成」。无论如何都保留逃生通道：*仍要更新（自检失败自动回滚）*。
-3. **执行**：停掉从属 harness → `npm install -g` 目标版本（超时保护、输出留日志）。
+3. **执行**：停掉从属 harness → `npm install -g` 目标版本（超时保护、输出留日志）。安装链路自带三层防护：
+   - **依赖预检**（`src/harness/installability.ts`）：先按目标版本的 86 个精确依赖逐个探测 npmjs，上游「发了主包、缺配套包」的半成品版本直接跳过（稳定通道）或明确报错（next/alpha 通道），不必等 npm 装到一半才失败。
+   - **失败重试**：peer 冲突（ERESOLVE）改用 `--force` 重试——注意不能用 `--legacy-peer-deps`，那会连 peer 依赖（`dsh-scope`/`dsh-attachment` 等）一起跳过，装出行不通的树；镜像未同步（ETARGET）则回退官方 registry 重试一次。
+   - **元数据回退**：检查更新时 npmjs 不可达会自动回退 npmmirror 镜像（不少国内用户的 `.npmrc` 就指向镜像，探测不应受它影响）。
+   - **错误归类**（`src/harness/npmFailure.ts`）：把 npm 的报错墙折叠成一句可操作的中文（缺包 / 依赖冲突 / 文件被运行中的 dsh 占用 EBUSY / 权限 / 网络）。检测到外部启动的 dsh 仍在运行时，更新前会明确提示先停止，避免替换被锁定的原生模块；若是**另一个 VS Code 窗口**自管的 harness，会按心跳识别并提示关闭那个窗口。
+   - **半装恢复**：npm 失败后若发现全局树已停在「非目标也非原版本」的残废状态，会自动重装回原版本并告知结果。
 4. **自检**：重启 harness → 探活 → **验证 RPC 与事件流都通了**才算成功；失败 → 提供「回滚到原版本」按钮（重装旧版 + 重启 + 再验证）。
 
 手动入口：命令面板 `DSH: 检查 DSH 更新`（立即复查，忽略 30 分钟限频）、`DSH: 更新 DSH`；以及设置页通用页的**扩展更新 / DSH 更新**两张卡（检测 / 安装）。扩展自身的更新走 GitHub Release：下载 VSIX → 通过 VS Code CLI `--install-extension --force` 安装，运行中的窗口在重载后生效。
@@ -368,6 +373,8 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | `src/harness/overlay/pristine.ts` | 官方 SHA256 表 + 完整性自检 | §4.2 |
 | `src/harness/launcher.ts` | 启动 DSH（注入 overlay、PID 记录、无窗口） | §5.1 |
 | `src/harness/updater.ts` | 更新检查 / 安装 / 版本比较 | §5.2 |
+| `src/harness/installability.ts` | 目标版本依赖预检（半成品发布拦截，纯模块） | §5.2 |
+| `src/harness/npmFailure.ts` | npm 失败归类（ETARGET/ERESOLVE/EBUSY/网络/权限） | §5.2 |
 | `src/harness/updateChannel.ts` | 通道感知的版本比较（auto/stable/next/alpha，纯模块） | §5.2 |
 | `src/harness/pluginUpdater.ts` | 扩展自更新（GitHub Release VSIX → code CLI） | §5.2 |
 | `src/harness/updatePreflight.ts` | 接口预检（通告扫描 + 包内静态核验） | §5.2 |

@@ -8,6 +8,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - _(nothing yet)_
 
+## [1.1.7] - 2026-10-26
+
+- **DSH 0.2.1-rc.3 适配**：overlay 金丝雀锚点同时匹配 v0.1.7-rc.2 与 v0.2.1-rc.3
+  两种上游形状（`void` 返回 / `Peer` 返回），升级后不再每次启动 `CANARY-FAIL`。
+- **完整性校验版本感知**：记录 0.2.1-rc.3 的 SHA256；版本与记录不一致时报告
+  「此版本尚未核验」而不是误报「官方文件被修改」；新增 `npm run record-pristine`
+  维护工具（`-- --write` 同时更新校验脚本）。
+- **更新失败自动恢复**：npm 失败后若全局树停在半装状态，自动重装回原版本并告知；
+  EBUSY 守卫区分「另一个 VS Code 窗口自管的 harness」与外部实例。
+- **更新检查更稳**：npmjs 元数据不可达时回退 npmmirror；自动检测结果写入状态栏
+  提示（上次检测时间/结果）；npm 改用已知绝对路径解析，找不到时给出明确错误。
+- **后台任务通知不再伪装成「插入中」**：`tool-jobs` 完成通知显示为「任务通知」
+  （灰色虚线、仅保留复制），≥3 条自动折叠为「后台任务通知 ×N」可展开/收起。
+
+## [1.1.6] - 2026-10-23
+
+### Fixed
+
+- **DSH updates no longer leave a broken install**: the npm retry after a peer
+  conflict now uses `--force` instead of `--legacy-peer-deps` (the latter also
+  skips peer provisioning, e.g. `dsh-scope`/`dsh-attachment`, and installs a
+  tree that cannot boot).
+- **Registry-mirror lag is handled**: when npm reports `ETARGET`/“no matching
+  version”, the update retries once against the official npm registry (China
+  mirrors can trail a fresh publish by minutes to hours).
+- **Half-published upstream versions are preflighted**: before installing, the
+  exact version's dependencies are probed on npmjs; a release missing a tandem
+  package is skipped (stable channels) or reported clearly (next/alpha) instead
+  of failing mid-install.
+- **Clear failure classification** for npm errors (ETARGET, ERESOLVE, EBUSY
+  files locked by a running dsh, permissions, network) instead of raw npm walls.
+- **Updating while an external dsh runs is refused with instructions**: npm
+  would hit locked koffi/worker files and the new version could not take effect
+  until that process restarted.
+
 ## [1.1.5] - 2026-10-16
 
 - **修复：自动链接吞掉后文**。URL 后紧跟全角标点、第二个 URL 或中文时，

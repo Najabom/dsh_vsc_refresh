@@ -603,17 +603,26 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
 
   /** Render the inbox projection as the pending-send rows above the input. */
   private postQueue(sessionId: string, inbox: unknown): void {
-    const v = (inbox ?? {}) as {
-      "next-turn"?: { id?: string; content?: { type?: string; text?: string }[] }[];
-      "next-step"?: { id?: string; content?: { type?: string; text?: string }[] }[];
+    type InboxRow = {
+      id?: string;
+      content?: { type?: string; text?: string }[];
+      source?: { kind?: string; summary?: string };
     };
+    const v = (inbox ?? {}) as { "next-turn"?: InboxRow[]; "next-step"?: InboxRow[] };
+    // The inbox carries the ORIGINAL message objects, including `source`
+    // (e.g. {kind:"tool-jobs"} completion notices). Pass the kind through so
+    // the panel can label harness notices instead of calling them user input.
+    const mapRow = (row: InboxRow, placement: "queued" | "steering") => ({
+      id: String(row.id ?? ""),
+      placement,
+      text: textOf(row.content),
+      ...(typeof row.source?.kind === "string" ? { source: row.source.kind } : {}),
+      ...(typeof row.source?.summary === "string" ? { summary: row.source.summary } : {}),
+    });
     this.post({
       type: "queue",
       sessionId,
-      items: [
-        ...(v["next-turn"] ?? []).map((row) => ({ id: String(row.id ?? ""), placement: "queued", text: textOf(row.content) })),
-        ...(v["next-step"] ?? []).map((row) => ({ id: String(row.id ?? ""), placement: "steering", text: textOf(row.content) })),
-      ],
+      items: [...(v["next-turn"] ?? []).map((row) => mapRow(row, "queued")), ...(v["next-step"] ?? []).map((row) => mapRow(row, "steering"))],
     });
   }
 
@@ -2409,7 +2418,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         status("dsh", info.kind === "update" ? "available" : "uptodate", {
           installed: info.installed,
           latest: info.latest,
-          message: `通道 ${info.channel ?? channel}`,
+          message: info.detail ?? `通道 ${info.channel ?? channel}`,
         });
       }
       return;

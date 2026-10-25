@@ -8,7 +8,8 @@
  * these deltas to the module SOURCE IN MEMORY as the harness process loads
  * each module — the official files on disk are never touched.
  *
- * Current delta (verified byte-exact against the npm release v0.1.7-rc.2):
+ * Current delta (verified byte-exact against the npm releases v0.1.7-rc.2 …
+ * v0.2.1-rc.3; the anchor below matches BOTH upstream shapes):
  *   1. dsh-client-connection/lib/index.js — browser-session auth bypass.
  *      DSH >= 0.1.7 mints a per-process launch token and gates the whole
  *      /api surface (HTTP RPC and the /api/remote.mux WebSocket upgrade)
@@ -49,8 +50,14 @@ export const PATCHES: Delta[] = [
     label: "client-connection browser-auth bypass (loopback bridge client)",
     url: /dsh-client-connection[\\/]lib[\\/]index\.js$/,
     marker: /dsh-vsc-local-bridge: auth bypass/,
-    re: /(\t\treturn this\.browserAuth\.isAuthenticated\(request\) \? void 0 : 401;)(\r?\n)/,
-    build: (_pre, eol) => "\t\treturn void 0; // dsh-vsc-local-bridge: auth bypass" + eol,
+    re: /(\t\t(?:return this\.browserAuth\.isAuthenticated\(request\) \? void 0 : 401;|if \(this\.browserAuth\.isAuthenticated\(request, secure\)\) return \{ peer: this\.browserPeer \};))(\r?\n)/,
+    build: (pre, eol) => {
+      // v0.2.1-rc.3's admit() returns a Peer object; older shape returned void.
+      const bypass = pre.includes("secure")
+        ? "\t\treturn { peer: this.browserPeer }; // dsh-vsc-local-bridge: auth bypass"
+        : "\t\treturn void 0; // dsh-vsc-local-bridge: auth bypass";
+      return bypass + eol;
+    },
   },
 ];
 

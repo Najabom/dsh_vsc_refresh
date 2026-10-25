@@ -342,6 +342,9 @@
             padding: 4px 8px; background: var(--input-bg); font-size: 13px; }
   .q-item .qtag { font-size: 13px; line-height: 1.55; color: var(--muted); flex: none; }
   .q-item .qtag.queued { color: var(--vscode-charts-green, #89d185); }
+  .q-item.notice { border-style: dashed; }
+  .q-item .qtag.notice { color: var(--vscode-descriptionForeground, var(--muted)); }
+  .q-item.notice .qtext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .q-item .qtext { flex: 1; white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.55; color: var(--fg); }
   .q-item .qbtn { flex: none; cursor: pointer; color: var(--muted); padding: 0 3px; border: none; background: none; font-size: 12px; line-height: 1.55; }
   .q-item .qbtn:hover { color: var(--fg); }
@@ -667,6 +670,7 @@
     interact: null,          // pending interaction card {rpcId, kind, ...} | null
     usage: null,             // active session tokenUsage projection
     queue: [],               // session/queue snapshot for the active session
+  noticeOpen: false,       // "后台任务通知" group expanded?
     commands: [],            // slash-command catalog (commands/list)
     todos: [],               // todos projection for the active session
     todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
@@ -2265,9 +2269,67 @@
   /* ---------- pending-send queue rows (session/queue snapshot) ---------- */
   function renderQueue() {
     queueEl.innerHTML = "";
-    if (!state.queue.length) { queueEl.hidden = true; return; }
+    if (!state.queue.length) { queueEl.hidden = true; state.noticeOpen = false; return; }
     queueEl.hidden = false;
+    var notices = state.queue.filter(function (it) { return it.source === "tool-jobs"; });
+    var collapsed = notices.length >= 3 && !state.noticeOpen;
+    function qbtn(label, title, fn, danger) {
+      var b = document.createElement("button");
+      b.className = "qbtn" + (danger ? " danger" : "");
+      b.textContent = label;
+      b.title = title;
+      b.onclick = fn;
+      return b;
+    }
+    function noticeRow(it) {
+      var row = document.createElement("div");
+      row.className = "q-item notice";
+      var tag = document.createElement("span");
+      tag.className = "qtag notice";
+      tag.textContent = "任务通知";
+      var txt = document.createElement("span");
+      txt.className = "qtext";
+      txt.textContent = it.summary || it.text || "";
+      txt.title = it.text || it.summary || "";
+      row.appendChild(tag);
+      row.appendChild(txt);
+      row.appendChild(qbtn("copy", "复制通知原文", function () { post({ type: "copyText", text: it.text }); }));
+      return row;
+    }
+    function noticeGroup(count, expanded) {
+      var row = document.createElement("div");
+      row.className = "q-item notice";
+      var tag = document.createElement("span");
+      tag.className = "qtag notice";
+      tag.textContent = "任务通知";
+      var txt = document.createElement("span");
+      txt.className = "qtext";
+      txt.textContent = "后台任务通知 ×" + count + (expanded ? "" : "（点击展开）");
+      row.appendChild(tag);
+      row.appendChild(txt);
+      row.appendChild(qbtn(expanded ? "收起" : "展开", expanded ? "折叠后台任务通知" : "展开后台任务通知", function () {
+        state.noticeOpen = !expanded;
+        renderQueue();
+      }));
+      if (!expanded) {
+        row.addEventListener("click", function (ev) {
+          if (ev.target && ev.target.closest && ev.target.closest(".qbtn")) return;
+          state.noticeOpen = true;
+          renderQueue();
+        });
+      }
+      return row;
+    }
+    // A burst of background-job completions is one event for the user: fold
+    // them into a single row instead of painting N identical banners.
+    if (notices.length >= 3) queueEl.appendChild(noticeGroup(notices.length, !collapsed));
     state.queue.forEach(function (it) {
+      var isNotice = it.source === "tool-jobs";
+      if (isNotice) {
+        if (collapsed) return;
+        queueEl.appendChild(noticeRow(it));
+        return;
+      }
       var row = document.createElement("div");
       row.className = "q-item";
       var tag = document.createElement("span");
@@ -2279,14 +2341,6 @@
       txt.title = it.text;
       row.appendChild(tag);
       row.appendChild(txt);
-      var qbtn = function (label, title, fn, danger) {
-        var b = document.createElement("button");
-        b.className = "qbtn" + (danger ? " danger" : "");
-        b.textContent = label;
-        b.title = title;
-        b.onclick = fn;
-        return b;
-      };
       row.appendChild(qbtn("copy", "复制", function () { post({ type: "copyText", text: it.text }); }));
       if (it.placement === "queued") {
         row.appendChild(qbtn("steer", "在下一个 LLM 回复后插入（打断）", function () {
@@ -2386,7 +2440,7 @@
           state.planMode = null; renderPlanButton(); // host re-pushes for the new session
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
-          state.queue = []; renderQueue();
+          state.queue = []; state.noticeOpen = false; renderQueue();
           state.todos = []; state.todoDoneCarry = 0; state.todoPrevAll = false;
           renderTodos();   // host re-pushes via todos message
           state.diffByCall = {}; state.activeRound = null;

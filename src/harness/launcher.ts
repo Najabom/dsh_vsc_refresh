@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as vscode from "vscode";
-import { checkDshPristine } from "./overlay/pristine";
+import { checkDshPristine, PRISTINE_HOST_VERSION } from "./overlay/pristine";
 
 let child: ChildProcess | undefined;
 let launcher: { node: string; script: string } | null = null;
@@ -272,9 +272,13 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
   const rep = checkDshPristine(subRoot);
   if (rep.ok) {
     log.appendLine(`dsh install integrity: pristine (${rep.pristine.length} official files byte-identical to npm release)`);
+  } else if (rep.unverified) {
+    log.appendLine(
+      `dsh install integrity: reference table is for v${PRISTINE_HOST_VERSION}, installed ${rep.dshVersion ?? "unknown"} — verification skipped (run npm run record-pristine when bumping dsh)`
+    );
   } else {
     log.appendLine(
-      `dsh install integrity: NOT pristine — missing=[${rep.missing.join(", ")}] modified=[${rep.modified.join(", ")}] (the overlay never writes to disk: reinstall with npm i -g @deepseek-ai/dsh@0.1.7-rc.2; verify via scripts/restore-dsh-pristine.ps1)`
+      `dsh install integrity: NOT pristine — missing=[${rep.missing.join(", ")}] modified=[${rep.modified.join(", ")}] (the overlay never writes to disk: reinstall with npm i -g @deepseek-ai/dsh@${PRISTINE_HOST_VERSION}; verify via scripts/restore-dsh-pristine.ps1)`
     );
   }
   const args = ["web", "--no-open", "--port", String(port)];

@@ -1,7 +1,7 @@
 # restore-dsh-pristine.ps1  [-VerifyOnly]
 #
 # Verify the official @deepseek-ai/dsh installation is byte-exact to the npm
-# registry release (v0.1.7-rc.2). The extension applies its deltas at RUNTIME
+# registry release (v0.2.1-rc.3). The extension applies its deltas at RUNTIME
 # as a per-process ESM loader overlay (src/harness/overlay/), so the installed
 # tree must stay pristine ("pure bridge": never write DSH official files).
 #
@@ -15,11 +15,11 @@ $ErrorActionPreference = "Stop"
 
 $dshRoot = Join-Path $env:APPDATA "npm\node_modules\@deepseek-ai\dsh"
 $subRoot = Join-Path $dshRoot "node_modules\@deepseek-ai"
-$expectedDshVersion = "0.1.7-rc.2"
+$expectedDshVersion = "0.2.1-rc.3"
 
 # relative path under $subRoot -> pristine SHA256 of the npm release file
 $pristine = @{
-  "dsh-client-connection\lib\index.js" = "3950F524AED44E28240140A254CD928EA40EBA8E2D04CC8FD04F92A687F5C91D"
+  "dsh-client-connection\lib\index.js" = "0EBCCA7583E082716F79B0B55BC1749D48269CC8DB2989B043B321B57ABD3684"
 }
 
 function Get-Sha256([string]$path) {

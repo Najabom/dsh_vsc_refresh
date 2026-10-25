@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.1.5",
+  "version": "1.1.7",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -156,7 +156,12 @@
         },
         "dshVsc.dshUpdateChannel": {
           "type": "string",
-          "enum": ["auto", "stable", "next", "alpha"],
+          "enum": [
+            "auto",
+            "stable",
+            "next",
+            "alpha"
+          ],
           "default": "auto",
           "description": "%dsh.config.dshUpdateChannel%",
           "enumDescriptions": [
@@ -173,6 +178,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.overlay.json --noEmit",
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
+    "record-pristine": "node scripts/record-pristine.mjs",
     "package": "node esbuild.js && vsce package --no-dependencies"
   },
   "devDependencies": {
