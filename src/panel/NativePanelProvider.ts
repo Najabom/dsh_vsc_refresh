@@ -1536,12 +1536,45 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       // A finished turn is the moment tokens were billed: refresh the balance
       // chip (throttled inside; covers background sessions too).
       void this.refreshBalance();
+      this.noteTurnFailure(sessionId, event);
     } else if (event.type === "session/title") {
       const title = (event.data as { title?: string } | undefined)?.title;
       if (typeof title === "string") {
         this.titles.set(sessionId, title);
         if (sessionId === this.activeSessionId) this.postState();
       }
+    }
+  }
+
+  /** One toast per failed turn (turn/end.reason.kind === "error").
+   *  The panel paints the failure in the transcript; this singleton toast is
+   *  for the background-tab case where the user is not looking at the panel.
+   *  QUOTA gets a direct top-up action — that class of failure is fixed by a
+   *  top-up, not by retrying. Disable with dshVsc.notifyTurnFailures. */
+  private notedTurnFailures = new Set<string>();
+  private noteTurnFailure(sessionId: string, event: PanelEvent): void {
+    const data = event.data as
+      | { turn?: number; reason?: { kind?: string; error?: { message?: string; code?: string; status?: number } } }
+      | undefined;
+    const reason = data?.reason;
+    if (!reason || reason.kind !== "error") return;
+    const enabled = vscode.workspace.getConfiguration("dshVsc").get<boolean>("notifyTurnFailures", true);
+    if (!enabled) return;
+    const key = sessionId + ":" + String(data?.turn ?? "");
+    if (this.notedTurnFailures.has(key)) return;
+    this.notedTurnFailures.add(key);
+    if (this.notedTurnFailures.size > 50) this.notedTurnFailures.clear();
+    const err = reason.error ?? {};
+    const code = typeof err.code === "string" ? err.code : "";
+    const quota = code === "QUOTA" || code === "ACCOUNT_QUOTA";
+    const msg = typeof err.message === "string" && err.message !== "" ? err.message : "未知错误";
+    const full = (quota ? "DSH 运行失败：账户余额不足" : "DSH 运行失败") + " — " + msg;
+    if (quota) {
+      void vscode.window.showErrorMessage(full, "打开充值页").then((pick) => {
+        if (pick === "打开充值页") void vscode.env.openExternal(vscode.Uri.parse("https://platform.deepseek.com/top_up"));
+      });
+    } else {
+      void vscode.window.showErrorMessage(full);
     }
   }
 

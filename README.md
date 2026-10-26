@@ -88,6 +88,7 @@ Upstream `zhibailu/dsh-vsc` (0.2.6) targets the DSH era of 2026-09. This fork tr
 - **Review Agent Changes** — per-turn changed-file list → native VS Code **git diff** in one click.
 - **Follow agent edits** — auto-open + first-changed-line cursor (preview tab, no focus steal); also catches external writes (e.g. `pwsh`) while a turn runs; toggle with `dshVsc.followAgentEdits`.
 - **Nested tool calls at a glance** — shell/fs calls inside a `run_code` program (`pwsh`, `read`, `write`, …) render as indented ↳ sub-cards with args, result and live timing, bundled with their parent card.
+- **Honest turn outcomes** — a turn that ended with an error (quota exhaustion, auth failure, timeout, interruption) is marked failed in the transcript with the raw error message and HTTP status, never a green “completed”. Quota failures add a top-up link; failed turns also raise one VS Code notification (`dshVsc.notifyTurnFailures` opts out).
 
 **Update center**
 

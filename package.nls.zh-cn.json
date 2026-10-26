@@ -17,5 +17,6 @@
   "dsh.config.dshUpdateChannel.auto": "跟随已安装版本：稳定版跟随 latest，预发布版跟随最新发布版本。",
   "dsh.config.dshUpdateChannel.stable": "仅稳定版本（latest 标签）。",
   "dsh.config.dshUpdateChannel.next": "next 标签发布线（当前 0.2.1-rc.x）。",
-  "dsh.config.dshUpdateChannel.alpha": "alpha 标签发布线（当前 0.2.1-alpha.x）。"
+  "dsh.config.dshUpdateChannel.alpha": "alpha 标签发布线（当前 0.2.1-alpha.x）。",
+  "dsh.config.notifyTurnFailures": "轮次以错误结束时弹出 VS Code 通知（余额耗尽、凭据失效、超时等）。转录里本来就会标出失败；当你在其他标签页时才需要这个通知。余额类失败会附「打开充值页」链接。"
 }

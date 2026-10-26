@@ -149,6 +149,22 @@
   .turn-summary details.turn-diff { flex-basis: 100%; margin-top: 2px; }
   .turn-diff summary { cursor: pointer; user-select: none; color: var(--muted); font-size: 11px; padding: 2px 0; }
   .turn-diff summary:hover { color: var(--fg); }
+  /* Failed / stopped turns: same strip, honest color (quota and auth errors
+     used to render as green ✓ because turn/end.reason was ignored). */
+  .turn-sep.failed { color: #f48771; }
+  .turn-summary.failed { color: #f48771; border-top-color: rgba(244, 135, 113, .5); }
+  .turn-summary.failed .check { color: #f48771; }
+  .turn-summary.stopped { color: #e0b94a; }
+  .turn-summary.stopped .check { color: #e0b94a; }
+  .turn-error { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid rgba(244, 135, 113, .55);
+                border-radius: 4px; background: rgba(244, 135, 113, .08); }
+  .turn-error .te-head { color: #f48771; font-weight: 600; font-size: 12px; }
+  .turn-error .te-msg { margin-top: 4px; font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+                        user-select: text; word-break: break-word; }
+  .turn-error .te-hint { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .turn-error .te-action { margin-top: 8px; padding: 3px 10px; font-size: 12px; border: 1px solid var(--border);
+                           border-radius: 3px; background: var(--input-bg); color: var(--fg); cursor: pointer; }
+  .turn-error .te-action:hover { border-color: #f48771; color: #f48771; }
   .turn-diff .td-file { display: flex; align-items: center; gap: 6px; padding: 2px 0 2px 14px; cursor: pointer; border-radius: 2px; }
   .turn-diff .td-file:hover { background: rgba(128, 128, 128, .08); }
   .turn-diff .td-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -192,6 +208,7 @@
   .tool .dot.run { background: #e0b94a; animation: blink 1s infinite; }
   .tool .dot.ok { background: var(--ok); }
   .tool .dot.err { background: var(--err); }
+  .tool .dot.stop { background: #e0b94a; }
   .tool .tname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
   /* tool-category colors (opencode-style): the fold row's name carries the tone */
   .tool.t-exec .tname { color: #e0b94a; }
@@ -1008,13 +1025,16 @@
       case "turn/end": {
         finalizeStream();
         state.activeRound = null;
+        var why = turnReasonOf(d);
+        var closeStatus = why.kind === "error" ? "error" : (why.kind === "aborted" || why.kind === "interrupted") ? "stopped" : "ok";
         // Safety net: if a tool/result failed to match (callId type drift) the
         // card would stay "running" with a live timer forever — close every
-        // still-running tool the moment the turn ends.
+        // still-running tool the moment the turn ends, with the turn's outcome
+        // (a quota error must not leave green tool checks behind).
         for (var ri = state.items.length - 1; ri >= 0; ri--) {
           var rit = state.items[ri];
           if (rit.kind === "tool" && rit.status === "running") {
-            rit.status = "ok";
+            rit.status = closeStatus;
             rit.version = (rit.version || 0) + 1;
           }
         }
@@ -1029,6 +1049,7 @@
             turnItem.endTime = typeof ev.time === "number" ? ev.time : Date.now();
             turnItem.elapsed = turnItem.startTime ? Math.max(0, turnItem.endTime - turnItem.startTime) : undefined;
             turnItem.totalDiff = aggregateTurnDiff(state.items, turnItem.turn);
+            turnItem.reason = why;
             turnItem.version = (turnItem.version || 0) + 1;
             endTurn = { turn: turnItem.turn, elapsed: turnItem.elapsed, totalDiff: turnItem.totalDiff };
             break;
@@ -1037,7 +1058,10 @@
         // Bottom-of-turn summary strip: appears the moment the turn ends, so
         // the totals are right under the newest message (no scrolling up).
         if (endTurn) {
-          state.items.push({ kind: "turn-end", turn: endTurn.turn, elapsed: endTurn.elapsed, totalDiff: endTurn.totalDiff });
+          if (why.kind === "error") {
+            state.items.push({ kind: "turn-error", turn: endTurn.turn, failure: turnFailureOf(why), reasonKind: why.kind });
+          }
+          state.items.push({ kind: "turn-end", turn: endTurn.turn, elapsed: endTurn.elapsed, totalDiff: endTurn.totalDiff, reason: why });
           // The final render of this round must still happen even though the
           // turn-end makes everything frozen: rAF coalescing can delay the
           // last text-delta render past this boundary, and frozen would then
@@ -1083,6 +1107,7 @@
           break;
         }
         case "turn/end": {
+          var whyH = turnReasonOf(d);
           var doneTurn = null;
           for (var i = out.length - 1; i >= 0; i--) {
             var t = out[i];
@@ -1092,12 +1117,16 @@
               if (t.startTime) t.elapsed = Math.max(0, t.endTime - t.startTime);
               var total = aggregateTurnDiff(out, t.turn);
               t.totalDiff = total;
+              t.reason = whyH;
               doneTurn = { turn: t.turn, elapsed: t.elapsed, totalDiff: total };
               break;
             }
           }
           if (doneTurn) {
-            out.push({ kind: "turn-end", turn: doneTurn.turn, elapsed: doneTurn.elapsed, totalDiff: doneTurn.totalDiff });
+            if (whyH.kind === "error") {
+              out.push({ kind: "turn-error", turn: doneTurn.turn, failure: turnFailureOf(whyH), reasonKind: whyH.kind });
+            }
+            out.push({ kind: "turn-end", turn: doneTurn.turn, elapsed: doneTurn.elapsed, totalDiff: doneTurn.totalDiff, reason: whyH });
           }
           break;
         }
@@ -1676,7 +1705,7 @@
     var sum = det.querySelector("summary");
     if (!sum) { var ne2 = renderItem(item); el.parentNode.replaceChild(ne2, el); return; }
     var dot = sum.querySelector(".dot");
-    if (dot) dot.className = "dot " + (item.status === "running" ? "run" : item.status === "error" ? "err" : "ok");
+    if (dot) dot.className = "dot " + (item.status === "running" ? "run" : item.status === "error" ? "err" : item.status === "stopped" ? "stop" : "ok");
     var tn = sum.querySelector(".tname");
     if (tn) {
       var tsum = toolSummaryText(item);
@@ -1903,6 +1932,43 @@
     if (/^(task|agent|subagent|ask|question)/i.test(n)) return "t-agent";
     return "t-other";
   }
+  /* ---------- turn outcome (harness turn/end.reason) ----------
+     Every turn ends with a reason; only "completed" means the work finished.
+     Errors (quota, auth, timeouts) must never look like a green ✓ — a quota
+     failure used to render as success with running tools flipped ok. */
+  var TURN_TOPUP_URL = "https://platform.deepseek.com/top_up";
+  function turnReasonOf(d) {
+    var r = d && d.reason;
+    return r && typeof r.kind === "string" ? r : { kind: "completed" };
+  }
+  function failureTitle(err) {
+    var code = err && typeof err.code === "string" ? err.code : "";
+    if (code === "QUOTA" || code === "ACCOUNT_QUOTA") return "账户余额不足";
+    if (code === "ACCOUNT_TOKEN_INVALID" || code === "AUTH") return "账户凭据失效";
+    if (code === "RATE_LIMIT") return "请求被限流";
+    if (code === "CONTEXT_WINDOW_EXCEEDED") return "上下文超出模型窗口";
+    if (code === "ABORTED") return "请求已中止";
+    return "运行失败";
+  }
+  function failureDetail(err) {
+    var msg = err && typeof err.message === "string" ? err.message : "";
+    var status = err && typeof err.status === "number" ? err.status : undefined;
+    if (msg && status !== undefined) return msg + "（HTTP " + status + "）";
+    if (msg) return msg;
+    if (status !== undefined) return "HTTP " + status;
+    return "没有更多错误信息。";
+  }
+  function turnFailureOf(reason) {
+    if (!reason || reason.kind !== "error") return null;
+    var err = reason.error && typeof reason.error === "object" ? reason.error : {};
+    var code = typeof err.code === "string" ? err.code : "";
+    return {
+      title: failureTitle(err),
+      detail: failureDetail(err),
+      code: code,
+      quota: code === "QUOTA" || code === "ACCOUNT_QUOTA"
+    };
+  }
   function renderItem(item) {
     var el = document.createElement("div");
     if (!item.id) item.id = state.nextItemId++;
@@ -1928,13 +1994,66 @@
           if (ltd && (ltd.added || ltd.deleted)) label += " · " + diffChipHtml(ltd);
         }
         el.innerHTML = "<span>" + label + " —</span>";
+        if (item.reason && item.reason.kind !== "completed") el.className = "turn-sep failed";
+        break;
+      }
+      case "turn-error": {
+        var tf = item.failure || { title: "运行失败", detail: "没有更多错误信息。", code: "", quota: false };
+        el.className = "turn-error";
+        var th = document.createElement("div");
+        th.className = "te-head";
+        th.textContent = "✗ " + tf.title + (tf.code ? "（" + tf.code + "）" : "");
+        el.appendChild(th);
+        var tm = document.createElement("div");
+        tm.className = "te-msg";
+        tm.textContent = tf.detail;
+        el.appendChild(tm);
+        var hint = document.createElement("div");
+        hint.className = "te-hint";
+        hint.textContent = tf.quota
+          ? "充值后重新发送消息即可继续；已完成的工作不会丢失。"
+          : "本轮在失败处中断。可直接重发消息重试；若反复失败，检查 DSH 连接与账户状态。";
+        el.appendChild(hint);
+        if (tf.quota) {
+          var tb = document.createElement("button");
+          tb.className = "te-action";
+          tb.textContent = "打开充值页";
+          tb.onclick = function () { post({ type: "openExternal", url: TURN_TOPUP_URL }); };
+          el.appendChild(tb);
+        }
         break;
       }
       case "turn-end": {
-        el.className = "turn-summary";
         var dur = (typeof item.elapsed === "number" && isFinite(item.elapsed)) ? fmtDur(item.elapsed) : "--";
         var endModel = state.turnModels[item.turn];
-        var s = "<span class='check'>✓</span><span>" + (endModel ? esc(endModel) + " · " : "") + "第 " + item.turn + " 轮完成 · 用时 " + dur + "</span>";
+        var whyEnd = item.reason || { kind: "completed" };
+        var endCls = "";
+        var endIcon = "✓";
+        var endWhat = "完成";
+        if (whyEnd.kind === "error") {
+          var ef = turnFailureOf(whyEnd);
+          endCls = " failed";
+          endIcon = "✗";
+          endWhat = "失败（" + (ef ? ef.title : "运行失败") + "）";
+        } else if (whyEnd.kind === "aborted") {
+          endCls = " stopped";
+          endIcon = "⏹";
+          endWhat = "已停止";
+        } else if (whyEnd.kind === "interrupted") {
+          endCls = " stopped";
+          endIcon = "⏸";
+          endWhat = "已中断（服务重启）";
+        } else if (whyEnd.kind === "blocked") {
+          endCls = " stopped";
+          endIcon = "⏹";
+          endWhat = "被阻止";
+        } else if (whyEnd.kind === "max-tokens") {
+          endCls = " failed";
+          endIcon = "⚠";
+          endWhat = "达到输出上限";
+        }
+        el.className = "turn-summary" + endCls;
+        var s = "<span class='check'>" + endIcon + "</span><span>" + (endModel ? esc(endModel) + " · " : "") + "第 " + item.turn + " 轮" + endWhat + " · 用时 " + dur + "</span>";
         var td = item.totalDiff;
         if (td && (td.added || td.deleted)) {
           s += diffChipHtml(td);
@@ -2076,7 +2195,7 @@
         // bundle (tool-group) wraps consecutive tool calls.
         var det = document.createElement("details");
         det.className = "tool " + toolTone(item.name) + (item.sub ? " sub" : "");
-        var dot = item.status === "running" ? "run" : item.status === "error" ? "err" : "ok";
+        var dot = item.status === "running" ? "run" : item.status === "error" ? "err" : item.status === "stopped" ? "stop" : "ok";
         var sum = document.createElement("summary");
         var d = document.createElement("span");
         d.className = "dot " + dot;

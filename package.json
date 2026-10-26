@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.1.7",
+  "version": "1.1.8",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -170,6 +170,11 @@
             "%dsh.config.dshUpdateChannel.next%",
             "%dsh.config.dshUpdateChannel.alpha%"
           ]
+        },
+        "dshVsc.notifyTurnFailures": {
+          "type": "boolean",
+          "default": true,
+          "description": "%dsh.config.notifyTurnFailures%"
         }
       }
     }

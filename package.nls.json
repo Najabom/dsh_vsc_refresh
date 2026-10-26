@@ -17,5 +17,6 @@
   "dsh.config.dshUpdateChannel.auto": "Follow the installed build: stable installs track the latest stable release, prerelease installs track the newest published version.",
   "dsh.config.dshUpdateChannel.stable": "Stable releases only (the latest dist-tag).",
   "dsh.config.dshUpdateChannel.next": "The next dist-tag release line (0.2.1-rc.x today).",
-  "dsh.config.dshUpdateChannel.alpha": "The alpha dist-tag release line (0.2.1-alpha.x today)."
+  "dsh.config.dshUpdateChannel.alpha": "The alpha dist-tag release line (0.2.1-alpha.x today).",
+  "dsh.config.notifyTurnFailures": "Show a VS Code notification when a turn ends with an error (quota exhaustion, auth failure, timeout, ...). The transcript already marks failed turns; the toast matters when you are looking at another tab. Quota failures offer a top-up link."
 }
