@@ -260,6 +260,16 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。不启用该包时按钮与卡片完全隐藏，旧 harness 无感。
 
+### 5.8 作业、目标与每轮变更：只搬数据面，不搬页面
+
+**后台作业**由会话事件 `job/registered` / `job/settled` 折出只读花名册（`job/list` 是常驻流，不是快照接口，正常路径不调用）；停止走 `job/kill`，参数是 `{request:{sessionId,jobId}}`——单请求，官方不接受扁平字段。
+
+**目标**完整映射官方生命周期：`goals/get` 读、`goals/create`（返回 `ref{id,revision}`，注意不是 GoalView）、`goals/pause|resume|complete|clear` 都带 `ref`（clear 也必须带），`$events` 的 `goal/activation-changed` 驱动刷新——与官方同一份会话级状态，网页端和面板看到的是同一个目标。
+
+**每轮变更**是 `workspace/changes` 事件里的「turn + seq」，具体内容走 HTTP：`/api/changes.summary?sessionId&seq` 取文件合计与逐文件 +/−，`/api/changes.diff?sessionId&seq&index` 取单文件对比；扩展把 before/after 拼成统一 diff 文本并以只读 `diff` 文档打开——不重造 diff 引擎，也不碰 DSH 的临时快照生命周期。`deliverables/presented` 同理只读声明（`{turn,callId,files:[{path,description}]}`），相对路径按**会话 cwd**解析后打开。
+
+**即时失效**：设置页、模型/凭据、权限目录、预设、插件市场都订阅 `$events` 的官方失效事件（`settings/document-updated`、`llm/adapters-updated`、`credentials/*`、`permission-presets/catalog-changed`、`agent-preset/selected`、`plugin-market/changed`），变化即在界面里反映，不需要用户手动刷新。
+
 ---
 
 ## 6. 它在生态里怎么立得住

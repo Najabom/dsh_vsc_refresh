@@ -78,6 +78,14 @@ export const METHODS = {
   pluginMarketSetIndexes: "pluginMarket/setIndexes",
   subagentsPrompt: "subagents/prompt",
   subagentsInterrupt: "subagents/interruptByParent",
+  jobList: "job/list",
+  jobKill: "job/kill",
+  goalsGet: "goals/get",
+  goalsCreate: "goals/create",
+  goalsPause: "goals/pause",
+  goalsResume: "goals/resume",
+  goalsComplete: "goals/complete",
+  goalsClear: "goals/clear",
   accountGetBalance: "account/getBalance",
   llmListProviders: "llm/listProviders",
   llmListConfigurableProviders: "llm/listConfigurableProviders",
@@ -668,4 +676,94 @@ export type SessionAddress =
 /** subagents/prompt value. */
 export interface SubagentPromptValue {
   messageId: string;
+}
+
+/* ---------- background jobs (dsh-api-job-controller) ---------- */
+
+/** Job lifecycle status (durable projection vocabulary). */
+export type JobStatusView = "running" | "stopping" | "completed" | "killed" | "failed";
+
+/** One background job as `job/list` reports it (view fields only). */
+export interface JobView {
+  id: string;
+  kind: string;
+  label: string;
+  owner?: string;
+  outputLimitBytes?: number;
+  status: JobStatusView;
+  progress?: { completed?: number; total?: number; text?: string };
+  detail?: string;
+  startedAt: number;
+  finishedAt?: number;
+  output?: { total: number; earliest: number; spillPaths?: string[] };
+}
+
+/** job/list value (one frame). */
+export interface JobListFrame {
+  type: "rows";
+  jobs: JobView[];
+}
+
+/* ---------- goals (dsh-goal) ---------- */
+
+/** One goal view (durable lifecycle + process-local activation). */
+export interface GoalView {
+  id: string;
+  revision: number;
+  roundsStarted: number;
+  maxGoalRounds: number;
+  objective: string;
+  phase: "active" | "paused" | "blocked" | "complete";
+  activation: "armed" | "disarmed";
+  blockedReason?: { code: string; message: string };
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** goals/* ref: identity + optimistic-concurrency revision. */
+export interface GoalRef {
+  id: string;
+  revision: number;
+}
+
+/* ---------- workspace changes / deliverables ---------- */
+
+/** One changed file in a turn summary. */
+export interface ChangedFileView {
+  path: string;
+  display: string;
+  added: number;
+  deleted: number;
+  binary?: true;
+  oversized?: true;
+}
+
+/** GET /api/changes.summary value. */
+export interface ChangesSummaryView {
+  turn: number;
+  files: ChangedFileView[];
+  total: number;
+  added: number;
+  deleted: number;
+}
+
+/** One unified-diff hunk (turn-start vs turn-end comparison). */
+export interface ChangesDiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+/** GET /api/changes.diff value (text comparison; binary/oversized refusals
+ *  carry only the identifying fields). */
+export type ChangesDiffView =
+  | { kind: "text"; path: string; display: string; before: boolean; after: boolean; hunks: ChangesDiffHunk[] }
+  | { kind: "binary" | "oversized"; path: string; display: string; before?: boolean; after?: boolean };
+
+/** One presented deliverable file (deliverables/presented payload). */
+export interface PresentedFileView {
+  path: string;
+  description?: string;
 }

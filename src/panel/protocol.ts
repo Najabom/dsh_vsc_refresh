@@ -103,6 +103,57 @@ export type HostMessage =
   | { type: "commands"; items: { name: string; description?: string; input?: { hint?: string; images?: boolean } }[] }
   | { type: "cmdResult"; text: string; ok: boolean }
   | { type: "todos"; sessionId: string; items: TodoItem[] }
+  | {
+      /** Background jobs of the viewed session (job/list). */
+      type: "jobs";
+      sessionId: string;
+      jobs: {
+        id: string;
+        kind: string;
+        label: string;
+        /** running | stopping | completed | killed | failed */
+        status: string;
+        detail?: string;
+        progress?: { completed?: number; total?: number; text?: string };
+        startedAt: number;
+        finishedAt?: number;
+        outputTotal?: number;
+      }[];
+    }
+  | {
+      /** The viewed session's goal (goals/get). null = no goal. */
+      type: "goal";
+      sessionId: string;
+      goal: {
+        id: string;
+        revision: number;
+        roundsStarted: number;
+        maxGoalRounds: number;
+        objective: string;
+        /** active | paused | blocked | complete */
+        phase: string;
+        /** armed | disarmed */
+        activation: string;
+        blockedReason?: string;
+      } | null;
+    }
+  | {
+      /** Latest turn's changed-file summary (workspace/changes). */
+      type: "changes";
+      sessionId: string;
+      turn: number;
+      files: { index: number; display: string; added: number; deleted: number; binary?: boolean; oversized?: boolean }[];
+      total: number;
+      added: number;
+      deleted: number;
+    }
+  | {
+      /** Files an assistant turn declared as deliverables (deliverables/presented). */
+      type: "deliveries";
+      sessionId: string;
+      turn: number;
+      files: { index: number; path: string; description?: string }[];
+    }
   | { type: "balance"; value: AccountBalanceView | null }
   | { type: "toolDiff"; sessionId: string; callId: string; added: number; deleted: number; path?: string }
   | {
@@ -274,6 +325,14 @@ export type WebviewMessage =
   /** DSH (harness npm package) update check/install from the settings page. */
   | { type: "dshUpdateCheck"; channel?: string }
   | { type: "dshUpdateInstall"; channel?: string }
+  | { type: "jobKill"; jobId: string }
+  | { type: "goalCreate"; objective: string }
+  | { type: "goalPause" }
+  | { type: "goalResume" }
+  | { type: "goalComplete" }
+  | { type: "goalClear" }
+  | { type: "openChangeDiff"; index: number }
+  | { type: "openDelivered"; index: number }
   | { type: "openSettings" };
 
 export interface PanelSession {

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
-import type { AgentTeamProjection, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
+import type { AgentTeamProjection, ChangedFileView, ChangesDiffView, ChangesSummaryView, GoalView, JobView, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PresentedFileView, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
 import type { FollowTarget, WaterfallFrame, WorkspaceState } from "../events/eventStream";
 import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
@@ -296,6 +296,26 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     // Route mux events into this surface (filtered by active session host-side).
     this.onSessionEvent((sessionId, event) => {
       this.trackRunning(sessionId, event);
+      // Live job/goal/artifact refreshes run for the viewed session only (the
+      // cards live in this surface); the raw events still ride through below.
+      if (sessionId === this.viewSessionId()) {
+        if (event.type === "job/registered" || event.type === "job/settled") this.updateJobEvent(sessionId, event);
+        else if (event.type === "goal/change") void this.postGoal(sessionId);
+        else if (event.type === "workspace/changes") {
+          const turn = Number((event.data as { turn?: unknown } | undefined)?.turn ?? 0);
+          if (typeof event.seq === "number") void this.postChanges(sessionId, event.seq, turn);
+        } else if (event.type === "deliverables/presented") {
+          const data = event.data as { turn?: unknown; files?: unknown } | undefined;
+          const files = Array.isArray(data?.files) ? (data.files as PresentedFileView[]) : [];
+          this.deliveriesLatest.set(sessionId, { turn: Number(data?.turn ?? 0), files });
+          this.post({
+            type: "deliveries",
+            sessionId,
+            turn: Number(data?.turn ?? 0),
+            files: files.map((f, index) => ({ index, path: f.path, description: f.description })),
+          });
+        }
+      }
       if (sessionId !== this.viewSessionId()) return;
       // Bridge-computed per-call line diffs ride alongside the raw event so
       // the panel can show "+N-M" on the tool card immediately (and refine it
@@ -418,6 +438,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     this.postPermissions();
     this.postPlanMode();
     this.postTeam();
+    this.postJobsFor(sessionId);
+    void this.postGoal(sessionId);
     // An unanswered approval/question can outlive a session switch: the panel
     // clears cards on switch, so re-post this session's pending waterfall or
     // the agent stays blocked with no visible card.
@@ -465,6 +487,181 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       tasks,
       failure: typeof projection?.failure === "string" ? projection.failure : undefined,
     });
+  }
+
+  /* ---------- background jobs / goals / artifacts ---------- */
+
+  /** Job roster per session, folded from the durable job/registered|settled
+   *  session events (the event stream is the only roster source the bridge
+   *  uses: job/list is a never-ending stream that a plain RPC call cannot
+   *  consume). */
+  private jobsBySession = new Map<string, JobView[]>();
+
+  /** Fold one job event into the session roster and repaint the bar. */
+  private updateJobEvent(sessionId: string, event: PanelEvent): void {
+    const data = event.data as
+      | { jobId?: unknown; kind?: unknown; label?: unknown; status?: unknown; finishedAt?: unknown }
+      | undefined;
+    const id = typeof data?.jobId === "string" ? data.jobId : "";
+    if (!id) return;
+    const list = this.jobsBySession.get(sessionId) ?? [];
+    const index = list.findIndex((job) => job.id === id);
+    if (event.type === "job/registered") {
+      const job: JobView = {
+        id,
+        kind: typeof data?.kind === "string" ? data.kind : "",
+        label: typeof data?.label === "string" ? data.label : id,
+        status: "running",
+        startedAt: typeof event.time === "number" ? event.time : Date.now(),
+      };
+      if (index >= 0) list[index] = { ...list[index], ...job };
+      else list.push(job);
+    } else if (index >= 0) {
+      const settled = typeof data?.status === "string" ? data.status : "completed";
+      list[index] = {
+        ...list[index],
+        status: settled === "completed" || settled === "killed" || settled === "failed" ? settled : "completed",
+        finishedAt: typeof data?.finishedAt === "number" ? data.finishedAt : Date.now(),
+      };
+    }
+    while (list.length > 20) {
+      const done = list.findIndex((job) => job.status !== "running" && job.status !== "stopping");
+      list.splice(done >= 0 ? done : 0, 1);
+    }
+    this.jobsBySession.set(sessionId, list);
+    this.postJobsFor(sessionId);
+  }
+
+  /** Push the roster of the viewed session (no-op for other sessions). */
+  private postJobsFor(sessionId: string): void {
+    if (sessionId !== this.viewSessionId()) return;
+    const jobs = this.jobsBySession.get(sessionId) ?? [];
+    this.post({
+      type: "jobs",
+      sessionId,
+      jobs: jobs.map((job) => ({
+        id: job.id,
+        kind: job.kind,
+        label: job.label,
+        status: job.status,
+        detail: job.detail,
+        progress: job.progress,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        outputTotal: job.output?.total,
+      })),
+    });
+  }
+
+  private goalToken = 0;
+
+  /** Push the viewed session's goal (goals/get). */
+  private async postGoal(sessionId: string): Promise<void> {
+    if (!this.client || !sessionId) return;
+    const token = ++this.goalToken;
+    try {
+      const goal = await this.client.goalsGet(sessionId);
+      if (token !== this.goalToken || sessionId !== this.viewSessionId()) return;
+      this.post({
+        type: "goal",
+        sessionId,
+        goal: goal
+          ? {
+              id: goal.id,
+              revision: goal.revision,
+              roundsStarted: goal.roundsStarted,
+              maxGoalRounds: goal.maxGoalRounds,
+              objective: goal.objective,
+              phase: goal.phase,
+              activation: goal.activation,
+              blockedReason: goal.blockedReason?.message,
+            }
+          : null,
+      });
+    } catch {
+      // Older harnesses without the goal plugin: no chip.
+    }
+  }
+
+  /** Latest workspace/changes summary per session (diff coordinates). */
+  private changesLatest = new Map<string, { seq: number; turn: number; files: ChangedFileView[] }>();
+  /** Latest deliverables/presented files per session (open coordinates). */
+  private deliveriesLatest = new Map<string, { turn: number; files: PresentedFileView[] }>();
+
+  /** Fetch one turn's changed-file summary and push it to the panel. */
+  private async postChanges(sessionId: string, seq: number, turn: number): Promise<void> {
+    if (!this.client) return;
+    try {
+      const summary: ChangesSummaryView = await this.client.changesSummary(sessionId, seq);
+      if (sessionId !== this.viewSessionId()) return;
+      this.changesLatest.set(sessionId, { seq, turn, files: summary.files ?? [] });
+      this.post({
+        type: "changes",
+        sessionId,
+        turn: typeof summary.turn === "number" ? summary.turn : turn,
+        files: (summary.files ?? []).map((f, index) => ({
+          index,
+          display: f.display,
+          added: f.added,
+          deleted: f.deleted,
+          binary: f.binary,
+          oversized: f.oversized,
+        })),
+        total: summary.total,
+        added: summary.added,
+        deleted: summary.deleted,
+      });
+    } catch (error) {
+      this.log(`changes summary: ${(error as Error).message}`);
+    }
+  }
+
+  /** Turn a stored comparison into a unified diff and open it in VS Code. */
+  private async openChangeDiff(index: number): Promise<void> {
+    const sessionId = this.viewSessionId();
+    const latest = sessionId ? this.changesLatest.get(sessionId) : undefined;
+    if (!this.client || !sessionId || !latest) return;
+    try {
+      const diff: ChangesDiffView = await this.client.changesDiff(sessionId, latest.seq, index);
+      if (diff.kind !== "text") {
+        void vscode.window.showInformationMessage(
+          diff.kind === "binary" ? `${diff.display}：二进制文件，无法显示差异` : `${diff.display}：文件过大，未生成差异`
+        );
+        return;
+      }
+      const header = `--- a/${diff.display}\n+++ b/${diff.display}\n`;
+      const body = (diff.hunks ?? [])
+        .map(
+          (h) =>
+            `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n` + (h.lines ?? []).join("\n") + "\n"
+        )
+        .join("");
+      const doc = await vscode.workspace.openTextDocument({ content: header + body, language: "diff" });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    } catch (error) {
+      void vscode.window.showErrorMessage(`打开差异失败：${(error as Error).message}`);
+    }
+  }
+
+  /** Open one presented deliverable file in the editor. */
+  private async openDelivered(index: number): Promise<void> {
+    const sessionId = this.viewSessionId();
+    const latest = sessionId ? this.deliveriesLatest.get(sessionId) : undefined;
+    const file = latest?.files[index];
+    if (!file) return;
+    const raw = file.path;
+    const sessionCwd = sessionId ? this.rawSessions.get(sessionId)?.cwd : undefined;
+    const target = path.isAbsolute(raw)
+      ? raw
+      : path.join(sessionCwd ?? this.workspaceCwd() ?? "", raw);
+    try {
+      await vscode.window.showTextDocument(vscode.Uri.file(target), { preview: true });
+    } catch {
+      void vscode.workspace.openTextDocument(vscode.Uri.file(target)).then(
+        (doc) => vscode.window.showTextDocument(doc, { preview: true }),
+        () => vscode.window.showWarningMessage(`无法打开 ${file.path}`)
+      );
+    }
   }
 
   /** Show one teammate's child conversation (the official continuable
@@ -625,6 +822,38 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
     if (event === "commands/change") {
       void this.postCommands();
+      return;
+    }
+    // Live invalidation (settings documents, LLM adapters/credentials, the
+    // permission-preset catalog, agent presets): the open settings page and
+    // the panel chrome follow the host's own change events instead of
+    // requiring a reload.
+    if (
+      event === "settings/document-updated" ||
+      event === "llm/adapters-updated" ||
+      event === "credentials/record-updated" ||
+      event === "credentials/reference-updated"
+    ) {
+      if (this.settingsPanel) void this.postSettingsData();
+      return;
+    }
+    if (event === "permission-presets/catalog-changed") {
+      void this.postPermissions();
+      if (this.settingsPanel) void this.postSettingsData();
+      return;
+    }
+    if (event === "agent-preset/selected") {
+      void this.postModels();
+      if (this.settingsPanel) void this.postSettingsData();
+      return;
+    }
+    if (event === "goal/activation-changed") {
+      const viewId = this.viewSessionId();
+      if (viewId) void this.postGoal(viewId);
+      return;
+    }
+    if (event === "plugin-market/changed") {
+      if (this.settingsPanel) void this.postPlugins();
       return;
     }
     if (event.startsWith("plugin-manager/")) {
@@ -977,6 +1206,63 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         break;
       case "teamBack":
         this.teamBack();
+        break;
+      case "jobKill": {
+        const sessionId = this.viewSessionId();
+        if (!this.client || !sessionId) break;
+        try {
+          await this.client.jobKill(sessionId, message.jobId);
+          const list = this.jobsBySession.get(sessionId) ?? [];
+          const job = list.find((j) => j.id === message.jobId);
+          if (job && job.status === "running") job.status = "stopping";
+          this.postJobsFor(sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `停止任务失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "goalCreate": {
+        const sessionId = this.viewSessionId();
+        const objective = message.objective.trim();
+        if (!this.client || !sessionId || !objective) break;
+        try {
+          await this.client.goalsCreate(sessionId, objective);
+          await this.postGoal(sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `创建目标失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "goalPause":
+      case "goalResume":
+      case "goalComplete":
+      case "goalClear": {
+        const sessionId = this.viewSessionId();
+        if (!this.client || !sessionId) break;
+        try {
+          if (message.type === "goalClear") {
+            const goal = await this.client.goalsGet(sessionId);
+            if (goal) await this.client.goalsClear(sessionId, { id: goal.id, revision: goal.revision });
+          } else {
+            const goal = await this.client.goalsGet(sessionId);
+            if (goal) {
+              const ref = { id: goal.id, revision: goal.revision };
+              if (message.type === "goalPause") await this.client.goalsPause(sessionId, ref);
+              else if (message.type === "goalResume") await this.client.goalsResume(sessionId, ref);
+              else await this.client.goalsComplete(sessionId, ref);
+            }
+          }
+          await this.postGoal(sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `更新目标失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "openChangeDiff":
+        void this.openChangeDiff(message.index);
+        break;
+      case "openDelivered":
+        void this.openDelivered(message.index);
         break;
       case "getModels":
         await this.postModels();
@@ -1550,6 +1836,61 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         isOlder: beforeSeq !== undefined,
         toolDiffs: Object.keys(toolDiffs).length > 0 ? toolDiffs : undefined,
       });
+      // Recover the tail turn's artifact coordinates from the page itself:
+      // workspace/changes carries its own seq (the summary route key) and
+      // deliverables/presented carries the declared files.
+      if (beforeSeq === undefined) {
+        const roster: JobView[] = [];
+        for (const event of mapped) {
+          if (event.type !== "job/registered" && event.type !== "job/settled") continue;
+          const d = event.data as { jobId?: unknown; kind?: unknown; label?: unknown; status?: unknown; finishedAt?: unknown } | undefined;
+          const id = typeof d?.jobId === "string" ? d.jobId : "";
+          if (!id) continue;
+          const idx = roster.findIndex((job) => job.id === id);
+          if (event.type === "job/registered") {
+            const row: JobView = {
+              id,
+              kind: typeof d?.kind === "string" ? d.kind : "",
+              label: typeof d?.label === "string" ? d.label : id,
+              status: "running",
+              startedAt: typeof event.time === "number" ? event.time : Date.now(),
+            };
+            if (idx >= 0) roster[idx] = { ...roster[idx], ...row };
+            else roster.push(row);
+          } else if (idx >= 0) {
+            const settled = typeof d?.status === "string" ? d.status : "completed";
+            roster[idx] = {
+              ...roster[idx],
+              status: settled === "completed" || settled === "killed" || settled === "failed" ? settled : "completed",
+              finishedAt: typeof d?.finishedAt === "number" ? d.finishedAt : Date.now(),
+            };
+          }
+        }
+        this.jobsBySession.set(sessionId, roster);
+        this.postJobsFor(sessionId);
+        for (let i = mapped.length - 1; i >= 0; i -= 1) {
+          const event = mapped[i];
+          if (event.type === "workspace/changes" && typeof event.seq === "number") {
+            void this.postChanges(sessionId, event.seq, Number((event.data as { turn?: unknown } | undefined)?.turn ?? 0));
+            break;
+          }
+        }
+        for (let i = mapped.length - 1; i >= 0; i -= 1) {
+          const event = mapped[i];
+          if (event.type === "deliverables/presented") {
+            const data = event.data as { turn?: unknown; files?: unknown } | undefined;
+            const files = Array.isArray(data?.files) ? (data.files as PresentedFileView[]) : [];
+            this.deliveriesLatest.set(sessionId, { turn: Number(data?.turn ?? 0), files });
+            this.post({
+              type: "deliveries",
+              sessionId,
+              turn: Number(data?.turn ?? 0),
+              files: files.map((f, index) => ({ index, path: f.path, description: f.description })),
+            });
+            break;
+          }
+        }
+      }
     } catch (error) {
       this.post({ type: "error", message: describeHarnessFailure("读取历史失败", error) });
     }

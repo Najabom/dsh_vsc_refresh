@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { nativeAuthHeaders } from "./nativeAuth";
-import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SubagentPromptValue } from "./protocol";
+import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -460,5 +460,68 @@ export class HarnessClient {
       parentSessionId,
       mode: "continuable",
     });
+  }
+
+  /* ---------- background jobs ---------- */
+
+  /** Ask a running job to stop (jobController/kill takes one request struct). */
+  jobKill(sessionId: string, jobId: string): Promise<{ outcome: "requested" | "already-finished" }> {
+    return this.call<{ outcome: "requested" | "already-finished" }>(METHODS.jobKill, { request: { sessionId, jobId } });
+  }
+
+  /* ---------- goals ---------- */
+
+  /** The session's goal (undefined when none is set). */
+  goalsGet(agentId: string): Promise<GoalView | undefined> {
+    return this.call<GoalView | undefined>(METHODS.goalsGet, { agentId });
+  }
+
+  goalsCreate(agentId: string, objective: string, maxGoalRounds?: number): Promise<{ ref: GoalRef }> {
+    return this.call<{ ref: GoalRef }>(METHODS.goalsCreate, { agentId, request: { objective, maxGoalRounds } });
+  }
+
+  goalsPause(agentId: string, ref: GoalRef): Promise<GoalView> {
+    return this.call<GoalView>(METHODS.goalsPause, { agentId, ref });
+  }
+
+  goalsResume(agentId: string, ref: GoalRef): Promise<GoalView> {
+    return this.call<GoalView>(METHODS.goalsResume, { agentId, ref });
+  }
+
+  goalsComplete(agentId: string, ref: GoalRef): Promise<GoalView> {
+    return this.call<GoalView>(METHODS.goalsComplete, { agentId, ref });
+  }
+
+  goalsClear(agentId: string, ref: GoalRef): Promise<void> {
+    return this.call<void>(METHODS.goalsClear, { agentId, ref });
+  }
+
+  /* ---------- document routes (workspace changes / deliverables) ---------- */
+
+  /** Authenticated GET on the harness document routes (JSON responses).
+   *  The same browser-session cookie the RPC call attaches is used here. */
+  async getJson<T>(pathAndQuery: string, signal?: AbortSignal): Promise<T> {
+    const res = await fetch(`${this.base}${pathAndQuery}`, {
+      headers: { ...(nativeAuthHeaders(this.base) ?? {}) },
+      signal,
+    });
+    if (!res.ok) throw new Error(`dsh api GET ${pathAndQuery}: HTTP ${res.status}`);
+    return (await res.json()) as T;
+  }
+
+  /** One turn's changed-file summary (workspace/changes). */
+  changesSummary(sessionId: string, seq: number, signal?: AbortSignal): Promise<ChangesSummaryView> {
+    return this.getJson<ChangesSummaryView>(
+      `/api/changes.summary?sessionId=${encodeURIComponent(sessionId)}&seq=${seq}`,
+      signal
+    );
+  }
+
+  /** One listed file's turn-start/turn-end comparison. */
+  changesDiff(sessionId: string, seq: number, index: number, signal?: AbortSignal): Promise<ChangesDiffView> {
+    return this.getJson<ChangesDiffView>(
+      `/api/changes.diff?sessionId=${encodeURIComponent(sessionId)}&seq=${seq}&index=${index}`,
+      signal
+    );
   }
 }

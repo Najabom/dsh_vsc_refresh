@@ -45,8 +45,12 @@
   body.ask-mode #perm-btn,
   body.ask-mode #plan-btn,
   body.ask-mode #balance-chip,
-  body.ask-mode #model-btn,
-  body.ask-mode #effort-btn { display: none !important; }
+body.ask-mode #model-btn,
+body.ask-mode #effort-btn,
+body.ask-mode #goal-btn,
+body.ask-mode #goal-row,
+body.ask-mode #goal-create,
+body.ask-mode #jobs-bar { display: none !important; }
   body.ask-mode #input-foot { display: none; }
   /* connection dot — compact: no text, color carries the state */
   .pill { flex: none; width: 10px; height: 10px; border-radius: 50%; font-size: 0; }
@@ -368,6 +372,54 @@
   .q-item .qbtn:hover { color: var(--fg); }
   .q-item .qbtn.danger:hover { color: var(--err); }
 
+  /* Goal strip (goals/* RPCs): lifecycle controls for the session's goal. */
+  #goal-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 13px;
+              border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); }
+  #goal-row .goal-icon { color: var(--vscode-charts-purple, #c678dd); flex: none; }
+  #goal-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #goal-phase { flex: none; font-size: 12px; color: var(--muted); }
+  #goal-phase.active { color: var(--vscode-charts-green, #89d185); }
+  #goal-phase.blocked { color: var(--warn, #e0b94a); }
+  #goal-rounds { flex: none; font-size: 12px; color: var(--muted); }
+  #goal-row .mini { flex: none; font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--border);
+                    border-radius: 3px; padding: 1px 6px; cursor: pointer; }
+  #goal-row .mini:hover { color: var(--fg); }
+  #goal-create { display: flex; gap: 6px; align-items: center; padding: 2px 0 4px; }
+  #goal-create input { flex: 1; min-width: 0; background: var(--input-bg); color: var(--fg);
+                       border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; font-size: 13px; }
+  #goal-create input:focus { outline: none; border-color: var(--accent); }
+
+  /* Background jobs bar (job/list): running rows carry a stop control. */
+  #jobs-bar { display: flex; flex-direction: column; gap: 2px; padding: 2px 8px; font-size: 12px; }
+  .job-row { display: flex; align-items: baseline; gap: 8px; color: var(--muted); }
+  .job-row .jdot { flex: none; }
+  .job-row.running .jdot { color: var(--vscode-charts-blue, #61afef); }
+  .job-row.failed .jdot { color: var(--err); }
+  .job-row.killed .jdot, .job-row.completed .jdot { color: var(--vscode-charts-green, #89d185); }
+  .job-row .jlabel { color: var(--fg); flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row .jmeta { flex: none; }
+  .job-row .jkill { flex: none; cursor: pointer; color: var(--muted); background: none; border: none; font-size: 12px; padding: 0 3px; }
+  .job-row .jkill:hover { color: var(--err); }
+
+  /* Per-turn workspace changes + presented deliverables. */
+  #changes-bar { padding: 2px 8px; font-size: 12px; }
+  .changes-head { display: flex; align-items: center; }
+  #changes-toggle { cursor: pointer; user-select: none; background: none; border: none; color: var(--muted);
+                    font-size: 12px; padding: 0; }
+  #changes-toggle:hover { color: var(--fg); }
+  #changes-sum .cadd { color: var(--vscode-charts-green, #89d185); }
+  #changes-sum .cdel { color: var(--vscode-charts-red, #f48771); }
+  #changes-files, #deliveries-list { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 2px 14px; }
+  .chg-row, .dlv-row { display: flex; align-items: baseline; gap: 6px; cursor: pointer; color: var(--muted);
+                       background: none; border: none; text-align: left; padding: 1px 0; font-size: 12px; }
+  .chg-row:hover, .dlv-row:hover { color: var(--fg); }
+  .chg-row .cpath, .dlv-row .cpath { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden;
+                                     text-overflow: ellipsis; color: var(--fg); }
+  .chg-row .cadd { flex: none; color: var(--vscode-charts-green, #89d185); }
+  .chg-row .cdel { flex: none; color: var(--vscode-charts-red, #f48771); }
+  .dlv-row .cdesc { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .changes-sub { color: var(--muted); padding: 3px 0 1px 0; }
+
   .msg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
   .msg-actions button { cursor: pointer; background: none; border: none; color: var(--muted); font-size: 11px; padding: 0 2px; }
   .msg-actions button:hover { color: var(--fg); }
@@ -637,7 +689,9 @@
   body.subview #ws-line, body.subview #session-picker, body.subview #new-session-wrap,
   body.subview #delete-session, body.subview #delete-session-hard, body.subview #perm-btn,
   body.subview #plan-btn, body.subview #model-btn, body.subview #effort-btn,
-  body.subview #attach-btn, body.subview #todo-bar, body.subview #queue-row { display: none !important; }
+  body.subview #attach-btn, body.subview #todo-bar, body.subview #queue-row,
+body.subview #goal-btn, body.subview #goal-row, body.subview #goal-create,
+body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
 </style>
 </head>
 <body>
@@ -693,6 +747,34 @@
       </div>
     </section>
     <section id="interact-card" hidden></section>
+    <div id="goal-create" hidden>
+      <input id="goal-input" placeholder="目标：描述要完成的事（Enter 创建）" />
+      <button id="goal-start" class="btn primary">开始</button>
+      <button id="goal-cancel" class="btn">取消</button>
+    </div>
+    <div id="goal-row" hidden>
+      <span class="goal-icon">◎</span>
+      <span id="goal-text"></span>
+      <span id="goal-phase"></span>
+      <span id="goal-rounds"></span>
+      <span class="in-spacer"></span>
+      <button id="goal-pause" class="mini" title="暂停目标">暂停</button>
+      <button id="goal-resume" class="mini" title="恢复目标" hidden>恢复</button>
+      <button id="goal-complete" class="mini" title="标记目标完成">完成</button>
+      <button id="goal-clear" class="mini" title="清除目标">✕</button>
+    </div>
+    <div id="jobs-bar" hidden></div>
+    <section id="changes-bar" hidden>
+      <div class="changes-head">
+        <button id="changes-toggle" title="展开/折叠变更"><span id="changes-chevron">▸</span> 变更 <span id="changes-sum"></span></button>
+        <span class="in-spacer"></span>
+      </div>
+      <div id="changes-files" hidden></div>
+      <div id="deliveries-wrap" hidden>
+        <div class="changes-sub">产物</div>
+        <div id="deliveries-list"></div>
+      </div>
+    </section>
     <div id="queue-row" hidden></div>
     <div id="input-row">
       <div class="input-box">
@@ -706,6 +788,7 @@
         <button id="model-btn" title="模型" hidden></button>
         <button id="effort-btn" title="推理等级" hidden></button>
         <button id="attach-btn" class="btn" title="添加图片或文件（也可粘贴、从资源管理器拖入）"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+        <button id="goal-btn" class="btn" title="创建目标（DSH 目标模式）" hidden>◎</button>
         <button id="send" class="btn primary" title="发送">➤</button>
         <button id="cancel" class="btn" title="停止当前回合" hidden>✕</button>
       </div>
@@ -738,6 +821,17 @@
       subviewStatusEl = $("subview-status"),
       permMenuEl = $("perm-menu"), planMenuEl = $("plan-menu"),
       modelMenuEl = $("model-menu"), effortMenuEl = $("effort-menu"),
+      goalBtnEl = $("goal-btn"), goalRowEl = $("goal-row"), goalTextEl = $("goal-text"),
+      goalPhaseEl = $("goal-phase"), goalRoundsEl = $("goal-rounds"),
+      goalPauseEl = $("goal-pause"), goalResumeEl = $("goal-resume"),
+      goalCompleteEl = $("goal-complete"), goalClearEl = $("goal-clear"),
+      goalCreateEl = $("goal-create"), goalInputEl = $("goal-input"),
+      goalStartEl = $("goal-start"), goalCancelEl = $("goal-cancel"),
+      jobsBarEl = $("jobs-bar"),
+      changesBarEl = $("changes-bar"), changesToggleEl = $("changes-toggle"),
+      changesChevronEl = $("changes-chevron"), changesSumEl = $("changes-sum"),
+      changesFilesEl = $("changes-files"), deliveriesWrapEl = $("deliveries-wrap"),
+      deliveriesListEl = $("deliveries-list"),
       todoBarEl = $("todo-bar"), todoToggleEl = $("todo-toggle"), todoListEl = $("todo-list"),
       todoCountEl = $("todo-count"), todoChevronEl = $("todo-chevron"),
       askCardEl = $("ask-card"), askCtxEl = $("ask-ctx"), askChoicesEl = $("ask-choices"),
@@ -771,6 +865,12 @@
     lastViewId: null,
     usage: null,             // active session tokenUsage projection
     queue: [],               // session/queue snapshot for the active session
+    jobs: [],                // background jobs of the viewed session (job/list)
+    goal: null,              // goals/get view of the viewed session | null
+    changes: null,           // latest workspace/changes summary {turn,files,total,added,deleted}
+    deliveries: null,        // latest deliverables/presented {turn,files}
+    changesOpen: false,      // changes card expanded?
+    goalCreating: false,     // inline goal composer open?
   noticeOpen: false,       // "后台任务通知" group expanded?
     commands: [],            // slash-command catalog (commands/list)
     todos: [],               // todos projection for the active session
@@ -2724,6 +2824,151 @@
     teamFailureEl.textContent = t.failure ? ("团队异常：" + t.failure) : "";
   }
 
+  /* ---------- background jobs bar ---------- */
+  var JOB_STATUS_TEXT = {
+    running: "运行中", stopping: "停止中", completed: "已完成", killed: "已停止", failed: "失败"
+  };
+  function jobMeta(job) {
+    var bits = [JOB_STATUS_TEXT[job.status] || job.status];
+    if (job.progress) {
+      if (typeof job.progress.text === "string" && job.progress.text) bits.push(job.progress.text);
+      else if (typeof job.progress.completed === "number" && typeof job.progress.total === "number") {
+        bits.push(job.progress.completed + "/" + job.progress.total);
+      }
+    }
+    if (job.detail) bits.push(job.detail);
+    if (typeof job.outputTotal === "number" && job.outputTotal > 0) {
+      bits.push(job.outputTotal >= 1024 ? (Math.round(job.outputTotal / 102.4) / 10) + "KB" : job.outputTotal + "B");
+    }
+    return bits.join(" · ");
+  }
+  function renderJobs() {
+    var jobs = state.jobs || [];
+    jobsBarEl.hidden = jobs.length === 0;
+    jobsBarEl.innerHTML = "";
+    jobs.forEach(function (job) {
+      var row = document.createElement("div");
+      row.className = "job-row " + (job.status || "");
+      var dot = document.createElement("span");
+      dot.className = "jdot";
+      dot.textContent = job.status === "failed" ? "●" : job.status === "running" || job.status === "stopping" ? "◉" : "✓";
+      var label = document.createElement("span");
+      label.className = "jlabel";
+      label.textContent = (job.kind ? "[" + job.kind + "] " : "") + (job.label || job.id);
+      label.title = label.textContent;
+      var meta = document.createElement("span");
+      meta.className = "jmeta";
+      meta.textContent = jobMeta(job);
+      row.appendChild(dot); row.appendChild(label); row.appendChild(meta);
+      if (job.status === "running" || job.status === "stopping") {
+        var kill = document.createElement("button");
+        kill.className = "jkill";
+        kill.textContent = "✕";
+        kill.title = "停止该后台任务";
+        kill.addEventListener("click", function () { post({ type: "jobKill", jobId: job.id }); });
+        row.appendChild(kill);
+      }
+      jobsBarEl.appendChild(row);
+    });
+  }
+
+  /* ---------- goal strip ---------- */
+  var GOAL_PHASE_TEXT = { active: "进行中", paused: "已暂停", blocked: "受阻", complete: "已完成" };
+  function renderGoal() {
+    var goal = state.goal;
+    goalBtnEl.hidden = !!(goal && goal.phase !== "complete") || state.mode === "ask";
+    goalRowEl.hidden = !goal;
+    if (!goal) { goalCreateEl.hidden = true; return; }
+    goalTextEl.textContent = goal.objective || "";
+    goalTextEl.title = goal.objective || "";
+    goalPhaseEl.textContent = GOAL_PHASE_TEXT[goal.phase] || goal.phase || "";
+    goalPhaseEl.className = goal.phase || "";
+    goalRoundsEl.textContent = "轮 " + (goal.roundsStarted || 0) + (goal.maxGoalRounds ? "/" + goal.maxGoalRounds : "");
+    var blocked = goal.phase === "blocked";
+    goalRoundsEl.title = blocked && goal.blockedReason ? goal.blockedReason : "";
+    goalPauseEl.hidden = goal.phase !== "active";
+    goalResumeEl.hidden = goal.phase !== "paused" && goal.phase !== "blocked";
+    goalCompleteEl.hidden = goal.phase === "complete";
+    goalClearEl.hidden = false;
+  }
+
+  /* ---------- per-turn changes + deliverables ---------- */
+  function renderChanges() {
+    var ch = state.changes;
+    var dl = state.deliveries;
+    var hasCh = !!(ch && ch.files && ch.files.length);
+    var hasDl = !!(dl && dl.files && dl.files.length);
+    changesBarEl.hidden = !hasCh && !hasDl;
+    if (changesBarEl.hidden) return;
+    var sum = "";
+    if (hasCh) {
+      sum = "第 " + ch.turn + " 轮 · " + ch.files.length + " 文件";
+    }
+    changesSumEl.innerHTML = "";
+    if (hasCh) {
+      changesSumEl.appendChild(document.createTextNode(sum + " "));
+      var add = document.createElement("span");
+      add.className = "cadd";
+      add.textContent = "+" + ch.added;
+      var del = document.createElement("span");
+      del.className = "cdel";
+      del.textContent = " −" + ch.deleted;
+      changesSumEl.appendChild(add);
+      changesSumEl.appendChild(document.createTextNode(" "));
+      changesSumEl.appendChild(del);
+    }
+    changesChevronEl.textContent = state.changesOpen ? "▾" : "▸";
+    changesFilesEl.hidden = !state.changesOpen;
+    deliveriesWrapEl.hidden = !state.changesOpen || !hasDl;
+    changesFilesEl.innerHTML = "";
+    (hasCh ? ch.files : []).forEach(function (file) {
+      var row = document.createElement("button");
+      row.className = "chg-row";
+      row.type = "button";
+      var pathEl = document.createElement("span");
+      pathEl.className = "cpath";
+      pathEl.textContent = file.display;
+      pathEl.title = file.display;
+      row.appendChild(pathEl);
+      if (file.binary || file.oversized) {
+        var note = document.createElement("span");
+        note.className = "cdel";
+        note.textContent = file.binary ? "二进制" : "过大";
+        row.appendChild(note);
+      } else {
+        var addEl = document.createElement("span");
+        addEl.className = "cadd";
+        addEl.textContent = "+" + file.added;
+        var delEl = document.createElement("span");
+        delEl.className = "cdel";
+        delEl.textContent = "−" + file.deleted;
+        row.appendChild(addEl);
+        row.appendChild(delEl);
+      }
+      row.addEventListener("click", function () { post({ type: "openChangeDiff", index: file.index }); });
+      changesFilesEl.appendChild(row);
+    });
+    deliveriesListEl.innerHTML = "";
+    (hasDl ? dl.files : []).forEach(function (file) {
+      var row = document.createElement("button");
+      row.className = "dlv-row";
+      row.type = "button";
+      var pathEl = document.createElement("span");
+      pathEl.className = "cpath";
+      pathEl.textContent = file.path;
+      pathEl.title = file.path;
+      row.appendChild(pathEl);
+      if (file.description) {
+        var desc = document.createElement("span");
+        desc.className = "cdesc";
+        desc.textContent = file.description;
+        row.appendChild(desc);
+      }
+      row.addEventListener("click", function () { post({ type: "openDelivered", index: file.index }); });
+      deliveriesListEl.appendChild(row);
+    });
+  }
+
   /* Subview chrome: hide the lead-only controls while a teammate chat is on
      screen; the back bar carries the member name + live status. */
   function applySubview() {
@@ -2809,6 +3054,11 @@
           state.hasMore = false; state.loadingOlder = false;
           state.diffByCall = {}; state.activeRound = null;
           state.turnStartTime = 0; state.firstTokenTime = 0; state.turnOutput = 0;
+          // Per-session artifact cards belong to the conversation on screen.
+          state.jobs = []; state.goal = null; state.changes = null; state.deliveries = null;
+          state.changesOpen = false; state.goalCreating = false;
+          renderJobs(); renderGoal(); renderChanges();
+          goalCreateEl.hidden = true;
           state.running = state.subview ? false : !!(act && act.running);
           suspended = false;
           forceBottom = true;
@@ -3031,6 +3281,38 @@
         if (msg.sessionId !== state.activeSessionId) return;
         state.todos = msg.items || [];
         renderTodos();
+        break;
+      }
+      case "jobs": {
+        // The host only reports the viewed session; keep the guard anyway so a
+        // late frame from a switch cannot draw into the new conversation.
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.jobs = msg.jobs || [];
+        renderJobs();
+        break;
+      }
+      case "goal": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.goal = msg.goal || null;
+        renderGoal();
+        break;
+      }
+      case "changes": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.changes = {
+          turn: msg.turn,
+          files: msg.files || [],
+          total: msg.total,
+          added: msg.added,
+          deleted: msg.deleted
+        };
+        renderChanges();
+        break;
+      }
+      case "deliveries": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.deliveries = { turn: msg.turn, files: msg.files || [] };
+        renderChanges();
         break;
       }
       case "toolDiff": {
@@ -4318,6 +4600,42 @@
     teamCardEl.hidden = true;
   });
   subviewBackEl.addEventListener("click", function () { post({ type: "teamBack" }); });
+
+  /* Goal strip: create + lifecycle controls. */
+  function closeGoalCreate() {
+    state.goalCreating = false;
+    goalCreateEl.hidden = true;
+    goalInputEl.value = "";
+  }
+  function submitGoal() {
+    var text = (goalInputEl.value || "").trim();
+    if (!text) { goalInputEl.focus(); return; }
+    post({ type: "goalCreate", objective: text });
+    closeGoalCreate();
+  }
+  goalBtnEl.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    if (state.goalCreating) { closeGoalCreate(); return; }
+    state.goalCreating = true;
+    goalCreateEl.hidden = false;
+    goalInputEl.focus();
+  });
+  goalStartEl.addEventListener("click", submitGoal);
+  goalCancelEl.addEventListener("click", closeGoalCreate);
+  goalInputEl.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); submitGoal(); }
+    else if (ev.key === "Escape") { ev.preventDefault(); closeGoalCreate(); }
+  });
+  goalPauseEl.addEventListener("click", function () { post({ type: "goalPause" }); });
+  goalResumeEl.addEventListener("click", function () { post({ type: "goalResume" }); });
+  goalCompleteEl.addEventListener("click", function () { post({ type: "goalComplete" }); });
+  goalClearEl.addEventListener("click", function () { post({ type: "goalClear" }); });
+
+  /* Changes card toggle. */
+  changesToggleEl.addEventListener("click", function () {
+    state.changesOpen = !state.changesOpen;
+    renderChanges();
+  });
   // click anywhere outside the popups closes them
   document.addEventListener("click", function (ev) {
     if (permMenuEl.hidden && planMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden && selMenuEl.hidden) return;
