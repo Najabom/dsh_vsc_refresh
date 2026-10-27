@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.4.0",
+  "version": "1.4.1",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -100,6 +100,10 @@
       {
         "command": "dsh.reloadPanel",
         "title": "%dsh.command.reloadPanel%"
+      },
+      {
+        "command": "dsh.exportDiagnostics",
+        "title": "%dsh.command.exportDiagnostics%"
       }
     ],
     "menus": {
@@ -120,6 +124,9 @@
         },
         {
           "command": "dsh.reloadPanel"
+        },
+        {
+          "command": "dsh.exportDiagnostics"
         }
       ]
     },

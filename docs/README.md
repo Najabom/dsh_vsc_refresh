@@ -10,6 +10,7 @@
 
 - `screenshots/` — README 引用的截图（7 张 v1.0.0 实拍；清单与拍摄规范见 `screenshots/README.md`）
 - `design.md` — 架构与设计说明（为什么「纯桥接」、如何保持稳定、对外讲述用）
+- `compatibility.md` — DSH 版本兼容矩阵、接口台账与版本不匹配的报告方式
 - 用户指南、FAQ、配置说明等面向使用者的文档
 
 ## 不放这里 ❌

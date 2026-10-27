@@ -1,7 +1,7 @@
 // 唯一主干入口
 import * as vscode from "vscode";
 import * as fs from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { NativePanelProvider } from "./panel/NativePanelProvider";
 import { renderEmbedHtml } from "./panel/embed";
@@ -38,6 +38,7 @@ import { ExternalChanges } from "./editor/externalChanges";
 import { AskSessions } from "./editor/askSessions";
 import { buildSelectionContext } from "./editor/askSelection";
 import { cleanupTempDirs, reviewFiles } from "./editor/diff";
+import { buildDiagnostics } from "./diagnostics";
 import type { PanelEvent } from "./panel/protocol";
 
 const POLL_MS = 1000;
@@ -58,6 +59,8 @@ const DSH_UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000; // long-running windows must n
  *  after the extension is going away (a late timer would otherwise spawn a
  *  detached orphan nobody could ever stop). */
 let shuttingDown = false;
+/** Recent log lines for the one-click diagnostics export (never contains secrets). */
+const LOG_RING: string[] = [];
 
 /**
  * Multi-window liveness: this window writes an adaptive heartbeat (via
@@ -114,6 +117,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const makeLog = (message: string): void => {
     log.appendLine(message);
     console.log("[dsh-vsc]", message); // lands in the exthost log for headless diagnosis
+    // Ring buffer for the diagnostics export (last 500 lines, no secrets are
+    // ever logged by this extension).
+    LOG_RING.push(`${new Date().toISOString()} ${message}`);
+    if (LOG_RING.length > 500) LOG_RING.splice(0, LOG_RING.length - 500);
   };
   const tracker = new ChangeTracker();
   const followEdits = new FollowEdits(makeLog);
@@ -310,6 +317,23 @@ export function activate(context: vscode.ExtensionContext): void {
       // render surface can stay blank even though the harness is healthy).
       panel.reloadWebview("手动重载");
       askProvider.reloadWebview("手动重载");
+    }),
+    vscode.commands.registerCommand("dsh.exportDiagnostics", async () => {
+      // One-click support bundle: versions, connection phase, compatibility
+      // report, harness/heartbeat records and the log tail. No credentials
+      // (the extension never logs tokens or message bodies).
+      const facts = { baseUrl: configuredBase(), ...panel.diagnosticsFacts() };
+      const content = buildDiagnostics(context, facts, LOG_RING);
+      const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const target = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.joinPath(folder ?? vscode.Uri.file(homedir()), `dsh-vsc-diagnostics-${stamp}.md`),
+        filters: { Markdown: ["md"] },
+      });
+      if (!target) return;
+      await vscode.workspace.fs.writeFile(target, Buffer.from(content, "utf8"));
+      const open = await vscode.window.showInformationMessage("诊断报告已保存", "打开");
+      if (open === "打开") void vscode.commands.executeCommand("vscode.open", target);
     }),
     vscode.window.onDidChangeWindowState((state) => {
       if (!state.focused) return;

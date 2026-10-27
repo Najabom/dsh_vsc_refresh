@@ -1,6 +1,6 @@
 {
   "name": "dsh-vsc-companion",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "private": true,
   "type": "module",
   "description": "DSH companion bundle for dsh-vsc: task-checklist stewardship plus host-side page_screenshot/page_eval tools that run outside the command sandbox.",

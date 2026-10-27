@@ -31,17 +31,17 @@ export const CAPABILITY_FEATURES: CapabilityFeature[] = [
   { id: "jobs", label: "后台任务", methods: ["job/*"] },
   { id: "schedules", label: "定时任务", methods: ["schedule/*"] },
   { id: "goals", label: "目标", methods: ["goals/*"] },
-  { id: "changes", label: "每轮变更", methods: ["workspace/changes"] },
+  { id: "changes", label: "每轮变更", methods: ["workspace/follow"] },
   { id: "search", label: "会话搜索", methods: ["session/search"] },
   { id: "fork", label: "会话分叉", methods: ["session/fork"] },
   { id: "references", label: "文件/会话引用", methods: ["fileReferences/*", "sessionReferenceResolver/*"] },
   { id: "skills", label: "技能菜单", methods: ["skills/*"] },
-  { id: "workspace", label: "工作区管理", methods: ["workspace/create", "workspace/rename", "workspace/delete", "workspace/move"] },
+  { id: "workspace", label: "工作区管理", methods: ["workspace/create", "workspace/rename", "workspace/delete", "workspace/insertBefore", "workspace/pinSession", "workspace/unpinSession"] },
   { id: "account", label: "账户与余额", methods: ["account/*"] },
   { id: "settings", label: "高级设置", methods: ["settings/*"] },
-  { id: "permissions", label: "权限预设", methods: ["permissionPresets/*", "permission/*"] },
+  { id: "permissions", label: "权限预设", methods: ["permissionPresets/*"] },
   { id: "attachments", label: "附件", methods: ["fileUploads/*", "session/attachment"] },
-  { id: "subagents", label: "子代理", methods: ["subagent/*"] },
+  { id: "subagents", label: "子代理", methods: ["subagents/prompt", "subagents/interruptByParent", "session/follow"] },
 ];
 
 export type FeatureStatus = "ok" | "incompatible" | "unsupported";

@@ -10,6 +10,7 @@
 
 - `restore-dsh-pristine.ps1` — 还原/校验官方 `@deepseek-ai/dsh` 安装树与 npm 发布版字节一致（幂等；`-VerifyOnly` 只读校验）
 - `verify-sandbox.mjs` / `lifecycle-test.ps1` — 开发期自测
+- `contract-check.mjs` — 对固定的 DSH 版本做接口合同检查（CI 每周运行；用法 `node scripts/contract-check.mjs 0.2.2`）
 
 ## 不放这里 ❌
 

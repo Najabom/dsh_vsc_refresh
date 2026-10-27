@@ -2676,6 +2676,31 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     this.settingsPanel?.webview.postMessage({ type: "capabilities", report });
   }
 
+  /** Facts for the diagnostics export (no internals leak past this shape). */
+  diagnosticsFacts(): {
+    phase: string;
+    connected: boolean;
+    dshVersion?: string;
+    activeSessionId: string | null;
+    sessions: number;
+    viewReady: boolean;
+    lastPongAgeMs: number | null;
+    panelWidth?: number;
+    capabilities: CompatibilityReport | null;
+  } {
+    return {
+      phase: this.phase,
+      connected: this.connected,
+      dshVersion: this.version,
+      activeSessionId: this.activeSessionId,
+      sessions: this.sessions.length,
+      viewReady: this.viewReady,
+      lastPongAgeMs: this.lastPongAt ? Date.now() - this.lastPongAt : null,
+      panelWidth: this.lastPanelWidth,
+      capabilities: this.capabilities,
+    };
+  }
+
   /** contextBreakdown projection of one session (null before the projection lands). */
   private contextBreakdownOf(sessionId: string | null): { systemTokens: number; toolsTokens: number; messageTokens: number } | null {
     if (!sessionId) return null;

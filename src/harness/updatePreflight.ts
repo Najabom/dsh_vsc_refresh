@@ -139,6 +139,11 @@ export async function fetchReleaseNotes(
 export const INTERFACE_IDS: string[] = [
   ...Object.values(METHODS),
   "remote.mux",
+  // Stream endpoints opened over the mux (not typert RPC methods).
+  "$events",
+  "session/control",
+  "session/follow",
+  "workspace/follow",
   "approval/request",
   "user-questions/request",
   "client-request",

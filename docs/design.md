@@ -294,6 +294,8 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 - **显示拓扑**：`pong` 携带 `screen.width/height`；宿主记录基线，屏幕尺寸变化视为显示器组变化（渲染面可疑），主动重建一次。窗口重新聚焦（`onDidChangeWindowState`）时对两个面板各做一次即时探测（`nudge`），6 秒内无回应直接重建。
 - **手动逃生口**：命令 `dsh.reloadPanel`（DSH: 重新加载侧边栏面板）随时重建侧边栏与问题窗口。
 
+支持面还包括：`dsh.exportDiagnostics`（DSH: 导出诊断报告）把版本、连接阶段、兼容台账、harness 记录、本窗口心跳与日志尾部打包成 Markdown（不含凭据）；伴生插件在 `apply` 内对每个宿主 API 逐项特性探测 + try/catch 注册，缺接口只关闭对应能力并记一条警告，绝不让 harness 启动失败；CI 的 `.github/workflows/contract.yml` 每周用固定版本矩阵跑 `scripts/contract-check.mjs`（与更新预检同一套静态接口扫描），接口缺失即红。
+
 ### 5.11 DSH 版本兼容台账：如实报告，而不是隐藏
 
 协议客户端最怕上游改名/改形。这里不做「猜」，也不做「默默隐藏」：

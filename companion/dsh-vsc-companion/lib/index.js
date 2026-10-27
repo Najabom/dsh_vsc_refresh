@@ -45,44 +45,92 @@ const NAV_TIMEOUT_MS = 30000
 const MAX_VIEWPORT = 4096
 const MAX_EVAL_RESULT_CHARS = 20000
 
+const has = (obj, key) => obj !== null && typeof obj === 'object' && typeof obj[key] === 'function'
+
 export function apply(ctx) {
-  ctx.sessionProjections.register({
-    key: 'companionTodos',
-    stateSchema: todoListSchema,
-    stateVersion: 1,
-    init: () => null,
-    apply: (state, event) => {
-      if (event.type === 'todo/write') {
-        return Array.isArray(event.data?.todos) ? event.data.todos : state
-      }
-      return state
-    },
-    wire: {
-      viewSchema: todoListSchema,
-      view: (state) => state,
-    },
-  })
+  // Host API drift must never break the harness boot: every surface is
+  // feature-detected and registered inside its own try/catch. Missing pieces
+  // degrade to "that feature is off", logged once.
+  const report = (feature, error) => {
+    const message = `dsh-vsc-companion: ${feature} unavailable: ${error?.message ?? String(error)}`
+    try { ctx.logger?.warn?.(message) } catch { }
+    try { console.warn(message) } catch { }
+  }
 
-  ctx.inject(['systemPrompt'], (scope) => {
-    scope.systemPrompt.context({
-      name: 'companion:todos',
-      order: CONTEXT_ORDER_TODOS,
-      text: (context) => {
-        const session = context.agent?.session
-        if (session === undefined) return ''
-        try {
-          const live = ctx.sessionProjections.stateOf(session, 'todos')
-          const shadow = ctx.sessionProjections.stateOf(session, 'companionTodos')
-          return renderTodoSection(live, shadow)
-        } catch {
-          return ''
+  let projections = false
+  if (has(ctx.sessionProjections, 'register') && has(ctx.sessionProjections, 'stateOf')) {
+    try {
+      ctx.sessionProjections.register({
+        key: 'companionTodos',
+        stateSchema: todoListSchema,
+        stateVersion: 1,
+        init: () => null,
+        apply: (state, event) => {
+          if (event.type === 'todo/write') {
+            return Array.isArray(event.data?.todos) ? event.data.todos : state
+          }
+          return state
+        },
+        wire: {
+          viewSchema: todoListSchema,
+          view: (state) => state,
+        },
+      })
+      projections = true
+    } catch (error) {
+      report('todo steward projection', error)
+    }
+  } else {
+    report('todo steward projection', new Error('sessionProjections API missing'))
+  }
+
+  if (projections) {
+    try {
+      if (!has(ctx, 'inject')) throw new Error('ctx.inject missing')
+      ctx.inject(['systemPrompt'], (scope) => {
+        if (!has(scope?.systemPrompt, 'context')) {
+          report('todo steward context', new Error('systemPrompt.context missing'))
+          return
         }
-      },
-    })
-  })
+        try {
+          scope.systemPrompt.context({
+            name: 'companion:todos',
+            order: CONTEXT_ORDER_TODOS,
+            text: (context) => {
+              const session = context.agent?.session
+              if (session === undefined) return ''
+              try {
+                const live = ctx.sessionProjections.stateOf(session, 'todos')
+                const shadow = ctx.sessionProjections.stateOf(session, 'companionTodos')
+                return renderTodoSection(live, shadow)
+              } catch {
+                return ''
+              }
+            },
+          })
+        } catch (error) {
+          report('todo steward context', error)
+        }
+      })
+    } catch (error) {
+      report('todo steward context', error)
+    }
+  }
 
-  ctx.tools.register(pageScreenshotTool(ctx))
-  ctx.tools.register(pageEvalTool(ctx))
+  if (has(ctx.tools, 'register')) {
+    for (const [label, tool] of [
+      ['page_screenshot', pageScreenshotTool(ctx)],
+      ['page_eval', pageEvalTool(ctx)],
+    ]) {
+      try {
+        ctx.tools.register(tool)
+      } catch (error) {
+        report(label + ' tool', error)
+      }
+    }
+  } else {
+    report('page tools', new Error('tools.register missing'))
+  }
 }
 
 /** The model-facing checklist section; '' contributes nothing. */

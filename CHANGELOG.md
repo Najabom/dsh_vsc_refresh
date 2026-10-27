@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - _(nothing yet)_
 
+## [1.4.1] - 2026-10-27
+
+- **诊断导出**：命令「DSH: 导出诊断报告」把扩展/VS Code/系统版本、连接阶段与
+  DSH 版本、兼容台账、harness 记录、本窗口心跳与日志尾部打包成 Markdown，
+  便于反馈问题（不含任何凭据）。
+- **伴生插件防爆**：任务清单投影与页面工具全部改为特性探测 + 逐项 try/catch
+  注册；宿主 API 缺失时只关闭对应能力并记录原因，不会再让 harness 启动失败。
+- **合同测试入 CI**：每周对固定 DSH 版本（0.1.7-rc.2 / 0.2.2）运行
+  `scripts/contract-check.mjs`，任一被扩展使用的接口标识缺失即报红。
+- **兼容矩阵文档**：新增 `docs/compatibility.md`（能力 → RPC 映射、已验证版本
+  区间、不匹配报告方式），README 双语链接。
+
 ## [1.4.0] - 2026-10-27
 
 - **低活性保活**：窗口心跳改为自适应——前台 30 秒、后台 120 秒，焦点变化与会话活动即时补写；

@@ -1,0 +1,31 @@
+name: Contract
+
+# Guards the wire contract against pinned DSH releases: every endpoint the
+# extension consumes must still exist. Runs weekly, on pushes touching the
+# contract surface, and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+  push:
+    paths:
+      - "src/harness/**"
+      - "scripts/contract-check.mjs"
+      - ".github/workflows/contract.yml"
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh: ["0.1.7-rc.2", "0.2.1-rc.4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Contract check (DSH ${{ matrix.dsh }})
+        run: node scripts/contract-check.mjs "${{ matrix.dsh }}"
