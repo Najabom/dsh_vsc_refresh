@@ -641,8 +641,8 @@ export function activate(context: vscode.ExtensionContext): void {
     };
     // Each surface decides which session to follow (the mux carries parallel
     // follow streams, so the sidebar and the ask window coexist).
-    panel.attachStream({ setFollowSession: (sessionId) => stream?.setFollow("panel", sessionId) });
-    askProvider.attachStream({ setFollowSession: (sessionId) => stream?.setFollow("ask", sessionId) });
+    panel.attachStream({ setFollowSession: (target) => stream?.setFollow("panel", target) });
+    askProvider.attachStream({ setFollowSession: (target) => stream?.setFollow("ask", target) });
     stream.onError = (message) => log.appendLine(`event stream: ${message}`);
     stream.onOpen = () => {
       // A restart watchdog (update flow) may be waiting for the WS mux to

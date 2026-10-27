@@ -3,8 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
-import type { LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionSummary, SettingsDescribeView } from "../harness/protocol";
-import type { WaterfallFrame, WorkspaceState } from "../events/eventStream";
+import type { AgentTeamProjection, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
+import type { FollowTarget, WaterfallFrame, WorkspaceState } from "../events/eventStream";
 import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
 import { INTENT_CHOICES, askPromptText, sendAsk } from "../editor/askSelection";
@@ -218,8 +218,14 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private eventClientId = "";
   /** Pending waterfall requests: eventId → sessionId. */
   private pendingWaterfalls = new Map<string, { sessionId: string; message: HostMessage }>();
+  /** Unfiltered session/list rows (subagents included) — team member rows,
+   *  running flags and per-child model lookups read from here. */
+  private rawSessions = new Map<string, SessionSummary>();
+  /** Subagent view: the panel is showing a child conversation of the active
+   *  team lead (address {kind:'subagent'}) instead of the lead transcript. */
+  private teamView: { parentSessionId: string; childSessionId: string } | null = null;
   /** Opens/closes the per-session follow stream (handed in by extension.ts). */
-  private setFollowSession: (sessionId: string | null) => void = () => {};
+  private setFollowSession: (target: FollowTarget | null) => void = () => {};
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -290,7 +296,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     // Route mux events into this surface (filtered by active session host-side).
     this.onSessionEvent((sessionId, event) => {
       this.trackRunning(sessionId, event);
-      if (sessionId !== this.activeSessionId) return;
+      if (sessionId !== this.viewSessionId()) return;
       // Bridge-computed per-call line diffs ride alongside the raw event so
       // the panel can show "+N-M" on the tool card immediately (and refine it
       // once the tool's own result-time hunks land).
@@ -359,18 +365,50 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** extension.ts hands in the follow-stream control after creating the mux. */
-  attachStream(controls: { setFollowSession: (sessionId: string | null) => void }): void {
+  attachStream(controls: { setFollowSession: (target: FollowTarget | null) => void }): void {
     this.setFollowSession = controls.setFollowSession;
   }
 
-  /** Follow the active session on the mux (idempotent). */
+  /** The session whose transcript is on screen (subagent view wins). */
+  private viewSessionId(): string | null {
+    return this.teamView ? this.teamView.childSessionId : this.activeSessionId;
+  }
+
+  /** Follow target for the current view (top-level session or subagent child). */
+  private followTarget(): FollowTarget | null {
+    if (this.teamView) {
+      return {
+        kind: "subagent",
+        parentSessionId: this.teamView.parentSessionId,
+        childSessionId: this.teamView.childSessionId,
+        mode: "continuable",
+      };
+    }
+    return this.activeSessionId ? { kind: "session", sessionId: this.activeSessionId } : null;
+  }
+
+  /** Wire address for paging whatever view is on screen. */
+  private addressFor(sessionId: string): SessionAddress {
+    if (this.teamView && this.teamView.childSessionId === sessionId) {
+      return {
+        kind: "subagent",
+        parentSessionId: this.teamView.parentSessionId,
+        childSessionId: sessionId,
+        mode: "continuable",
+      };
+    }
+    return { kind: "session", sessionId };
+  }
+
+  /** Follow the active view on the mux (idempotent). */
   private followActive(): void {
-    this.setFollowSession(this.activeSessionId);
+    this.setFollowSession(this.followTarget());
   }
 
   /** Switch this surface to a session: identity first (the renderer drops
    *  history frames for any other session), then history + per-session chrome. */
   private async activateSession(sessionId: string): Promise<void> {
+    this.teamView = null;
     this.activeSessionId = sessionId;
     this.postState();
     this.followActive();
@@ -379,6 +417,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     await this.postCommands();
     this.postPermissions();
     this.postPlanMode();
+    this.postTeam();
     // An unanswered approval/question can outlive a session switch: the panel
     // clears cards on switch, so re-post this session's pending waterfall or
     // the agent stays blocked with no visible card.
@@ -392,6 +431,78 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   /** Ask surface: pin the dedicated question conversation and load it. */
   openAskSession(sessionId: string): void {
     void this.activateSession(sessionId);
+  }
+
+  /** Team card data: the lead's `agentTeam` projection plus live member
+   *  statuses (official composition: phase !== active keeps its phase;
+   *  active members read the child session's running flag). */
+  private postTeam(): void {
+    if (this.askMode) return;
+    const leadId = this.teamView?.parentSessionId ?? this.activeSessionId;
+    const projection = leadId
+      ? (this.projections.get(leadId)?.get("agentTeam") as AgentTeamProjection | null | undefined)
+      : undefined;
+    const members = Array.isArray(projection?.members) ? projection.members : [];
+    const tasks = Array.isArray(projection?.tasks) ? projection.tasks : [];
+    const view = members.map((m) => {
+      const raw = this.rawSessions.get(m.id);
+      const status = m.phase === "active" ? (raw?.running ? "running" : "inactive") : m.phase;
+      const sel = this.projections.get(m.id)?.get("modelSelection") as ModelSelectionProjection | null | undefined;
+      return {
+        id: m.id,
+        name: m.name,
+        role: m.role,
+        status,
+        model: sel?.next?.model ?? sel?.lastUsed?.model,
+        error: m.error,
+      };
+    });
+    this.post({
+      type: "team",
+      sessionId: leadId ?? "",
+      viewSessionId: this.viewSessionId() ?? "",
+      members: view,
+      tasks,
+      failure: typeof projection?.failure === "string" ? projection.failure : undefined,
+    });
+  }
+
+  /** Show one teammate's child conversation (the official continuable
+   *  addressing). The lead stays activeSessionId; only the view flips. */
+  private async openTeamMember(childSessionId: string): Promise<void> {
+    const lead = this.teamView?.parentSessionId ?? this.activeSessionId;
+    if (!lead || !this.client) return;
+    if (childSessionId === lead) {
+      this.teamBack();
+      return;
+    }
+    const child = this.rawSessions.get(childSessionId);
+    if (child && child.parentSessionId && child.parentSessionId !== lead) return;
+    this.teamView = { parentSessionId: lead, childSessionId };
+    this.postState();
+    this.followActive();
+    await this.loadHistory(childSessionId, undefined);
+    this.postTeam();
+  }
+
+  /** Return from a teammate transcript to the lead conversation. */
+  private teamBack(): void {
+    const tv = this.teamView;
+    if (!tv) return;
+    this.teamView = null;
+    this.postState();
+    if (tv.parentSessionId === this.activeSessionId) {
+      this.followActive();
+      void this.loadHistory(tv.parentSessionId, undefined).then(() => {
+        this.postModels();
+        this.postPermissions();
+        this.postPlanMode();
+        this.postTeam();
+      });
+    } else {
+      void this.activateSession(tv.parentSessionId);
+    }
+    this.postTeam();
   }
 
   /** session/control push: projection values are cached per session; the ones
@@ -413,6 +524,12 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       // Runs BEFORE the active-session guard: the hard-variant permission
       // restore must fire even when the panel is showing another session.
       this.handlePlanProjection(sessionId, value);
+      return;
+    }
+    if (key === "agentTeam") {
+      // Team state belongs to the lead conversation; refresh the card even
+      // while a teammate's transcript is on screen.
+      if (sessionId === (this.teamView?.parentSessionId ?? this.activeSessionId)) this.postTeam();
       return;
     }
     if (sessionId !== this.activeSessionId) return;
@@ -468,6 +585,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (event === "api-session/added") {
       const item = args[0] as SessionSummary | undefined;
       if (!item || typeof item.sessionId !== "string") return;
+      this.rawSessions.set(item.sessionId, item);
       const asOf = item.projections?.asOfSeq;
       if (typeof asOf === "number") this.cursors.set(item.sessionId, asOf);
       if (item.blank || item.origin === "subagent" || this.archivedSessionIds.has(item.sessionId) || this.hardDeletedSessionIds.has(item.sessionId)) return;
@@ -482,21 +600,27 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (event === "api-session/status") {
       const sessionId = String(args[0] ?? "");
       const running = args[1] === true;
+      const raw = this.rawSessions.get(sessionId);
+      if (raw) this.rawSessions.set(sessionId, { ...raw, running });
       const row = this.sessions.find((s) => s.sessionId === sessionId);
       if (row) row.running = running;
       if (sessionId) this.post({ type: "running", sessionId, running });
       if (sessionId === this.activeSessionId) this.postState();
+      this.postTeam();
       return;
     }
     if (event === "api-session/removed") {
       const sessionId = String(args[0] ?? "");
       if (!sessionId) return;
+      this.rawSessions.delete(sessionId);
       this.sessions = this.sessions.filter((s) => s.sessionId !== sessionId);
+      if (this.teamView?.childSessionId === sessionId) this.teamBack();
       if (this.activeSessionId === sessionId) {
         this.activeSessionId = null;
         this.followActive();
       }
       this.postState();
+      this.postTeam();
       return;
     }
     if (event === "commands/change") {
@@ -673,6 +797,9 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (!this.client) return;
     try {
       const { items } = await this.client.listSessions();
+      // Keep the unfiltered view (subagent children included): the team card
+      // derives member running flags and models from these rows.
+      this.rawSessions = new Map(items.map((item) => [item.sessionId, item]));
       // Cache each session's journal cursor (projections.asOfSeq) while the
       // list is in hand — session/page refuses throughSeq past the cursor.
       for (const item of items) {
@@ -752,6 +879,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       }
       this.postState();
       this.followActive();
+      this.postTeam();
     } catch (error) {
       this.post({ type: "error", message: describeHarnessFailure("会话列表失败", error) });
     }
@@ -843,6 +971,12 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         break;
       case "selectSession":
         await this.activateSession(message.sessionId);
+        break;
+      case "teamOpen":
+        await this.openTeamMember(message.childSessionId);
+        break;
+      case "teamBack":
+        this.teamBack();
         break;
       case "getModels":
         await this.postModels();
@@ -1243,6 +1377,29 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         const atts = message.attachments ?? [];
         if (!text && atts.length === 0) return;
         const mode = message.mode ?? "queue";
+        // Subagent view: the child conversation is addressed through its lead.
+        // Only text + images are admissible (the official addressing refuses
+        // durable files for subagent prompts).
+        if (this.teamView) {
+          const tv = this.teamView;
+          const content: PromptContentPart[] = [];
+          for (const a of atts) {
+            if (a.kind === "file") {
+              this.post({ type: "error", message: "给团队成员发消息只能附带图片，不能附带文件（DSH 本体限制）。" });
+              return;
+            }
+            content.push({ type: "image", mediaType: a.mediaType ?? "image/png", data: a.data, name: a.name });
+          }
+          if (text) content.push({ type: "text", text });
+          if (!content.length) return;
+          try {
+            await this.client.subagentsPrompt(tv.parentSessionId, tv.childSessionId, content, mode === "steer" ? "steer" : "queue");
+            this.post({ type: "running", sessionId: tv.childSessionId, running: true });
+          } catch (error) {
+            this.post({ type: "error", message: describeHarnessFailure("发送失败", error) });
+          }
+          return;
+        }
         let sessionId = this.activeSessionId;
         if (!sessionId) {
           try {
@@ -1301,9 +1458,19 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "loadOlder":
-        await this.loadHistory(this.activeSessionId ?? "", message.beforeSeq);
+        await this.loadHistory(this.viewSessionId() ?? "", message.beforeSeq);
         break;
       case "cancel":
+        if (this.teamView) {
+          const tv = this.teamView;
+          try {
+            await this.client.subagentInterrupt(tv.childSessionId, tv.parentSessionId);
+            this.post({ type: "running", sessionId: tv.childSessionId, running: false });
+          } catch (error) {
+            this.post({ type: "error", message: describeHarnessFailure("停止失败", error) });
+          }
+          break;
+        }
         if (this.activeSessionId) {
           try {
             await this.client.cancel(this.activeSessionId);
@@ -1365,15 +1532,16 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (!this.client || !sessionId) return;
     try {
       const cursor = await this.cursorFor(sessionId);
-      const { records, hasMore } = await this.client.page(sessionId, cursor, beforeSeq, 30);
+      const { records, hasMore } = await this.client.pageAddress(this.addressFor(sessionId), cursor, beforeSeq, 30);
       const mapped = records.map((entry) => entry.event as PanelEvent);
       // Per-call "+N-M" diffs for this page, shipped inside the history frame
       // so the panel has them in hand while folding the page in.
       const toolDiffs = this.diffEntriesForPage(mapped);
       // Tail page: seed the task bar / permission select / queue rows from the
       // control-plane projection cache (the session/control stream source —
-      // the same values the web GUI renders).
-      if (beforeSeq === undefined) this.applyCachedProjections(sessionId);
+      // the same values the web GUI renders). Subagent views keep the lead's
+      // chrome untouched — a child has no composer preset row of its own.
+      if (beforeSeq === undefined && !this.teamView) this.applyCachedProjections(sessionId);
       this.post({
         type: "history",
         sessionId,
@@ -1859,6 +2027,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       activeSessionId: this.activeSessionId,
       workspace: this.workspaceCwd(),
       mode: this.askMode ? "ask" : "main",
+      viewSessionId: this.viewSessionId(),
+      subview: this.teamView ? { ...this.teamView } : null,
     });
   }
 
@@ -2040,6 +2210,72 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           this.postSettingsMessage({ type: "pluginCancelResult", value });
         } catch (error) {
           this.postSettingsError(describeHarnessFailure("取消安装失败", error));
+        }
+        break;
+      }
+      case "pluginWaitInstall": {
+        // Recovery for a lost install response: ask the harness to settle the
+        // original requestId instead of re-running a possibly-finished install.
+        const requestId = String(msg.requestId ?? this.pluginInstallRequestId ?? "");
+        if (!requestId) {
+          this.postSettingsError("没有可核对的安装请求");
+          break;
+        }
+        try {
+          const value = await this.client.waitForInstall(requestId);
+          if (value) {
+            this.postSettingsMessage({ type: "pluginInstallResult", spec: this.lastInstallSpec, value, recovered: true });
+            await this.postPlugins();
+          } else {
+            this.postSettingsError("该安装请求仍在进行或已被 harness 遗忘（可稍后重试）");
+          }
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("核对安装状态失败", error));
+        }
+        break;
+      }
+      case "pluginMarketIndexes": {
+        try {
+          const value = await this.client.marketIndexes();
+          this.postSettingsMessage({ type: "pluginMarketIndexes", value });
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("读取插件市场索引失败", error));
+        }
+        break;
+      }
+      case "pluginMarketSearch": {
+        const url = String(msg.url ?? "").trim();
+        const rawQuery = (msg.query && typeof msg.query === "object" ? msg.query : {}) as Record<string, unknown>;
+        const text = typeof rawQuery.text === "string" ? rawQuery.text.trim() : undefined;
+        const offset = typeof rawQuery.offset === "number" && rawQuery.offset >= 0 ? Math.floor(rawQuery.offset) : 0;
+        const limitRaw = typeof rawQuery.limit === "number" ? Math.floor(rawQuery.limit) : 30;
+        const limit = Math.min(100, Math.max(1, limitRaw));
+        if (!url) {
+          this.postSettingsError("请选择一个市场索引");
+          break;
+        }
+        try {
+          const value = await this.client.marketSearch(url, {
+            ...(text ? { text } : {}),
+            sort: { kind: text ? "relevance" : "index" },
+            offset,
+            limit,
+          });
+          this.postSettingsMessage({ type: "pluginMarketSearch", url, value });
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("插件市场检索失败", error));
+        }
+        break;
+      }
+      case "pluginMarketSetIndexes": {
+        const urls = Array.isArray(msg.urls) ? (msg.urls as unknown[]).map((u) => String(u).trim()).filter(Boolean) : [];
+        try {
+          await this.client.marketSetIndexes(urls);
+          const value = await this.client.marketIndexes();
+          this.postSettingsMessage({ type: "pluginMarketIndexes", value });
+          this.postSettingsSaved(`已保存 ${urls.length} 个市场索引`);
+        } catch (error) {
+          this.postSettingsError(describeHarnessFailure("保存市场索引失败", error));
         }
         break;
       }
@@ -2348,15 +2584,18 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Full plugin-manager snapshot for the 插件 tab (bundles + entries + registries + exemptions). */
+  /** Full plugin-manager snapshot for the 插件 tab (bundles + entries + registries + exemptions + inventory). */
   private async postPlugins(): Promise<void> {
     if (!this.client) return;
     try {
-      const [bundles, plugins, registries, exemptions] = await Promise.all([
+      const [bundles, plugins, registries, exemptions, inventory] = await Promise.all([
         this.client.listBundles(),
         this.client.listPluginEntries(),
         this.client.pluginRegistries(),
         this.client.listVersionExemptions(),
+        // inventory is newer than the rest of the plugin domain: an older
+        // harness answers unknown-method, which must not blank the whole tab.
+        this.client.pluginInventory().catch(() => null),
       ]);
       this.postSettingsMessage({
         type: "settingsPlugins",
@@ -2365,6 +2604,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         registries,
         exemptions: exemptions.exemptions,
         exemptionWarnings: exemptions.warnings,
+        inventory,
         companion: this.companionStatus,
       });
     } catch (error) {

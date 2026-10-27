@@ -20,6 +20,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; }
+  [hidden] { display: none !important; }
   body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg);
          font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); overflow: hidden; }
 
@@ -584,6 +585,59 @@
   .u-files { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 2px 0 17px; }
   .u-file { display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 4px; line-height: 18px;
             border: 1px solid var(--border); background: var(--input-bg); font-size: 12px; }
+
+  /* ---- agent team (lead `agentTeam` projection) ---- */
+  #team-btn { flex: none; }
+  #team-btn.on { border-color: #5a78b4; color: #9db8e8; }
+  #subview-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+                 border-bottom: 1px solid var(--border);
+                 background: rgba(90,120,180,.12); flex: none; font-size: 12px; }
+  #subview-back { border: 1px solid var(--border); background: var(--input-bg); color: var(--fg);
+                  border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  #subview-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #subview-status { color: var(--muted); flex: none; }
+  #team-card { flex: none; max-height: 46vh; overflow-y: auto; border-bottom: 1px solid var(--border);
+               background: rgba(90,120,180,.10); }
+  .team-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+  .team-title { font-weight: 700; font-size: 12px; }
+  .team-summary { color: var(--muted); font-size: 11px; flex: 1 1 auto; min-width: 0;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #team-close { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+  .tm-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+            border-top: 1px solid var(--border); cursor: pointer; }
+  .tm-row:hover { background: rgba(255,255,255,.05); }
+  .tm-row.cur { background: rgba(90,120,180,.18); }
+  .tm-row.lead { cursor: default; }
+  .tm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+  .tm-dot.running { background: #3fb950; }
+  .tm-dot.inactive { background: #6e7681; }
+  .tm-dot.provisioning { background: #d29922; }
+  .tm-dot.failed { background: #f85149; }
+  .tm-main { flex: 1 1 auto; min-width: 0; }
+  .tm-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tm-meta { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tm-role { font-size: 10px; color: var(--muted); flex: none; }
+  .team-sub { padding: 6px 10px 2px; font-size: 10px; color: var(--muted);
+              text-transform: uppercase; letter-spacing: .04em; }
+  .tt-row { padding: 4px 10px; cursor: pointer; }
+  .tt-line { display: flex; gap: 6px; align-items: baseline; }
+  .tt-mark { flex: none; font-size: 11px; }
+  .tt-mark.completed { color: #3fb950; }
+  .tt-mark.in_progress { color: #d29922; }
+  .tt-mark.blocked { color: #6e7681; }
+  .tt-main { flex: 1 1 auto; min-width: 0; }
+  .tt-subject { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tt-subject.done { color: var(--muted); text-decoration: line-through; }
+  .tt-meta { font-size: 10px; color: var(--muted); margin-top: 1px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tt-desc { font-size: 11px; color: var(--muted); white-space: pre-wrap; display: none;
+             padding: 3px 0 0 17px; }
+  .tt-row.open .tt-desc { display: block; }
+  .team-failure { padding: 6px 10px; color: #f85149; font-size: 11px; }
+  body.subview #ws-line, body.subview #session-picker, body.subview #new-session-wrap,
+  body.subview #delete-session, body.subview #delete-session-hard, body.subview #perm-btn,
+  body.subview #plan-btn, body.subview #model-btn, body.subview #effort-btn,
+  body.subview #attach-btn, body.subview #todo-bar, body.subview #queue-row { display: none !important; }
 </style>
 </head>
 <body>
@@ -594,6 +648,7 @@
       <button id="session-btn" title="切换会话"></button>
       <div id="session-menu" class="combo-popup" hidden></div>
     </div>
+    <button id="team-btn" hidden title="智能体团队（成员与共享任务）">团队</button>
     <button id="settings-btn" title="设置（配置 harness）">⚙</button>
     <div id="new-session-wrap">
       <button id="new-session" title="新会话（选择模式）">＋</button>
@@ -602,6 +657,24 @@
     <button id="delete-session" title="归档当前会话（停止运行中的任务并从列表移除；harness 侧记录保留，等价 web 的归档）">归档</button>
     <button id="delete-session-hard" title="彻底删除当前会话：停止任务并删除 harness 的会话历史文件（不可恢复）">彻底删除</button>
   </header>
+  <div id="subview-bar" hidden>
+    <button id="subview-back" title="返回主会话">← 返回</button>
+    <span id="subview-name"></span>
+    <span id="subview-status"></span>
+  </div>
+  <section id="team-card" hidden>
+    <div class="team-head">
+      <span class="team-title">智能体团队</span>
+      <span class="team-summary" id="team-summary"></span>
+      <button id="team-close" title="收起">✕</button>
+    </div>
+    <div id="team-members"></div>
+    <div id="team-tasks-wrap" hidden>
+      <div class="team-sub">共享任务</div>
+      <div id="team-tasks"></div>
+    </div>
+    <div id="team-failure" class="team-failure" hidden></div>
+  </section>
   <main id="messages"><div id="history-sentinel"></div></main>
   <footer>
     <div id="mention-menu" hidden></div>
@@ -657,6 +730,12 @@
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
       permBtnEl = $("perm-btn"), planBtnEl = $("plan-btn"), balanceChipEl = $("balance-chip"),
       modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
+      teamBtnEl = $("team-btn"), teamCardEl = $("team-card"), teamCloseEl = $("team-close"),
+      teamSummaryEl = $("team-summary"), teamMembersEl = $("team-members"),
+      teamTasksWrapEl = $("team-tasks-wrap"), teamTasksEl = $("team-tasks"),
+      teamFailureEl = $("team-failure"), subviewBarEl = $("subview-bar"),
+      subviewBackEl = $("subview-back"), subviewNameEl = $("subview-name"),
+      subviewStatusEl = $("subview-status"),
       permMenuEl = $("perm-menu"), planMenuEl = $("plan-menu"),
       modelMenuEl = $("model-menu"), effortMenuEl = $("effort-menu"),
       todoBarEl = $("todo-bar"), todoToggleEl = $("todo-toggle"), todoListEl = $("todo-list"),
@@ -685,6 +764,11 @@
     balance: null,           // account balance view {status,wallets,bonusWallets} | null
     modes: [],               // agent presets for the ＋ mode picker: [{id,name,description,isDefault}]
     interact: null,          // pending interaction card {rpcId, kind, ...} | null
+    team: null,              // {sessionId, members, tasks, failure} | null (lead agentTeam)
+    teamOpen: false,         // team card expanded?
+    subview: null,           // {parentSessionId, childSessionId} while a teammate chat is open
+    viewSessionId: null,     // session whose transcript is on screen
+    lastViewId: null,
     usage: null,             // active session tokenUsage projection
     queue: [],               // session/queue snapshot for the active session
   noticeOpen: false,       // "后台任务通知" group expanded?
@@ -2516,6 +2600,145 @@
     });
   }
 
+  /* ---------- agent team card ---------- */
+  var TEAM_STATUS_TEXT = { running: "运行中", inactive: "空闲", provisioning: "启动中", failed: "失败" };
+
+  function teamMemberById(id) {
+    var t = state.team;
+    if (!t || !t.members) return null;
+    for (var i = 0; i < t.members.length; i++) {
+      if (t.members[i].id === id) return t.members[i];
+    }
+    return null;
+  }
+
+  function renderTeamButton() {
+    var t = state.team;
+    var n = t && t.members ? t.members.length : 0;
+    var show = n > 1 && state.mode !== "ask";
+    teamBtnEl.hidden = !show;
+    if (show) {
+      teamBtnEl.textContent = "团队 " + n;
+      teamBtnEl.classList.toggle("on", state.teamOpen);
+    } else {
+      state.teamOpen = false;
+      teamCardEl.hidden = true;
+    }
+  }
+
+  function renderTeamCard() {
+    var t = state.team;
+    if (!t) { teamCardEl.hidden = true; return; }
+    teamCardEl.hidden = !state.teamOpen;
+    if (!state.teamOpen) return;
+    var members = t.members || [];
+    var tasks = t.tasks || [];
+    var running = members.filter(function (m) { return m.status === "running"; }).length;
+    var openTasks = tasks.filter(function (x) { return x.status !== "completed"; }).length;
+    teamSummaryEl.textContent = members.length + " 名成员 · " + running + " 运行中 · " + openTasks + " 项未完成";
+    teamMembersEl.innerHTML = "";
+    members.forEach(function (m) {
+      var isLead = m.role === "lead";
+      var cur = state.subview && state.subview.childSessionId === m.id;
+      var row = document.createElement("div");
+      row.className = "tm-row" + (isLead ? " lead" : "") + (cur ? " cur" : "");
+      var dot = document.createElement("span");
+      dot.className = "tm-dot " + (m.status || "");
+      row.appendChild(dot);
+      var main = document.createElement("div");
+      main.className = "tm-main";
+      var nm = document.createElement("div");
+      nm.className = "tm-name";
+      nm.textContent = m.name || shortId(m.id);
+      main.appendChild(nm);
+      var metaBits = [];
+      if (m.model) metaBits.push(m.model);
+      if (m.status === "failed" && m.error) metaBits.push(m.error);
+      if (metaBits.length) {
+        var meta = document.createElement("div");
+        meta.className = "tm-meta";
+        meta.textContent = metaBits.join(" · ");
+        meta.title = metaBits.join("\n");
+        main.appendChild(meta);
+      }
+      row.appendChild(main);
+      var role = document.createElement("span");
+      role.className = "tm-role";
+      role.textContent = isLead ? "主" : (TEAM_STATUS_TEXT[m.status] || m.status || "");
+      row.appendChild(role);
+      if (!isLead) {
+        row.title = "打开「" + (m.name || shortId(m.id)) + "」的对话";
+        row.addEventListener("click", function () {
+          if (!state.subview || state.subview.childSessionId !== m.id) {
+            post({ type: "teamOpen", childSessionId: m.id });
+          }
+        });
+      } else if (state.subview) {
+        row.title = "返回主会话";
+        row.addEventListener("click", function () { post({ type: "teamBack" }); });
+      }
+      teamMembersEl.appendChild(row);
+    });
+    teamTasksWrapEl.hidden = tasks.length === 0;
+    teamTasksEl.innerHTML = "";
+    tasks.forEach(function (task) {
+      var blocked = task.status === "pending" && task.blockedBy && task.blockedBy.length > 0;
+      var row = document.createElement("div");
+      row.className = "tt-row";
+      var line = document.createElement("div");
+      line.className = "tt-line";
+      var mark = document.createElement("span");
+      mark.className = "tt-mark " + (task.status === "completed" ? "completed" : task.status === "in_progress" ? "in_progress" : blocked ? "blocked" : "");
+      mark.textContent = task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : blocked ? "⛔" : "○";
+      line.appendChild(mark);
+      var main = document.createElement("div");
+      main.className = "tt-main";
+      var subj = document.createElement("div");
+      subj.className = "tt-subject" + (task.status === "completed" ? " done" : "");
+      subj.textContent = (task.id ? "#" + task.id + " " : "") + (task.subject || "");
+      main.appendChild(subj);
+      var bits = [];
+      if (task.ownerName) bits.push("负责: " + task.ownerName);
+      if (blocked) bits.push("等待: " + task.blockedBy.join(", "));
+      if (task.writeScopes && task.writeScopes.length) bits.push("写入: " + task.writeScopes.join(", "));
+      if (bits.length) {
+        var meta = document.createElement("div");
+        meta.className = "tt-meta";
+        meta.textContent = bits.join(" · ");
+        meta.title = bits.join("\n");
+        main.appendChild(meta);
+      }
+      var descText = [task.description, (task.writeScopeWarnings || []).join("\n")].filter(Boolean).join("\n\n");
+      if (descText) {
+        var desc = document.createElement("div");
+        desc.className = "tt-desc";
+        desc.textContent = descText;
+        main.appendChild(desc);
+        row.addEventListener("click", function () { row.classList.toggle("open"); });
+      }
+      line.appendChild(main);
+      row.appendChild(line);
+      teamTasksEl.appendChild(row);
+    });
+    teamFailureEl.hidden = !t.failure;
+    teamFailureEl.textContent = t.failure ? ("团队异常：" + t.failure) : "";
+  }
+
+  /* Subview chrome: hide the lead-only controls while a teammate chat is on
+     screen; the back bar carries the member name + live status. */
+  function applySubview() {
+    var sub = !!state.subview;
+    document.body.classList.toggle("subview", sub);
+    subviewBarEl.hidden = !sub;
+    if (sub) {
+      var m = teamMemberById(state.subview.childSessionId);
+      subviewNameEl.textContent = m ? (m.name || shortId(m.id)) : "团队成员";
+      subviewStatusEl.textContent = m ? (TEAM_STATUS_TEXT[m.status] || m.status || "") : "";
+      subviewStatusEl.title = m && m.error ? m.error : "";
+    }
+    renderTeamButton();
+  }
+
   /* ---------- protocol from host ---------- */
   window.addEventListener("message", function (event) {
     var msg = event.data;
@@ -2529,6 +2752,8 @@
         state.sessions = msg.sessions || [];
         state.activeSessionId = msg.activeSessionId;
         state.workspace = msg.workspace || null;
+        state.viewSessionId = msg.viewSessionId || msg.activeSessionId || null;
+        state.subview = msg.subview || null;
         if (msg.mode && msg.mode !== state.mode) {
           state.mode = msg.mode;
           applyAskMode();
@@ -2572,6 +2797,23 @@
           suspended = false;
           forceBottom = true;
         }
+        // Transcript identity can change WITHOUT the active session changing
+        // (a teammate's child conversation is a subview: activeSessionId stays
+        // the lead, viewSessionId flips to the child).
+        var viewId = msg.viewSessionId || msg.activeSessionId || null;
+        if (viewId !== state.lastViewId) {
+          state.lastViewId = viewId;
+          state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.turnModels = {};
+          state.curAssistant = null; state.openBlocks = [];
+          state.hasMore = false; state.loadingOlder = false;
+          state.diffByCall = {}; state.activeRound = null;
+          state.turnStartTime = 0; state.firstTokenTime = 0; state.turnOutput = 0;
+          state.running = state.subview ? false : !!(act && act.running);
+          suspended = false;
+          forceBottom = true;
+        }
+        applySubview();
         // Re-apply the latest known todos for the now-active session (host may
         // have sent the todos message before this state update landed).
         if (state.todoCache && state.todoCache.sessionId === state.activeSessionId) {
@@ -2646,6 +2888,18 @@
         renderBalance();
         break;
       }
+      case "team": {
+        state.team = {
+          sessionId: msg.sessionId,
+          members: msg.members || [],
+          tasks: msg.tasks || [],
+          failure: msg.failure
+        };
+        renderTeamButton();
+        if (state.teamOpen) renderTeamCard();
+        if (state.subview) applySubview();
+        break;
+      }
       case "agentPresets": {
         state.modes = msg.presets || [];
         if (modeMenuOpen) renderModeMenu();
@@ -2665,7 +2919,7 @@
         break;
       }
       case "history": {
-        if (msg.sessionId !== state.activeSessionId) return;
+        if (msg.sessionId !== state.viewSessionId) return;
         state.hasMore = !!msg.hasMore;
         state.loadingOlder = false;
         // Bridge-computed per-call "+N-M" diffs for this page.
@@ -2737,7 +2991,7 @@
         break;
       }
       case "event": {
-        if (msg.sessionId !== state.activeSessionId) return;
+        if (msg.sessionId !== state.viewSessionId) return;
         applyEvent(msg.event);
         break;
       }
@@ -2745,7 +2999,7 @@
         // Keep the session-list dot fresh for BACKGROUND sessions too.
         var srow = (state.sessions || []).find(function (x) { return x.sessionId === msg.sessionId; });
         if (srow) srow.running = msg.running;
-        if (msg.sessionId === state.activeSessionId) {
+        if (msg.sessionId === state.viewSessionId) {
           var wasRunning = state.running;
           state.running = msg.running;
           if (wasRunning && !msg.running) {
@@ -2780,7 +3034,7 @@
         break;
       }
       case "toolDiff": {
-        if (msg.sessionId !== state.activeSessionId) return;
+        if (msg.sessionId !== state.viewSessionId) return;
         state.diffByCall[msg.callId] = { added: msg.added, deleted: msg.deleted, path: msg.path };
         var tool = findTool(msg.callId);
         if (tool) {
@@ -3084,6 +3338,7 @@
     sendBtn.disabled = !state.connected;
     updateWorkspaceLine();
     updateStatusLine();
+    renderTeamButton();
   }
 
   /* Workspace strip above the header: mirrors state.workspace (the VS Code folder
@@ -4046,6 +4301,23 @@
     else effortMenuEl.hidden = true;
   });
   settingsBtnEl.addEventListener("click", function () { post({ type: "openSettings" }); });
+
+  /* Agent-team card: header toggle, close, and the subview back bar. */
+  teamBtnEl.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    var t = state.team;
+    if (!t || !t.members || t.members.length < 2) return;
+    state.teamOpen = !state.teamOpen;
+    renderTeamButton();
+    renderTeamCard();
+  });
+  teamCloseEl.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    state.teamOpen = false;
+    renderTeamButton();
+    teamCardEl.hidden = true;
+  });
+  subviewBackEl.addEventListener("click", function () { post({ type: "teamBack" }); });
   // click anywhere outside the popups closes them
   document.addEventListener("click", function (ev) {
     if (permMenuEl.hidden && planMenuEl.hidden && modelMenuEl.hidden && effortMenuEl.hidden && selMenuEl.hidden) return;

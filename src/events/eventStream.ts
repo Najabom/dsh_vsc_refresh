@@ -32,6 +32,29 @@ export interface WorkspaceState {
   archivedSessionIds?: string[];
 }
 
+/** A mux follow target: a top-level session, or a child conversation
+ *  addressed through its parent (the official subagent addressing). */
+export type FollowTarget =
+  | { kind: "session"; sessionId: string }
+  | {
+      kind: "subagent";
+      parentSessionId: string;
+      childSessionId: string;
+      mode: "one-shot" | "continuable" | "unknown";
+    };
+
+/** Stable mux stream key for one follow target. */
+function targetKey(target: FollowTarget): string {
+  return target.kind === "session"
+    ? target.sessionId
+    : `sub:${target.parentSessionId}:${target.childSessionId}:${target.mode}`;
+}
+
+/** The session id whose events a target carries. */
+function targetSessionId(target: FollowTarget): string {
+  return target.kind === "session" ? target.sessionId : target.childSessionId;
+}
+
 const MUX_PATH = "/api/remote.mux";
 const EVENTS_STREAM = "events";
 const CONTROL_STREAM = "control";
@@ -51,9 +74,9 @@ export class HarnessEventStream implements vscode.Disposable {
   private retryTimer: NodeJS.Timeout | null = null;
   private retries = 0;
   /** Followed session per owner ("panel", "ask", …). */
-  private readonly follows = new Map<string, string>();
-  /** Session ids with an open follow stream right now (dedupes owners). */
-  private readonly openFollows = new Set<string>();
+  private readonly follows = new Map<string, FollowTarget>();
+  /** Follow targets with an open follow stream right now (dedupes owners). */
+  private readonly openFollows = new Map<string, FollowTarget>();
 
   constructor(private readonly base: string) {}
 
@@ -78,25 +101,30 @@ export class HarnessEventStream implements vscode.Disposable {
     this.connect();
   }
 
-  /** Follow a session on behalf of one surface (null = stop). Safe before
-   *  connect: streams open on (re)connect from the owners map. */
-  setFollow(owner: string, sessionId: string | null): void {
+  /** Follow a conversation on behalf of one surface (null = stop). Safe
+   *  before connect: streams open on (re)connect from the owners map.
+   *  A bare string is the common top-level session case. */
+  setFollow(owner: string, target: FollowTarget | string | null): void {
+    const next: FollowTarget | null =
+      typeof target === "string" ? { kind: "session", sessionId: target } : target;
     const previous = this.follows.get(owner);
-    if (previous === sessionId || (previous === undefined && sessionId === null)) return;
-    if (sessionId) this.follows.set(owner, sessionId);
+    const previousKey = previous ? targetKey(previous) : "";
+    const nextKey = next ? targetKey(next) : "";
+    if (previousKey === nextKey && (previous !== undefined || next === null)) return;
+    if (next) this.follows.set(owner, next);
     else this.follows.delete(owner);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    if (previous && previous !== sessionId && !this.wanted(previous)) {
-      this.openFollows.delete(previous);
-      this.send({ type: "cancel", streamId: `follow:${previous}` });
+    if (previous && previousKey !== nextKey && !this.wanted(previousKey)) {
+      this.openFollows.delete(previousKey);
+      this.send({ type: "cancel", streamId: `follow:${previousKey}` });
     }
-    if (sessionId && !this.openFollows.has(sessionId)) this.openFollow(sessionId);
+    if (next && !this.openFollows.has(nextKey)) this.openFollow(next);
   }
 
-  /** True when some owner still wants this session streamed. */
-  private wanted(sessionId: string): boolean {
-    for (const id of this.follows.values()) {
-      if (id === sessionId) return true;
+  /** True when some owner still wants this follow target. */
+  private wanted(key: string): boolean {
+    for (const target of this.follows.values()) {
+      if (targetKey(target) === key) return true;
     }
     return false;
   }
@@ -133,16 +161,38 @@ export class HarnessEventStream implements vscode.Disposable {
     this.send({ type: "open", streamId: EVENTS_STREAM, endpoint: "$events", payload: { args: {} } });
     this.send({ type: "open", streamId: CONTROL_STREAM, endpoint: "session/control", payload: { args: {} } });
     this.send({ type: "open", streamId: WORKSPACE_STREAM, endpoint: "workspace/follow", payload: { args: {} } });
-    for (const sessionId of new Set(this.follows.values())) this.openFollow(sessionId);
+    const seen = new Set<string>();
+    for (const target of this.follows.values()) {
+      const key = targetKey(target);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      this.openFollow(target);
+    }
   }
 
-  private openFollow(sessionId: string): void {
-    this.openFollows.add(sessionId);
+  private openFollow(target: FollowTarget): void {
+    const key = targetKey(target);
+    this.openFollows.set(key, target);
     this.send({
       type: "open",
-      streamId: `follow:${sessionId}`,
+      streamId: `follow:${key}`,
       endpoint: "session/follow",
-      payload: { args: { request: { address: { kind: "session", sessionId }, assistantStream: true } } },
+      payload: {
+        args: {
+          request: {
+            address:
+              target.kind === "session"
+                ? { kind: "session", sessionId: target.sessionId }
+                : {
+                    kind: "subagent",
+                    parentSessionId: target.parentSessionId,
+                    childSessionId: target.childSessionId,
+                    mode: target.mode,
+                  },
+            assistantStream: true,
+          },
+        },
+      },
     });
   }
 
@@ -176,11 +226,12 @@ export class HarnessEventStream implements vscode.Disposable {
       // session may be reopened); a base stream ending means the harness is
       // restarting — drop the socket so the reconnect loop rebuilds a fresh one.
       if (streamId.startsWith("follow:")) {
-        const ended = streamId.slice("follow:".length);
-        this.openFollows.delete(ended);
+        const key = streamId.slice("follow:".length);
+        const target = this.openFollows.get(key);
+        this.openFollows.delete(key);
         setTimeout(() => {
-          if (!this.disposed && this.wanted(ended) && this.ws?.readyState === WebSocket.OPEN) {
-            this.openFollow(ended);
+          if (!this.disposed && target && this.wanted(key) && this.ws?.readyState === WebSocket.OPEN) {
+            this.openFollow(target);
           }
         }, 500);
       } else if (streamId) {
@@ -209,7 +260,14 @@ export class HarnessEventStream implements vscode.Disposable {
       return;
     }
     if (streamId.startsWith("follow:")) {
-      this.handleFollowValue(streamId.slice("follow:".length), value);
+      const key = streamId.slice("follow:".length);
+      const target = this.openFollows.get(key);
+      // Streams opened before this build (or a re-open race) still carry the
+      // target; fall back to interpreting the key as a plain session id.
+      this.handleFollowValue(
+        target ? targetSessionId(target) : key,
+        value
+      );
     }
   }
 

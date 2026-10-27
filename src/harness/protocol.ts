@@ -71,6 +71,13 @@ export const METHODS = {
   pluginRemoveBundle: "pluginManager/removeBundle",
   pluginListExemptions: "pluginManager/listVersionExemptions",
   pluginSetExemption: "pluginManager/setVersionExemption",
+  pluginWaitInstall: "pluginManager/waitForInstall",
+  pluginInventory: "pluginInventory/list",
+  pluginMarketIndexes: "pluginMarket/listIndexes",
+  pluginMarketSearch: "pluginMarket/search",
+  pluginMarketSetIndexes: "pluginMarket/setIndexes",
+  subagentsPrompt: "subagents/prompt",
+  subagentsInterrupt: "subagents/interruptByParent",
   accountGetBalance: "account/getBalance",
   llmListProviders: "llm/listProviders",
   llmListConfigurableProviders: "llm/listConfigurableProviders",
@@ -369,8 +376,8 @@ export interface CredentialInfo {
 
 /** Local package display metadata (title/description, locale-resolved). */
 export interface PluginLocalizedMetaView {
-  title?: string;
-  description?: string;
+  title?: LocalizedText;
+  description?: LocalizedText;
   [key: string]: unknown;
 }
 
@@ -396,7 +403,9 @@ export interface BundleRowView {
   entryId?: string;
 }
 
-/** pluginManager/listBundles row (one installed profile bundle). */
+/** pluginManager/listBundles row (one profile bundle). Official optional
+ *  bundles are listed even when not installed yet (availability tells where
+ *  the package lives; installTarget is set only for on-demand packages). */
 export interface BundleView {
   name: string;
   version?: string;
@@ -405,9 +414,13 @@ export interface BundleView {
   enabled: boolean;
   installed: boolean;
   optional: boolean;
+  official?: boolean;
+  availability?: "installation" | "profile" | "missing";
+  installTarget?: { spec: string; version: string };
+  source?: string;
   removable: boolean;
   readOnlyReason?: string;
-  error?: { code: string; diagnostic?: string };
+  error?: { code: string; diagnostic?: string; incompatible?: PluginIncompatible[] };
   rows: BundleRowView[];
   overrides: string[];
 }
@@ -466,9 +479,12 @@ export interface PluginChangeResult {
   stage: "install" | "enable" | "remove";
   target: string;
   enabled?: boolean;
+  version?: string;
+  restartReason?: string;
   error?: { code: string; diagnostic?: string; incompatible?: PluginIncompatible[] };
   warnings?: string[];
   pendingBuilds?: string[];
+  approvedBuilds?: string[];
   bundle?: string;
   packageResult?: {
     exitCode?: number;
@@ -499,4 +515,157 @@ export interface PluginInstallLogView {
   stream: "stdout" | "stderr";
   text: string;
   exitCode?: number | null;
+}
+
+/* ---------- plugin inventory (read-only; grouped by agent preset) ---------- */
+
+/** One Loader entry as the official built-in-plugins view lists it. */
+export interface PluginInventoryEntry {
+  entryId: string;
+  moduleName: string;
+  meta?: PluginLocalizedMetaView;
+  enabled: boolean;
+  fiberPhase: PluginFiberPhase;
+}
+
+/** One entry row inside an agent preset composition. */
+export interface PluginInventoryRow extends PluginInventoryEntry {
+  condition?: unknown;
+}
+
+/** One agent preset and the entries it composes. */
+export interface PluginInventoryPreset {
+  id: string;
+  name?: string;
+  isDefault?: boolean;
+  broken?: string;
+  rows: PluginInventoryRow[];
+}
+
+/** pluginInventory/list value (the official Settings → 内置插件 source). */
+export interface PluginInventoryView {
+  managementAvailable?: boolean;
+  entries: PluginInventoryEntry[];
+  agentPresets: PluginInventoryPreset[];
+}
+
+/* ---------- plugin market (Discover; pluginMarket/*) ---------- */
+
+/** LocalizedText as DSH stores display copy (string or locale map). */
+export type LocalizedText = string | { [locale: string]: string };
+
+/** One configured market index source and the last read's outcome. */
+export interface MarketIndexSummary {
+  url: string;
+  title?: LocalizedText;
+  description?: LocalizedText;
+  error?: string;
+}
+
+/** Result ordering for a market query. */
+export type MarketSort =
+  | { kind: "index" }
+  | { kind: "relevance" }
+  | { kind: "published"; direction: "asc" | "desc" }
+  | { kind: "key"; id: string; direction: "asc" | "desc" };
+
+/** One page request over one configured index. */
+export interface MarketQuery {
+  text?: string;
+  category?: string;
+  labels?: string[];
+  sort: MarketSort;
+  offset: number;
+  limit: number;
+  refresh?: boolean;
+  fetchedAt?: number;
+}
+
+/** How a market plugin relates to this profile. */
+export interface MarketInstallation {
+  status: string;
+  installedVersion?: string;
+}
+
+/** One listed version with its compatibility verdict and install target. */
+export interface MarketVersionView {
+  version: string;
+  install?: { spec?: string } & Record<string, unknown>;
+  compatibility?: {
+    compatible?: boolean;
+    runtimeVersion?: string;
+    requirements?: Record<string, string>;
+    exempted?: boolean;
+  };
+}
+
+/** One market plugin row. */
+export interface MarketEntryView {
+  name: string;
+  title?: LocalizedText;
+  description?: LocalizedText;
+  versions: MarketVersionView[];
+  defaultVersion?: string;
+  installation: MarketInstallation;
+  [key: string]: unknown;
+}
+
+/** pluginMarket/search value: one page plus the index header. */
+export interface MarketSearchResult {
+  url: string;
+  title?: LocalizedText;
+  description?: LocalizedText;
+  metadata?: unknown;
+  fetchedAt: number;
+  entries: MarketEntryView[];
+  total: number;
+  nextOffset: number | null;
+}
+
+/* ---------- agent team (projection `agentTeam` + subagent addressing) ---------- */
+
+/** One team member row (the lead is synthesized by the host). */
+export interface AgentTeamMemberView {
+  id: string;
+  name: string;
+  role: "lead" | "teammate";
+  phase: "provisioning" | "active" | "failed";
+  error?: string;
+}
+
+/** One shared task (the projection drops deleted rows and passwords the list). */
+export interface AgentTeamTaskView {
+  id: string;
+  revision?: number;
+  subject: string;
+  description?: string;
+  status: string;
+  ownerName?: string;
+  blockedBy?: string[];
+  writeScopes?: string[];
+  ready?: boolean;
+  writeScopeWarnings?: string[];
+}
+
+/** The `agentTeam` projection unit. */
+export interface AgentTeamProjection {
+  members: AgentTeamMemberView[];
+  tasks: AgentTeamTaskView[];
+  failure?: string;
+}
+
+/** A session address: a top-level conversation, or a child conversation
+ *  addressed through its parent (the official subagent addressing). */
+export type SessionAddress =
+  | { kind: "session"; sessionId: string }
+  | {
+      kind: "subagent";
+      parentSessionId: string;
+      childSessionId: string;
+      mode: "one-shot" | "continuable" | "unknown";
+    };
+
+/** subagents/prompt value. */
+export interface SubagentPromptValue {
+  messageId: string;
 }

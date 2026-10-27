@@ -1,7 +1,7 @@
 {
   "name": "dsh-vsc",
   "displayName": "DSH Bridge",
-  "description": "DeepSeek Harness (DSH) in VS Code: native sidebar panel + editor bridge for the local AI agent — a pure protocol client, no second server.",
+  "description": "DeepSeek Harness (DSH) in VS Code: native sidebar panel + editor bridge for the local AI agent 鈥?a pure protocol client, no second server.",
   "keywords": [
     "deepseek",
     "deepseek-harness",
@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.1.8",
+  "version": "1.2.0",
   "publisher": "local",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",

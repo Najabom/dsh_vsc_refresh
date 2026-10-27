@@ -254,6 +254,12 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 设置页的「API」标签复用 DSH 自己的凭据与设置域：密钥经 `credentials/set|unset` 写入 DSH 凭据存储（环境变量来源只读），自定义供应商走 `settings/mutate` 写入 `llm-pi-ai` 的 `providers` 映射（路由校验、apiKeyEnv 派生、冲突保护）——与官方设置页同款算法。协议不变，扩展只做壳。
 
+### 5.7 官方可选插件与智能体团队：把官方能力搬进侧边栏
+
+插件的**开关语义完全交还官方**：实验性插件包（智能体团队、语音输入、自动评审、Inspector、会话搜索/标题、终端、ralph、徽章技能、思维链翻译、worktree、插件市场）在插件页单独成组，勾选即调用 `pluginManager/setBundleEnabled` ——官方管理器会从安装副本直接启用，扩展不重装、不改 profile；按需包（Codex / Claude Code 子代理）按其固定 spec 走 `installBundle`；已安装落后的包提供更新；`waitForInstall` 兜住响应丢失；`pluginInventory/list` 以只读清单呈现内置模块（按 Agent 预设分组）。**插件市场**同理：只有官方 market 包启用后才出现索引与检索 UI，扩展绝不自己维护市场源。
+
+智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。不启用该包时按钮与卡片完全隐藏，旧 harness 无感。
+
 ---
 
 ## 6. 它在生态里怎么立得住

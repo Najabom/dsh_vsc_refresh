@@ -74,8 +74,23 @@
   .pl-row .pl-tag.err { color: var(--err); border-color: var(--err); }
   .pl-row .pl-sub { color: var(--muted); font-size: 12px; margin-top: 3px; word-break: break-all; }
   .pl-row .pl-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-  .pl-row .pl-actions label { color: var(--muted); font-size: 12px; }
-  .pl-row input[type="checkbox"] { width: auto; }
+    .pl-row .pl-actions label {
+      color: var(--muted);
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .pl-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      flex: none;
+      cursor: pointer;
+      accent-color: var(--vscode-focusBorder, #3b82f6);
+    }
   .pl-row .pl-del { background: none; border: 1px solid var(--border); color: var(--err);
     border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
   .pl-row .pl-del.confirm { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
@@ -105,6 +120,26 @@
   .pl-ex-row button { background: none; border: 1px solid var(--border); color: var(--muted);
     border-radius: 3px; height: 28px; padding: 0 8px; cursor: pointer; font-size: 11px; margin-left: auto; }
   .pl-ex-row button:hover { color: var(--err); border-color: var(--err); }
+  /* 插件分组 / 详情 / 市场 */
+  .pl-group-title { margin: 10px 0 2px; font-size: 12px; color: var(--muted); }
+  #pl-more { margin: 4px 0 8px; }
+  .pl-detail { color: var(--muted); font-size: 11px; margin-top: 3px; word-break: break-all; }
+  .pl-badge { border: 1px solid #5a78b4; border-radius: 3px; color: #9db8e8; font-size: 10px; padding: 0 5px; }
+  .pl-badge.warn { border-color: #d29922; color: #d29922; }
+  .pl-btn { background: none; border: 1px solid var(--border); color: var(--fg);
+    border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
+  .pl-btn:hover { border-color: #5a78b4; color: #9db8e8; }
+  .mk-row { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; margin: 6px 0; }
+  .mk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mk-name { font-weight: 600; }
+  .mk-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .mk-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  #pl-market-indexes { width: 100%; box-sizing: border-box; }
+  .inv-preset { border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin: 5px 0; }
+  .inv-preset summary { cursor: pointer; font-size: 12px; }
+  .inv-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted);
+    padding: 2px 0 2px 14px; }
+  .inv-row .inv-name { color: var(--fg); }
 </style>
 </head>
 <body>
@@ -226,18 +261,54 @@
 
   <!-- 插件 -->
   <section id="tab-plugins" hidden>
-    <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>：检索 → 安装 → 开关 / 删除，与官方 web 的插件面板同一机制。<br>
-    spec 可以是 npm 包名（从 registry 解析）、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
-    说明：客户端 UI 类 bundle（如 <span class="mono">dsh-drop-caret</span>、<span class="mono">dsh-webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设等其余插件与 web 共用同一个 harness，两边都生效。</p>
+    <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>，与官方 web 的插件面板同一机制：启停、按需安装、更新、市场检索都在这里。<br>
+    spec 可以是 npm 包名、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
+    说明：客户端 UI 类 bundle（如 <span class="mono">drop-caret</span>、<span class="mono">webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设 / 团队等其余插件与 web 共用同一个 harness，两边都生效。</p>
     <div id="pl-companion" class="hint"></div>
+    <h2>实验性功能</h2>
+    <p class="hint">官方随安装附带、默认关闭的实验性 bundle：打开开关即启用（需要时自动安装/重启 harness）。「团队」成员与共享任务卡片会出现在侧栏。</p>
+    <div id="pl-experimental"></div>
+    <button class="save" id="pl-more" hidden>显示其余实验性功能</button>
+    <div id="pl-more-list" hidden></div>
+    <div id="pl-on-demand" hidden>
+      <h2>按需安装</h2>
+      <p class="hint">官方随安装附带、但需要显式安装后才能启用的包（例如外部编码 Agent 的 subagent 接入）。</p>
+      <div id="pl-on-demand-list"></div>
+    </div>
+    <h2>内置插件（只读清单）</h2>
+    <p class="hint">与官方「设置 → 内置插件」同源的清单（<span class="mono">pluginInventory/list</span>）：按 Agent 预设列出组合的 Loader 条目，只读；开关请在上方实验性功能或下方全部 bundle 中进行。</p>
+    <div id="pl-inventory" class="hint">加载中…</div>
+    <h2>插件市场（Discover）</h2>
+    <div id="pl-market" hidden>
+      <p class="hint">索引地址是市场 JSON 文档的 URL；检索与安装走 <span class="mono">pluginMarket/*</span>，安装仍复用下方的 pluginManager 流程。</p>
+      <div class="row"><label>索引地址（每行一个 URL）</label></div>
+      <textarea id="pl-market-indexes" rows="3" class="mono" placeholder="https://example.com/market.json"></textarea>
+      <div class="row">
+        <button class="save" id="pl-market-save">保存索引</button>
+        <button class="save" id="pl-market-refresh">刷新</button>
+      </div>
+      <div class="row"><label>索引</label><select id="pl-market-url"></select></div>
+      <div class="row">
+        <input id="pl-market-query" type="text" placeholder="搜索插件名 / 关键词（留空列出全部）">
+        <button class="save" id="pl-market-search">搜索</button>
+      </div>
+      <div id="pl-market-results"></div>
+      <div id="pl-market-error" class="hint err-text"></div>
+    </div>
+    <div id="pl-market-off" class="hint">插件市场随 <span class="mono">dsh-experimental-plugin-market-bundle</span> 启用后出现。</div>
+    <h2>其他插件包（bundle）</h2>
+    <div id="pl-bundles"></div>
+    <h2>插件条目（Loader entries）</h2>
+    <div id="pl-entries"></div>
+    <h2>安装插件包</h2>
     <div class="card">
-      <h3>安装插件包</h3>
       <div class="row"><label>registry</label><select id="pl-registry"></select></div>
       <div class="row"><label>包名 / 路径 / git / tarball</label><input id="pl-spec" type="text" placeholder="@scope/dsh-plugin-x 或 ./pkg.tgz"></div>
       <div class="row">
         <button class="save" id="pl-inspect">检索</button>
         <button class="save" id="pl-install" disabled>安装</button>
         <button class="save" id="pl-cancel" hidden>取消安装</button>
+        <button class="save" id="pl-recheck" hidden>检查安装状态</button>
       </div>
       <div id="pl-inspect-out" class="hint"></div>
       <div id="pl-progress" class="hint"></div>
@@ -252,10 +323,6 @@
       <div id="pl-exemptions" class="hint" hidden></div>
       <pre id="pl-log" class="mono pl-log"></pre>
     </div>
-    <h2>已安装插件包（bundle）</h2>
-    <div id="pl-bundles"></div>
-    <h2>插件条目（Loader entries）</h2>
-    <div id="pl-entries"></div>
   </section>
 
   <!-- Agent 预设 -->
@@ -821,12 +888,28 @@
   var lastInstallSpec = "";
   var lastPendingBuilds = [];
   var lastInstallRegistry = undefined;
+  var lastInstallRequestId = "";
+  var pluginInventory = null;
+  var marketIndexes = null;
+  var marketLoaded = false;
+  var moreOpen = false;
 
+  function localizedText(value, fallback) {
+    if (typeof value === "string" && value) return value;
+    if (value && typeof value === "object") {
+      if (typeof value.zh === "string" && value.zh) return value.zh;
+      if (typeof value.en === "string" && value.en) return value.en;
+      for (var k in value) {
+        if (typeof value[k] === "string" && value[k]) return value[k];
+      }
+    }
+    return fallback || "";
+  }
   function pluginTitle(meta, fallback) {
-    return (meta && (meta.title || meta.name)) || fallback;
+    return localizedText(meta && (meta.title || meta.name), fallback);
   }
   function pluginDescription(meta, fallback) {
-    return (meta && meta.description) || fallback || "";
+    return localizedText(meta && meta.description, fallback);
   }
   function plTag(text, cls) {
     var t = document.createElement("span");
@@ -882,82 +965,283 @@
     }
   }
 
-  function renderPluginBundles() {
-    var box = $("pl-bundles");
+  function bundleRow(b) {
+    var row = document.createElement("div");
+    row.className = "pl-row";
+    var head = document.createElement("div");
+    head.className = "pl-head";
+    var name = document.createElement("span");
+    name.className = "pl-name";
+    name.textContent = pluginTitle(b.meta, b.name) + (b.version ? "@" + b.version : "");
+    head.appendChild(name);
+    if (b.name.indexOf("@deepseek-ai/dsh-experimental-") === 0) head.appendChild(plTag("实验性"));
+    head.appendChild(plTag(b.installed ? "已安装" : (b.readOnlyReason === "management-required" ? "内置" : b.availability === "missing" ? "缺失" : b.enabled ? "已启用" : "未安装"), b.installed || b.enabled ? "on" : (b.error ? "err" : "")));
+    if (b.official) head.appendChild(plTag("官方"));
+    if (b.optional) head.appendChild(plTag("可选"));
+    if (b.enabled) head.appendChild(plTag("启用", "on"));
+    if (b.availability === "missing") head.appendChild(plTag("包缺失", "err"));
+    if (b.readOnlyReason) head.appendChild(plTag("只读: " + b.readOnlyReason, "err"));
+    if (b.error) head.appendChild(plTag("错误: " + b.error.code, "err"));
+    var actions = document.createElement("div");
+    actions.className = "pl-actions";
+    var needInstall = !b.installed && (b.optional || !!b.installTarget) && b.availability !== "missing";
+    var label = document.createElement("label");
+    var toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = !!b.enabled;
+    toggle.disabled = !!b.readOnlyReason || (!b.installed && b.availability === "missing" && !b.installTarget);
+    toggle.addEventListener("change", function () {
+      if (needInstall && b.installTarget) {
+        vscode.postMessage({ type: "pluginInstall", spec: b.installTarget.spec, registry: null, enabled: toggle.checked });
+        setStatus((toggle.checked ? "安装并启用 " : "安装 ") + b.name + " …");
+        return;
+      }
+      vscode.postMessage({ type: "pluginSetBundleEnabled", name: b.name, enabled: toggle.checked });
+      setStatus((toggle.checked ? "启用 " : "停用 ") + b.name + " …");
+    });
+    label.appendChild(toggle);
+    label.appendChild(document.createTextNode("启用"));
+    actions.appendChild(label);
+    if (b.installed && b.installTarget && b.installTarget.version && b.installTarget.version !== b.version) {
+      var upd = document.createElement("button");
+      upd.className = "pl-btn";
+      upd.textContent = "更新到 " + b.installTarget.version;
+      upd.title = "安装 " + b.installTarget.spec;
+      upd.addEventListener("click", function () {
+        vscode.postMessage({ type: "pluginInstall", spec: b.installTarget.spec, registry: null });
+        setStatus("更新 " + b.name + " 到 " + b.installTarget.version + " …");
+      });
+      actions.appendChild(upd);
+    }
+    if (b.installTarget && !b.installed) {
+      var ins = document.createElement("button");
+      ins.className = "pl-btn";
+      ins.textContent = "按需安装";
+      ins.title = b.installTarget.spec;
+      ins.addEventListener("click", function () {
+        vscode.postMessage({ type: "pluginInstall", spec: b.installTarget.spec, registry: null });
+        setStatus("安装 " + b.name + " …");
+      });
+      actions.appendChild(ins);
+    }
+    if (b.removable && !b.readOnlyReason) {
+      var del = document.createElement("button");
+      del.className = "pl-del";
+      del.textContent = "删除";
+      var armed = false;
+      del.addEventListener("click", function () {
+        if (!armed) {
+          armed = true;
+          del.classList.add("confirm");
+          del.textContent = "确认删除？";
+          return;
+        }
+        vscode.postMessage({ type: "pluginRemove", name: b.name });
+        setStatus("删除 " + b.name + " …");
+      });
+      actions.appendChild(del);
+    }
+    head.appendChild(actions);
+    row.appendChild(head);
+    var sub = document.createElement("div");
+    sub.className = "pl-sub mono";
+    var subBits = [b.name];
+    if (b.rows && b.rows.length) subBits.push(b.rows.length + " 行");
+    if (b.availability) subBits.push("availability " + b.availability);
+    if (b.installTarget) subBits.push("安装源 " + b.installTarget.spec + "@" + b.installTarget.version);
+    if (b.source) subBits.push("source " + b.source);
+    sub.textContent = subBits.join(" · ");
+    row.appendChild(sub);
+    var desc = pluginDescription(b.meta, b.description);
+    if (desc) {
+      var d = document.createElement("div");
+      d.className = "pl-sub";
+      d.textContent = desc;
+      row.appendChild(d);
+    }
+    if (b.error && b.error.diagnostic) {
+      var e = document.createElement("div");
+      e.className = "pl-sub";
+      e.textContent = b.error.diagnostic;
+      row.appendChild(e);
+    }
+    return row;
+  }
+
+  function fillBundleBox(box, list, emptyText) {
+    if (!box) return;
     box.innerHTML = "";
-    if (!pluginBundles.length) {
-      var empty = document.createElement("p");
-      empty.className = "hint";
-      empty.textContent = "没有已安装的插件包（内置 bundle 由部署提供，端口 harness 可能报 management-required）。";
-      box.appendChild(empty);
+    if (!list.length) {
+      if (emptyText) {
+        var p = document.createElement("p");
+        p.className = "hint";
+        p.textContent = emptyText;
+        box.appendChild(p);
+      }
       return;
     }
-    pluginBundles.forEach(function (b) {
-      var row = document.createElement("div");
-      row.className = "pl-row";
-      var head = document.createElement("div");
-      head.className = "pl-head";
-      var name = document.createElement("span");
-      name.className = "pl-name";
-      name.textContent = pluginTitle(b.meta, b.name) + (b.version ? "@" + b.version : "");
-      head.appendChild(name);
-      head.appendChild(plTag(b.installed ? "已安装" : (b.readOnlyReason === "management-required" ? "内置" : "未安装"), b.installed ? "on" : ""));
-      if (b.optional) head.appendChild(plTag("可选"));
-      if (b.enabled) head.appendChild(plTag("启用", "on"));
-      if (b.readOnlyReason) head.appendChild(plTag("只读: " + b.readOnlyReason, "err"));
-      if (b.error) head.appendChild(plTag("错误: " + b.error.code, "err"));
-      var actions = document.createElement("div");
-      actions.className = "pl-actions";
-      var label = document.createElement("label");
-      var toggle = document.createElement("input");
-      toggle.type = "checkbox";
-      toggle.checked = !!b.enabled;
-      toggle.disabled = !!b.readOnlyReason;
-      toggle.addEventListener("change", function () {
-        vscode.postMessage({ type: "pluginSetBundleEnabled", name: b.name, enabled: toggle.checked });
-        setStatus((toggle.checked ? "启用 " : "停用 ") + b.name + " …");
+    list.forEach(function (b) { box.appendChild(bundleRow(b)); });
+  }
+
+  function renderPluginBundles() {
+    var exp = pluginBundles.filter(function (b) {
+      return String(b.name || "").indexOf("@deepseek-ai/dsh-experimental-") === 0 && !b.installTarget;
+    });
+    var demand = pluginBundles.filter(function (b) { return !!b.installTarget; });
+    var others = pluginBundles.filter(function (b) {
+      return exp.indexOf(b) < 0 && demand.indexOf(b) < 0;
+    });
+    var mainList = exp.slice(0, 4);
+    fillBundleBox($("pl-experimental"), mainList, "没有实验性功能需要展示。");
+    fillBundleBox($("pl-more-list"), moreOpen ? exp.slice(4) : [], "");
+    $("pl-more-list").hidden = !moreOpen || exp.length <= 4;
+    var moreBtn = $("pl-more");
+    moreBtn.hidden = exp.length <= 4;
+    moreBtn.textContent = moreOpen ? "收起其余实验性功能" : "显示其余实验性功能（" + (exp.length - 4) + "）";
+    $("pl-on-demand").hidden = demand.length === 0;
+    fillBundleBox($("pl-on-demand-list"), demand, "");
+    var box = $("pl-bundles");
+    fillBundleBox(box, others, "没有其他插件包（内置 bundle 由部署提供；端口 harness 可能报 management-required）。");
+  }
+
+  function renderInventory() {
+    var box = $("pl-inventory");
+    if (!box) return;
+    box.innerHTML = "";
+    var inv = pluginInventory;
+    if (!inv) { box.textContent = "不可用（harness 未提供 pluginInventory/list）。"; return; }
+    var presets = inv.agentPresets || [];
+    var totalRows = 0;
+    presets.forEach(function (p) { totalRows += (p.rows || []).length; });
+    var manage = document.createElement("div");
+    manage.className = "hint";
+    manage.textContent = "管理可用：" + (inv.managementAvailable ? "是" : "否") +
+      " · 预设 " + presets.length + " 个 · 条目 " + totalRows + " 条" +
+      (inv.entries ? "（顶层 " + inv.entries.length + " 条）" : "");
+    box.appendChild(manage);
+    presets.forEach(function (p) {
+      var det = document.createElement("details");
+      det.className = "inv-preset";
+      var sum = document.createElement("summary");
+      sum.textContent = (p.name || p.id) + (p.isDefault ? "（默认）" : "") + " · " + (p.rows || []).length + " 条" + (p.broken ? " · 已损坏" : "");
+      det.appendChild(sum);
+      (p.rows || []).forEach(function (r) {
+        var line = document.createElement("div");
+        line.className = "inv-row";
+        var nm = document.createElement("span");
+        nm.className = "inv-name";
+        nm.textContent = pluginTitle(r.meta, r.moduleName);
+        line.appendChild(nm);
+        var st = document.createElement("span");
+        st.textContent = "· " + (r.enabled ? "启用" : "停用") + (r.fiberPhase ? " · " + r.fiberPhase : "") + (r.condition ? " · 条件 " + r.condition : "");
+        line.appendChild(st);
+        det.appendChild(line);
       });
-      label.appendChild(toggle);
-      label.appendChild(document.createTextNode("启用"));
-      actions.appendChild(label);
-      if (b.removable && !b.readOnlyReason) {
-        var del = document.createElement("button");
-        del.className = "pl-del";
-        del.textContent = "删除";
-        var armed = false;
-        del.addEventListener("click", function () {
-          if (!armed) {
-            armed = true;
-            del.classList.add("confirm");
-            del.textContent = "确认删除？";
-            return;
-          }
-          vscode.postMessage({ type: "pluginRemove", name: b.name });
-          setStatus("删除 " + b.name + " …");
-        });
-        actions.appendChild(del);
+      box.appendChild(det);
+    });
+    if (!presets.length) {
+      var p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "预设清单为空。";
+      box.appendChild(p);
+    }
+  }
+
+  function marketBundleEnabled() {
+    return pluginBundles.some(function (b) {
+      return b.name === "@deepseek-ai/dsh-experimental-plugin-market-bundle" && b.enabled;
+    });
+  }
+
+  function renderMarketIndexes() {
+    var ta = $("pl-market-indexes");
+    var sel = $("pl-market-url");
+    var urls = (marketIndexes || []).map(function (x) { return x.url; });
+    if (ta) ta.value = urls.join("\n");
+    if (sel) {
+      var cur = sel.value;
+      sel.innerHTML = "";
+      (marketIndexes || []).forEach(function (x) {
+        var o = document.createElement("option");
+        o.value = x.url;
+        o.textContent = (localizedText(x.title, x.url)) + (x.error ? "（错误）" : "");
+        sel.appendChild(o);
+      });
+      if (cur && urls.indexOf(cur) >= 0) sel.value = cur;
+    }
+  }
+
+  function renderMarketResults(value) {
+    var box = $("pl-market-results");
+    var err = $("pl-market-error");
+    if (err) err.textContent = "";
+    if (!box) return;
+    box.innerHTML = "";
+    if (!value) return;
+    var entries = value.entries || [];
+    if (!entries.length) {
+      var p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "没有匹配的插件。";
+      box.appendChild(p);
+      return;
+    }
+    entries.forEach(function (e) {
+      var row = document.createElement("div");
+      row.className = "mk-row";
+      var head = document.createElement("div");
+      head.className = "mk-head";
+      var nm = document.createElement("span");
+      nm.className = "mk-name";
+      nm.textContent = localizedText(e.title, e.name);
+      head.appendChild(nm);
+      if (e.category) head.appendChild(plTag(e.category));
+      if (e.labels) e.labels.forEach(function (l) { head.appendChild(plTag(l)); });
+      var acts = document.createElement("div");
+      acts.className = "mk-actions";
+      var versions = e.versions || [];
+      var ver = e.defaultVersion || (versions[0] && versions[0].version) || "";
+      var compat = versions.filter(function (v) { return v.version === ver; })[0];
+      if (compat && compat.compatibility && compat.compatibility.ok === false) {
+        head.appendChild(plTag("不兼容", "err"));
       }
-      head.appendChild(actions);
+      var inst = e.installation || {};
+      var btn = document.createElement("button");
+      btn.className = "pl-btn";
+      if (inst.status === "installed") {
+        btn.textContent = "已安装" + (inst.installedVersion ? "@" + inst.installedVersion : "");
+        btn.disabled = true;
+      } else {
+        btn.textContent = "安装" + (ver ? " " + ver : "");
+        btn.addEventListener("click", function () {
+          var spec = (compat && compat.install && compat.install.spec) || (e.name + (ver ? "@" + ver : ""));
+          vscode.postMessage({ type: "pluginInstall", spec: spec, registry: null });
+          setStatus("安装 " + spec + " …");
+        });
+      }
+      acts.appendChild(btn);
+      head.appendChild(acts);
       row.appendChild(head);
-      var sub = document.createElement("div");
-      sub.className = "pl-sub mono";
-      sub.textContent = b.name + (b.rows && b.rows.length ? " · " + b.rows.length + " 行" : "");
-      row.appendChild(sub);
-      var desc = pluginDescription(b.meta, b.description);
-      if (desc) {
+      if (e.description) {
         var d = document.createElement("div");
-        d.className = "pl-sub";
-        d.textContent = desc;
+        d.className = "mk-sub";
+        d.textContent = localizedText(e.description, "");
         row.appendChild(d);
       }
-      if (b.error && b.error.diagnostic) {
-        var e = document.createElement("div");
-        e.className = "pl-sub";
-        e.textContent = b.error.diagnostic;
-        row.appendChild(e);
-      }
+      var sub = document.createElement("div");
+      sub.className = "mk-sub mono";
+      sub.textContent = e.name + (ver ? "@" + ver : "") +
+        (versions.length ? " · " + versions.length + " 个版本" : "") +
+        (e.author ? " · " + e.author : "");
+      row.appendChild(sub);
       box.appendChild(row);
     });
+    if (value.total && entries.length < value.total) {
+      var more = document.createElement("p");
+      more.className = "hint";
+      more.textContent = "已显示 " + entries.length + " / " + value.total + " 条（搜索词更精确可缩小范围）。";
+      box.appendChild(more);
+    }
   }
 
   function renderPluginEntries() {
@@ -1008,6 +1292,15 @@
   function renderPlugins() {
     renderPluginBundles();
     renderPluginEntries();
+    renderInventory();
+    var on = marketBundleEnabled();
+    $("pl-market").hidden = !on;
+    $("pl-market-off").hidden = on;
+    if (on && !marketLoaded) {
+      marketLoaded = true;
+      vscode.postMessage({ type: "pluginMarketIndexes" });
+    }
+    if (on) renderMarketIndexes();
   }
 
   function renderExemptions() {
@@ -1131,6 +1424,33 @@
   $("pl-cancel").addEventListener("click", function () {
     vscode.postMessage({ type: "pluginCancelInstall" });
     setStatus("取消安装 …");
+  });
+  $("pl-more").addEventListener("click", function () {
+    moreOpen = !moreOpen;
+    renderPluginBundles();
+  });
+  $("pl-market-save").addEventListener("click", function () {
+    var urls = $("pl-market-indexes").value.split(/\r?\n/)
+      .map(function (x) { return x.trim(); })
+      .filter(function (x) { return x.length > 0; });
+    vscode.postMessage({ type: "pluginMarketSetIndexes", urls: urls });
+    setStatus("保存市场索引（" + urls.length + " 个）…");
+  });
+  $("pl-market-refresh").addEventListener("click", function () {
+    vscode.postMessage({ type: "pluginMarketIndexes" });
+    setStatus("刷新市场索引 …");
+  });
+  $("pl-market-search").addEventListener("click", function () {
+    var url = $("pl-market-url").value;
+    if (!url) { setStatus("没有可用的市场索引地址", "err"); return; }
+    var text = $("pl-market-query").value.trim();
+    vscode.postMessage({ type: "pluginMarketSearch", url: url, text: text });
+    setStatus(text ? "搜索市场：" + text + " …" : "列出市场全部插件 …");
+  });
+  $("pl-recheck").addEventListener("click", function () {
+    if (!lastInstallRequestId) { setStatus("没有可检查的安装请求", "err"); return; }
+    vscode.postMessage({ type: "pluginWaitInstall", requestId: lastInstallRequestId });
+    setStatus("检查安装状态 …");
   });
 
   /* agent presets tab */
@@ -1321,10 +1641,25 @@
       pluginEntries = (msg.plugins || []).slice();
       pluginExemptions = msg.exemptions || {};
       pluginCompanion = msg.companion || null;
+      pluginInventory = msg.inventory || null;
       refillRegistries(msg.registries);
       renderExemptions();
       renderPlugins();
       renderCompanion();
+      if (msg.exemptionWarnings && msg.exemptionWarnings.length) {
+        setStatus("版本豁免警告：" + msg.exemptionWarnings.join("；"), "err");
+      }
+    }
+    else if (msg.type === "pluginMarketIndexes") {
+      marketIndexes = msg.indexes || [];
+      marketLoaded = true;
+      renderMarketIndexes();
+      if ($("pl-market-error")) $("pl-market-error").textContent = "";
+    }
+    else if (msg.type === "pluginMarketSearch") {
+      renderMarketResults(msg.value);
+      var mres = msg.value || {};
+      setStatus("市场检索完成：" + ((mres.entries || []).length) + " 条", "ok");
     }
     else if (msg.type === "pluginInspectResult") {
       if (msg.spec !== $("pl-spec").value.trim()) return;
@@ -1333,8 +1668,10 @@
     }
     else if (msg.type === "pluginInstallStarted") {
       setInstallBusy(true);
+      lastInstallRequestId = msg.requestId || "";
       $("pl-incompat").hidden = true;
       $("pl-builds").hidden = true;
+      $("pl-recheck").hidden = true;
       $("pl-progress").textContent = "安装中（requestId " + msg.requestId + "）…";
     }
     else if (msg.type === "pluginInstallProgress") {
@@ -1361,12 +1698,17 @@
             + "：可授予该精确版本的豁免后按原样安装（可能存在崩溃/数据损坏风险，请自行确认）。";
         }).join("\n");
       }
-      if (r.application === "applied") setStatus("安装完成：" + (r.bundle || msg.spec), "ok");
+      if (r.application === "applied") setStatus((msg.recovered ? "（经 waitForInstall 恢复）" : "") + "安装完成：" + (r.bundle || msg.spec), "ok");
       else if (r.application === "restart-required") setStatus("已安装：" + (r.bundle || msg.spec) + "，需重启 harness 生效", "ok");
       else if (r.application === "cancelled") setStatus("安装已取消", "err");
+      else if (r.application === "overridden") setStatus("安装已应用，但启用状态被其它来源覆盖" + (r.restartReason ? "（" + r.restartReason + "）" : ""), "err");
       else setStatus("安装未完成：" + (r.application || "failed")
         + (r.error ? " [" + r.error.code + (r.error.diagnostic ? ": " + r.error.diagnostic : "") + "]" : "")
         + (incompat ? " —— 可点下方「授予版本豁免并重试」" : ""), "err");
+      if (r.version) appendLog("版本：" + r.version);
+      if (r.restartReason) appendLog("重启原因：" + r.restartReason);
+      if (msg.recovered) appendLog("响应丢失后通过 pluginManager/waitForInstall 恢复结果");
+      $("pl-recheck").hidden = !(r.application === "failed" || (r.error && r.application !== "applied" && r.application !== "restart-required"));
       if (r.warnings && r.warnings.length) appendLog(r.warnings.join("\n"));
       lastPendingBuilds = Array.isArray(r.pendingBuilds) ? r.pendingBuilds.slice() : [];
       $("pl-builds").hidden = !lastPendingBuilds.length;

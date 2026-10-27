@@ -1,7 +1,7 @@
 # restore-dsh-pristine.ps1  [-VerifyOnly]
 #
 # Verify the official @deepseek-ai/dsh installation is byte-exact to the npm
-# registry release (v0.2.1-rc.3). The extension applies its deltas at RUNTIME
+# registry release (v0.2.1-rc.4). The extension applies its deltas at RUNTIME
 # as a per-process ESM loader overlay (src/harness/overlay/), so the installed
 # tree must stay pristine ("pure bridge": never write DSH official files).
 #

@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - _(nothing yet)_
 
+## [1.2.0] - 2026-10-27
+
+- **官方可选插件包正式接入**：插件页按官方语义重做——实验性插件包（智能体团队、
+  语音输入、自动评审、Inspector、会话搜索 / 标题、终端、ralph、徽章技能、思维链
+  翻译、worktree、插件市场）单独成组并带实验徽标；勾选启用直接从安装副本生效
+  （`pluginManager/setBundleEnabled`，无需重装）；按需子代理供应商（Codex、Claude
+  Code）按固定版本 spec 安装；已安装且落后的包提供**更新**；新增「检查安装状态」
+  找回丢失的安装响应（`pluginManager/waitForInstall`）；版本豁免警告、安装源、
+  availability、行数与错误诊断均展示；内置模块清单（`pluginInventory/list`）按
+  Agent 预设分组折叠。
+- **插件市场**（可选）：启用官方 *plugin market* 包后，插件页出现索引管理
+  （`pluginMarket/listIndexes` / `setIndexes`）与市场检索 / 安装 / 更新
+  （`pluginMarket/search`），带兼容性与版本豁免保护。
+- **智能体团队面板**：启用 *agent team* 包后，头部**团队**按钮（人数）打开实时
+  团队卡——成员（队长在前、运行中 / 空闲 / 启动中 / 失败、所用模型、错误明细）与
+  共享任务（状态标记、负责人、阻塞关系、写入范围、可展开描述）。点击队友在面板内
+  打开其**可续聊会话**：直接发送（`subagents/prompt`）、停止
+  （`subagents/interruptByParent`）、返回队长；子会话隐藏主工具栏，历史分页走
+  `subagent` 地址；团队/成员/任务事件实时刷新，投影缓存兜底。对齐官方 Web 团队
+  对话框（任务只读），并保留既有视图（不启用该包时完全无感）。
+- 兼容性：全部新 RPC 均为「有则用、无则静默降级」，旧 harness 不受影响。
+
 ## [1.1.8] - 2026-10-24
 
 - **失败不再伪装成完成**：此前 `turn/end` 的原因（reason）被忽略——余额耗尽

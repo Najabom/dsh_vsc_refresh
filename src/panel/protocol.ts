@@ -54,6 +54,11 @@ export type HostMessage =
       activeSessionId: string | null;
       /** Effective workspace folder (manual picker override or the open folder). */
       workspace?: string;
+      /** Session id whose transcript is on screen (subagent view differs from
+       *  the active session while a teammate's conversation is open). */
+      viewSessionId?: string | null;
+      /** Set while a teammate's child conversation is on screen. */
+      subview?: { parentSessionId: string; childSessionId: string } | null;
       /** Surface mode: "ask" renders the dedicated question conversation
        *  (session picker / workspace strip / utility buttons hidden). */
       mode?: "main" | "ask";
@@ -61,6 +66,33 @@ export type HostMessage =
   | { type: "event"; sessionId: string; event: PanelEvent }
   | { type: "history"; sessionId: string; events: PanelEvent[]; hasMore: boolean; isOlder?: boolean; toolDiffs?: Record<string, ToolLineDiff> }
   | { type: "running"; sessionId: string; running: boolean }
+  | {
+      /** Agent-team card (the lead's `agentTeam` projection + live statuses). */
+      type: "team";
+      sessionId: string;
+      viewSessionId?: string;
+      members: {
+        id: string;
+        name: string;
+        role: string;
+        /** running | inactive | provisioning | failed */
+        status: string;
+        model?: string;
+        error?: string;
+      }[];
+      tasks: {
+        id: string;
+        subject: string;
+        description?: string;
+        status: string;
+        ownerName?: string;
+        blockedBy?: string[];
+        writeScopes?: string[];
+        ready?: boolean;
+        writeScopeWarnings?: string[];
+      }[];
+      failure?: string;
+    }
   | { type: "index"; files: string[]; dirs: string[] }
   | {
       type: "models";
@@ -176,6 +208,8 @@ export type HostMessage =
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "selectSession"; sessionId: string }
+  | { type: "teamOpen"; childSessionId: string }
+  | { type: "teamBack" }
   | { type: "newSession"; agentPreset?: string }
   | { type: "getAgentPresets" }
   | { type: "deleteSession"; sessionId: string }

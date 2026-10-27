@@ -2,7 +2,7 @@
  * Official-install integrity reference for the runtime overlay.
  *
  * The installed @deepseek-ai/dsh tree must stay byte-identical to the npm
- * release (v0.2.1-rc.3 — keep PRISTINE_HOST_VERSION in sync). These SHA256
+ * release (v0.2.1-rc.4). These SHA256
  * values were computed from the files of the npm release and are what
  * scripts/restore-dsh-pristine.ps1 verifies against. When upstream ships a new
  * version, update this table + the script + internal/runtime-overlay.md
@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** dsh version the table below was recorded from. */
-export const PRISTINE_HOST_VERSION = "0.2.1-rc.3";
+export const PRISTINE_HOST_VERSION = "0.2.1-rc.4";
 
 /** relative path under the dsh package's node_modules/@deepseek-ai -> pristine SHA256 */
 export const PRISTINE_SHA256: Record<string, string> = {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { nativeAuthHeaders } from "./nativeAuth";
-import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp } from "./protocol";
+import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SubagentPromptValue } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -95,11 +95,23 @@ export class HarnessClient {
     maxMessages = 30,
     signal?: AbortSignal
   ): Promise<SessionPageValue> {
+    return this.pageAddress({ kind: "session", sessionId }, throughSeq, beforeSeq, maxMessages, signal);
+  }
+
+  /** One history page for an explicit address (top-level session or a
+   *  subagent child addressed through its parent — same paging rules). */
+  pageAddress(
+    address: SessionAddress,
+    throughSeq: number,
+    beforeSeq?: number,
+    maxMessages = 30,
+    signal?: AbortSignal
+  ): Promise<SessionPageValue> {
     return this.call<SessionPageValue>(
       METHODS.sessionPage,
       {
         request: {
-          address: { kind: "session", sessionId },
+          address,
           throughSeq,
           ...(beforeSeq !== undefined ? { beforeSeq } : {}),
           maxMessages,
@@ -394,6 +406,59 @@ export class HarnessClient {
       runtimeVersion,
       enabled,
       ...(acceptRisk === undefined ? {} : { acceptRisk }),
+    });
+  }
+
+  /** Settle a lost install request by its requestId (null when the harness
+   *  never saw it or it is still running). */
+  waitForInstall(requestId: string): Promise<PluginChangeResult | null> {
+    return this.call<PluginChangeResult | null>(METHODS.pluginWaitInstall, { requestId });
+  }
+
+  /** Read-only built-in plugins inventory, grouped by agent preset. */
+  pluginInventory(signal?: AbortSignal): Promise<PluginInventoryView> {
+    return this.call<PluginInventoryView>(METHODS.pluginInventory, {}, signal);
+  }
+
+  /** Configured market index sources (title/description/error per source). */
+  marketIndexes(signal?: AbortSignal): Promise<MarketIndexSummary[]> {
+    return this.call<MarketIndexSummary[]>(METHODS.pluginMarketIndexes, {}, signal);
+  }
+
+  /** One market search page from a configured index. */
+  marketSearch(url: string, query: MarketQuery, signal?: AbortSignal): Promise<MarketSearchResult> {
+    return this.call<MarketSearchResult>(METHODS.pluginMarketSearch, { url, query }, signal);
+  }
+
+  /** Replace the configured market index sources. */
+  marketSetIndexes(urls: string[], signal?: AbortSignal): Promise<void> {
+    return this.call<void>(METHODS.pluginMarketSetIndexes, { urls }, signal);
+  }
+
+  /** Continue (or steer) a child conversation through its parent — the
+   *  official addressing for a live subagent session. */
+  subagentsPrompt(
+    parentSessionId: string,
+    childSessionId: string,
+    content: PromptContentPart[],
+    delivery: "queue" | "steer" = "queue"
+  ): Promise<SubagentPromptValue> {
+    return this.call<SubagentPromptValue>(METHODS.subagentsPrompt, {
+      requestId: randomUUID(),
+      parentSessionId,
+      childSessionId,
+      mode: "continuable",
+      delivery,
+      content,
+    });
+  }
+
+  /** Interrupt a child conversation (works even when the parent is not live). */
+  subagentInterrupt(childSessionId: string, parentSessionId: string): Promise<{ accepted: true }> {
+    return this.call<{ accepted: true }>(METHODS.subagentsInterrupt, {
+      childSessionId,
+      parentSessionId,
+      mode: "continuable",
     });
   }
 }
