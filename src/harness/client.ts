@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { nativeAuthHeaders } from "./nativeAuth";
-import { METHODS, type AccountBalanceWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView } from "./protocol";
+import { METHODS, type AccountBalanceWire, type AccountProfileWire, type AccountStateWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileReferenceWire, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type ScheduleCatalogEntryWire, type ScheduleTimingChangeWire, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionReferenceCandidateWire, type SessionSearchView, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SkillWire, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView, type WorkspaceViewWire } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -18,6 +18,11 @@ export class RpcErrorResult extends Error {
  */
 export class HarnessClient {
   constructor(public readonly base: string) {}
+
+  /** Optional sink for RPC-level failures: the extension classifies which
+   *  surface a gateway error belongs to and reports version incompatibility
+   *  honestly (see harness/capabilities.ts). Never throws into the call path. */
+  onProtocolError?: (method: string, code: string, message: string) => void;
 
   async call<T>(method: string, args: unknown, signal?: AbortSignal): Promise<T> {
     const request: ClientRequest = {
@@ -51,7 +56,15 @@ export class HarnessClient {
     if (!body || body.type !== "server-response" || !body.result) {
       throw new Error(`dsh api ${method}: malformed server response`);
     }
-    if (!body.result.ok) throw new RpcErrorResult(body.result.error);
+    if (!body.result.ok) {
+      const failure = new RpcErrorResult(body.result.error);
+      try {
+        this.onProtocolError?.(method, failure.rpcError.code, failure.rpcError.message);
+      } catch {
+        /* diagnostics must never break the call */
+      }
+      throw failure;
+    }
     return body.result.value as T;
   }
 
@@ -494,6 +507,106 @@ export class HarnessClient {
 
   goalsClear(agentId: string, ref: GoalRef): Promise<void> {
     return this.call<void>(METHODS.goalsClear, { agentId, ref });
+  }
+
+  /* ---------- workspace management / search / fork / skills / references ---------- */
+
+  workspaceCreate(path: string): Promise<{ workspace: WorkspaceViewWire; created: boolean }> {
+    return this.call<{ workspace: WorkspaceViewWire; created: boolean }>(METHODS.workspaceCreate, { path });
+  }
+
+  workspaceRename(workspaceId: string, title: string): Promise<{ workspace: WorkspaceViewWire }> {
+    return this.call<{ workspace: WorkspaceViewWire }>(METHODS.workspaceRename, { workspaceId, title });
+  }
+
+  workspaceDelete(workspaceId: string): Promise<{ deleted: true }> {
+    return this.call<{ deleted: true }>(METHODS.workspaceDelete, { workspaceId });
+  }
+
+  /** Move a workspace before another one (order is the list order). */
+  workspaceInsertBefore(workspaceId: string, beforeWorkspaceId?: string): Promise<{ workspaceIds: string[] }> {
+    return this.call<{ workspaceIds: string[] }>(METHODS.workspaceInsertBefore, {
+      workspaceId,
+      ...(beforeWorkspaceId ? { beforeWorkspaceId } : {}),
+    });
+  }
+
+  workspacePinSession(sessionId: string, pinned: boolean): Promise<{ pinnedSessionIds: string[] }> {
+    return this.call<{ pinnedSessionIds: string[] }>(
+      pinned ? METHODS.workspacePinSession : METHODS.workspaceUnpinSession,
+      { sessionId }
+    );
+  }
+
+  /** Full-text history search (session/search). Disabled deployments answer
+   *  with a gateway/internal error explaining the query index is off. */
+  sessionSearch(query: string): Promise<SessionSearchView> {
+    return this.call<SessionSearchView>(METHODS.sessionSearch, { request: { query } });
+  }
+
+  /** Fork a conversation; atSeq is an inclusive source seq (the turn prefix
+   *  before that seq is forked when callers pass turnStartSeq - 1). */
+  sessionFork(sessionId: string, atSeq?: number): Promise<{ sessionId: string }> {
+    return this.call<{ sessionId: string }>(METHODS.sessionFork, {
+      sessionId,
+      ...(atSeq !== undefined ? { atSeq } : {}),
+    });
+  }
+
+  skillsList(sessionId: string): Promise<{ skills: SkillWire[] }> {
+    return this.call<{ skills: SkillWire[] }>(METHODS.skillsList, { sessionId });
+  }
+
+  /** Workspace-relative file/directory suggestions for the @ menu. */
+  fileReferences(agentId: string, query: string): Promise<FileReferenceWire[]> {
+    return this.call<FileReferenceWire[]>(METHODS.fileReferences, { agentId, query });
+  }
+
+  /** Conversation candidates for the @ menu; insert `mention` verbatim. */
+  sessionReferenceCandidates(agentId: string, query?: string): Promise<SessionReferenceCandidateWire[]> {
+    return this.call<SessionReferenceCandidateWire[]>(
+      METHODS.sessionReferenceCandidates,
+      query === undefined ? { agentId } : { agentId, query }
+    );
+  }
+
+  /* ---------- account (read-only) ---------- */
+
+  getAccountState(): Promise<AccountStateWire> {
+    return this.call<AccountStateWire>(METHODS.accountGetState, {});
+  }
+
+  getAccountProfile(version: string, locale: string): Promise<AccountProfileWire> {
+    return this.call<AccountProfileWire>(METHODS.accountGetProfile, {
+      client: { version, locale, timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 },
+    });
+  }
+
+  /* ---------- schedules ---------- */
+
+  scheduleCatalog(): Promise<ScheduleCatalogEntryWire[]> {
+    return this.call<ScheduleCatalogEntryWire[]>(METHODS.scheduleCatalog, {});
+  }
+
+  /** Update one task (title/prompt/timing). `expected` is the full record read from the catalog. */
+  scheduleUpdate(
+    record: ScheduleCatalogEntryWire,
+    change?: ScheduleTimingChangeWire,
+    title?: string,
+    prompt?: string
+  ): Promise<ScheduleCatalogEntryWire> {
+    return this.call<ScheduleCatalogEntryWire>(METHODS.scheduleUpdate, {
+      id: record.id,
+      sessionId: record.sessionId,
+      expected: record,
+      ...(change ? { change } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(prompt !== undefined ? { prompt } : {}),
+    });
+  }
+
+  scheduleDelete(id: string, sessionId: string): Promise<{ id: string; deleted: boolean; code?: string }> {
+    return this.call<{ id: string; deleted: boolean; code?: string }>(METHODS.scheduleDelete, { id, sessionId });
   }
 
   /* ---------- document routes (workspace changes / deliverables) ---------- */

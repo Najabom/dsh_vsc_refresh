@@ -15,6 +15,8 @@
 - `workspaceAcl.ts` — 工作区 ACL 守护（DSH 沙箱需要的 WRITE_OWNER；icacls 自动修复 + 可选 UAC 修复）
 - `updater.ts` — dsh 更新检查（npm registry）+ `npm install -g` 安装/回滚
 - `updatePreflight.ts` — 更新前接口预检（GitHub 通告扫描 + 新版本包接口静态核验）
+- `capabilities.ts` — DSH 版本兼容台账（特性 → RPC 组、gateway 错误分类、已验证版本区间）
+- `clientRegistry.ts` / `guard.ts` — 多窗口心跳注册表与 harness 守卫进程（自适应心跳 30s/120s，FRESH=150s）
 - `protocol.ts` — 协议类型（0.1.7 typert 端点 + settings / pluginManager 视图）
 
 ## 不放这里 ❌

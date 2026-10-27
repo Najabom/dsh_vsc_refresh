@@ -13,6 +13,7 @@ import { deleteSessionStorage } from "../harness/storage";
 import { ensureWorkspaceAcl } from "../harness/workspaceAcl";
 import type { CompanionStatus } from "../harness/companion";
 import type { DshUpdateHooks } from "./protocol";
+import type { CompatibilityReport } from "../harness/capabilities";
 
 /** Normalize the settings-page channel picker value (free-form string on the
  *  wire) to a channel the updater understands; unknown → auto. */
@@ -192,8 +193,27 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private pendingAsk: { context: string; choices: typeof INTENT_CHOICES } | null = null;
   /** Archived session ids (workspace/follow baseline + archived increments). */
   private archivedSessionIds = new Set<string>();
+  /** Registry-global pin set (workspace/follow) + ordered workspace registry. */
+  private pinnedSessionIds = new Set<string>();
+  private workspaces: WorkspaceState["items"] = [];
   /** Sessions hard-deleted from disk this window — hidden until the harness forgets them. */
   private hardDeletedSessionIds = new Set<string>();
+  /**
+   * Webview liveness + display-topology watchdog.
+   *
+   * A monitor disconnect can kill the webview's render surface: the panel goes
+   * blank and stays blank until the window (and with it the webview) is
+   * recreated. `ping`/`pong` detects a dead renderer (JS stopped), and a change
+   * in the screen metrics reported by the webview flags a display-topology
+   * change; reassigning `webview.html` recreates the surface and the webview's
+   * own "ready" re-syncs the full state.
+   */
+  private lastPongAt = 0;
+  private lastScreen = "";
+  private viewVisible = true;
+  private pingTimer?: ReturnType<typeof setInterval>;
+  /** Compatibility ledger snapshot (posted with every state). */
+  private capabilities: CompatibilityReport | null = null;
   /** Durable model selection per session (the `modelSelection` projection:
    *  next ?? lastUsed). The model catalog's `default` is the deployment
    *  fallback, NOT the session's pick — without this map the model button
@@ -252,14 +272,27 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = html;
     webviewView.onDidDispose(() => {
-      if (this.view === webviewView) this.view = undefined;
+      if (this.view === webviewView) {
+        this.view = undefined;
+        this.stopHeartbeat();
+      }
     });
+    this.viewVisible = webviewView.visible;
+    this.startHeartbeat();
     webviewView.onDidChangeVisibility(() => {
+      this.viewVisible = webviewView.visible;
       if (!webviewView.visible) return;
       // Re-showing the sidebar refreshes the balance instead of leaving
-      // whatever the chip displayed when it was last hidden.
+      // whatever the chip displayed when it was last hidden, and a stale
+      // render surface gets a chance to prove it is still alive.
       this.post({ type: "balance", value: this.lastBalance });
       void this.refreshBalance(true);
+      this.post({ type: "ping" });
+      if (this.viewReady) {
+        this.postState();
+        const sid = this.viewSessionId();
+        if (sid) void this.loadHistory(sid, undefined);
+      }
     });
     this.wireWebview(webviewView.webview);
   }
@@ -275,10 +308,91 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     };
     panel.webview.html = this.renderHtml();
     panel.onDidDispose(() => {
-      if (this.view === panel) this.view = undefined;
+      if (this.view === panel) {
+        this.view = undefined;
+        this.stopHeartbeat();
+      }
+    });
+    this.viewVisible = panel.visible;
+    this.startHeartbeat();
+    panel.onDidChangeViewState(() => {
+      this.viewVisible = panel.visible;
+      if (!panel.visible) return;
+      this.post({ type: "ping" });
+      if (this.viewReady) {
+        this.postState();
+        const sid = this.viewSessionId();
+        if (sid) void this.loadHistory(sid, undefined);
+      }
     });
     this.wireWebview(panel.webview);
     if (this.askMode) this.log("ask window: attached");
+  }
+
+  /** 60s liveness ping (only while visible AND the window is focused — idle
+   *  background windows stay at zero traffic). A ping left unanswered for 12s
+   *  means the renderer died; reassigning html recreates it. */
+  private static readonly PROBE_MS = 60_000;
+  private static readonly PROBE_TIMEOUT_MS = 12_000;
+  private nudgeTimer?: ReturnType<typeof setTimeout>;
+  /** Last ping with no pong yet (0 when the last probe was answered). */
+  private lastPingAt = 0;
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.lastPingAt = 0;
+    this.pingTimer = setInterval(() => this.heartbeatTick(), NativePanelProvider.PROBE_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = undefined;
+    if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
+    this.nudgeTimer = undefined;
+  }
+
+  private pingWebview(): void {
+    this.lastPingAt = Date.now();
+    this.post({ type: "ping" });
+  }
+
+  private heartbeatTick(): void {
+    if (!this.view || !this.viewReady || !this.viewVisible) return;
+    if (!vscode.window.state.focused) return;
+    if (this.lastPingAt && Date.now() - this.lastPingAt > NativePanelProvider.PROBE_TIMEOUT_MS) {
+      this.reloadWebview("面板无响应");
+      return;
+    }
+    this.pingWebview();
+  }
+
+  /** Called when the window regains focus (display reconnect often lands
+   *  here): probe immediately and heal a silent webview within seconds. */
+  nudge(): void {
+    if (!this.view) return;
+    this.pingWebview();
+    if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
+    const probeAt = this.lastPingAt;
+    this.nudgeTimer = setTimeout(() => {
+      this.nudgeTimer = undefined;
+      if (!this.view || !this.viewReady) return;
+      if (this.lastPongAt < probeAt) this.reloadWebview("窗口重新聚焦时面板无响应");
+    }, 6000);
+  }
+
+  /** Recreate the webview's content. Its "ready" handler re-posts the full
+   *  state, so nothing is lost except scroll position / expanded cards. */
+  reloadWebview(reason: string): void {
+    if (!this.view) {
+      this.viewReady = false;
+      return;
+    }
+    this.log(`panel: reloading webview (${reason})`);
+    this.viewReady = false;
+    this.lastPongAt = Date.now();
+    this.lastPingAt = 0;
+    this.view.webview.html = this.renderHtml();
   }
 
   /** Bind the host-message router to THIS webview (per webview object), and
@@ -440,6 +554,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     this.postTeam();
     this.postJobsFor(sessionId);
     void this.postGoal(sessionId);
+    this.postOutline(sessionId);
+    void this.postSchedules(sessionId);
     // An unanswered approval/question can outlive a session switch: the panel
     // clears cards on switch, so re-post this session's pending waterfall or
     // the agent stays blocked with no visible card.
@@ -664,6 +780,21 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Open any child conversation under an explicit parent (picker's nested
+   *  subagent rows). Same continuable addressing as the team card. */
+  private async openChildSession(childSessionId: string, parentSessionId: string): Promise<void> {
+    if (!this.client) return;
+    if (childSessionId === parentSessionId) {
+      this.teamBack();
+      return;
+    }
+    this.teamView = { parentSessionId, childSessionId };
+    this.postState();
+    this.followActive();
+    await this.loadHistory(childSessionId, undefined);
+    this.postTeam();
+  }
+
   /** Show one teammate's child conversation (the official continuable
    *  addressing). The lead stays activeSessionId; only the view flips. */
   private async openTeamMember(childSessionId: string): Promise<void> {
@@ -712,6 +843,12 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.projections.set(sessionId, values);
     }
     values.set(key, value);
+    if (key === "turnOutline") {
+      if (sessionId === this.viewSessionId()) this.postOutline(sessionId);
+    }
+    if (key === "contextBreakdown") {
+      if (sessionId === this.viewSessionId()) this.postState();
+    }
     if (key === "modelSelection") {
       this.noteModelSelection(sessionId, value);
       if (sessionId === this.activeSessionId) void this.postModels();
@@ -767,9 +904,13 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** workspace/follow: the archived set changed — re-filter the session list. */
+  /** workspace/follow: archived/pinned sets and the registry changed. */
   onWorkspace(state: WorkspaceState): void {
     this.archivedSessionIds = new Set((state.archivedSessionIds ?? []).map(String));
+    this.pinnedSessionIds = new Set((state.pinnedSessionIds ?? []).map(String));
+    this.workspaces = Array.isArray(state.items) ? state.items : [];
+    this.postState();
+    this.postWorkspaces();
     if (this.connected) void this.refresh();
   }
 
@@ -785,7 +926,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.rawSessions.set(item.sessionId, item);
       const asOf = item.projections?.asOfSeq;
       if (typeof asOf === "number") this.cursors.set(item.sessionId, asOf);
-      if (item.blank || item.origin === "subagent" || this.archivedSessionIds.has(item.sessionId) || this.hardDeletedSessionIds.has(item.sessionId)) return;
+      if (item.blank || this.archivedSessionIds.has(item.sessionId) || this.hardDeletedSessionIds.has(item.sessionId)) return;
       const row = this.toPanelSession(item);
       const index = this.sessions.findIndex((s) => s.sessionId === item.sessionId);
       if (index >= 0) this.sessions[index] = { ...this.sessions[index], ...row };
@@ -822,6 +963,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
     if (event === "commands/change") {
       void this.postCommands();
+      return;
+    }
+    if (event === "schedule/changed") {
+      void this.postSchedules(this.viewSessionId());
       return;
     }
     // Live invalidation (settings documents, LLM adapters/credentials, the
@@ -1069,10 +1214,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       // Mirror the official client's session visibility contract
       // (dsh-client-ui-workspace `sessionVisible`): subagent children carry
       // `origin: "subagent"` and are surfaced under their parent conversation
-      // via subagent.list, never as standalone sidebar rows. Archived and
-      // blank rows are excluded the same way.
+      // — the picker nests them; the panel filters them unless selected.
+      // Archived and blank rows are excluded the same way.
       let sessions = items
-        .filter((item) => !item.blank && item.origin !== "subagent" && !this.archivedSessionIds.has(item.sessionId) && !this.hardDeletedSessionIds.has(item.sessionId))
+        .filter((item) => !item.blank && !this.archivedSessionIds.has(item.sessionId) && !this.hardDeletedSessionIds.has(item.sessionId))
         .map((item) => this.toPanelSession(item))
         .sort((a, b) => b.updatedAt - a.updatedAt);
       // A freshly created session is blank until its first prompt; keep it
@@ -1102,7 +1247,9 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         // auto-opened as the coding chat — it lives in its own window.
         const askIds = askSessionIdSet(this.context);
         const match = cwd
-          ? this.sessions.find((s) => s.cwd && normalizePath(s.cwd) === normalizePath(cwd) && !askIds.has(s.sessionId))
+          ? this.sessions.find(
+              (s) => !s.parentSessionId && s.cwd && normalizePath(s.cwd) === normalizePath(cwd) && !askIds.has(s.sessionId)
+            )
           : undefined;
         if (match) this.activeSessionId = match.sessionId;
       }
@@ -1160,6 +1307,24 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (message.type === "pong") {
+      // Liveness + display-topology sensor. A changed screen size means the
+      // monitor set changed (disconnect/reconnect); the render surface is then
+      // suspect even while JS still answers, so rebuild the webview.
+      this.lastPongAt = Date.now();
+      this.lastPingAt = 0;
+      const screen = message.screen;
+      if (screen) {
+        const key = `${Math.round(screen.w)}x${Math.round(screen.h)}`;
+        if (this.lastScreen && key !== this.lastScreen && this.view) {
+          this.lastScreen = key;
+          this.reloadWebview("显示器拓扑变化");
+        } else {
+          this.lastScreen = key;
+        }
+      }
+      return;
+    }
     if (!this.client) {
       this.post({ type: "error", message: "harness 未连接" });
       return;
@@ -1207,6 +1372,131 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       case "teamBack":
         this.teamBack();
         break;
+      case "childOpen":
+        await this.openChildSession(message.childSessionId, message.parentSessionId);
+        break;
+      case "pinSession": {
+        if (!this.client) break;
+        try {
+          const { pinnedSessionIds } = await this.client.workspacePinSession(message.sessionId, message.pinned);
+          this.pinnedSessionIds = new Set((pinnedSessionIds ?? []).map(String));
+          this.postState();
+          this.postWorkspaces();
+        } catch (error) {
+          this.post({ type: "error", message: `置顶失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "forkSession": {
+        if (!this.client) break;
+        try {
+          const { sessionId } = await this.client.sessionFork(message.sessionId, message.atSeq);
+          await this.refresh();
+          await this.activateSession(sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `分叉会话失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "sessionSearch": {
+        if (!this.client) break;
+        const query = message.query.trim();
+        if (!query) {
+          this.post({ type: "searchResults", query: "", items: [] });
+          break;
+        }
+        try {
+          const result = await this.client.sessionSearch(query);
+          this.post({ type: "searchResults", query, items: result.items ?? [] });
+        } catch (error) {
+          this.post({
+            type: "searchResults",
+            query,
+            items: [],
+            error: describeHarnessFailure("搜索失败", error),
+          });
+        }
+        break;
+      }
+      case "skillsList":
+        void this.postSkills(this.viewSessionId());
+        break;
+      case "references":
+        void this.postRefs(this.viewSessionId() ?? "", message.requestId, message.query);
+        break;
+      case "outlineRequest":
+        this.postOutline(message.sessionId);
+        break;
+      case "scheduleList":
+        void this.postSchedules(message.sessionId);
+        break;
+      case "scheduleUpdate": {
+        if (!this.client) break;
+        try {
+          const catalog = await this.client.scheduleCatalog();
+          const record = catalog.find((e) => e.id === message.id);
+          if (!record) {
+            this.post({ type: "error", message: "计划任务不存在（可能已被删除）" });
+            void this.postSchedules(message.sessionId);
+            break;
+          }
+          await this.client.scheduleUpdate(record, undefined, message.title, message.prompt);
+          void this.postSchedules(message.sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `更新计划失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "scheduleDelete": {
+        if (!this.client) break;
+        try {
+          await this.client.scheduleDelete(message.id, message.sessionId);
+          void this.postSchedules(message.sessionId);
+        } catch (error) {
+          this.post({ type: "error", message: `删除计划失败：${(error as Error).message}` });
+        }
+        break;
+      }
+      case "workspaceCreate": {
+        if (!this.client) break;
+        try {
+          await this.client.workspaceCreate(message.path);
+          this.postWorkspaces();
+        } catch (error) {
+          this.postSettingsError(`添加工作区失败：${(error as Error).message}`);
+        }
+        break;
+      }
+      case "workspaceRename": {
+        if (!this.client) break;
+        try {
+          await this.client.workspaceRename(message.workspaceId, message.title);
+          this.postWorkspaces();
+        } catch (error) {
+          this.postSettingsError(`重命名工作区失败：${(error as Error).message}`);
+        }
+        break;
+      }
+      case "workspaceDelete": {
+        if (!this.client) break;
+        try {
+          await this.client.workspaceDelete(message.workspaceId);
+          this.postWorkspaces();
+        } catch (error) {
+          this.postSettingsError(`删除工作区失败：${(error as Error).message}`);
+        }
+        break;
+      }
+      case "workspaceMove": {
+        if (!this.client) break;
+        try {
+          await this.client.workspaceInsertBefore(message.workspaceId, message.beforeWorkspaceId);
+          this.postWorkspaces();
+        } catch (error) {
+          this.postSettingsError(`调整工作区顺序失败：${(error as Error).message}`);
+        }
+        break;
+      }
       case "jobKill": {
         const sessionId = this.viewSessionId();
         if (!this.client || !sessionId) break;
@@ -2029,6 +2319,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       updatedAt: item.updatedAt,
       title: item.projections?.values?.title ?? undefined,
       cwd: item.cwd,
+      parentSessionId: item.parentSessionId,
       usage: item.projections?.values?.tokenUsage ?? undefined,
       stats: item.projections?.values?.sessionStats ?? undefined,
       context: item.projections?.values?.contextPressure ?? undefined,
@@ -2370,7 +2661,34 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       mode: this.askMode ? "ask" : "main",
       viewSessionId: this.viewSessionId(),
       subview: this.teamView ? { ...this.teamView } : null,
+      pinnedSessionIds: Array.from(this.pinnedSessionIds),
+      breakdown: this.contextBreakdownOf(this.viewSessionId()),
+      capabilities: this.capabilities,
     });
+  }
+
+  /** DSH compatibility ledger (owned by extension.ts): mirrors to the panel
+   *  banner and the settings page. Entries stay visible either way — an
+   *  incompatible surface keeps its UI and reports the version mismatch. */
+  setCapabilities(report: CompatibilityReport): void {
+    this.capabilities = report;
+    this.post({ type: "capabilities", report });
+    this.settingsPanel?.webview.postMessage({ type: "capabilities", report });
+  }
+
+  /** contextBreakdown projection of one session (null before the projection lands). */
+  private contextBreakdownOf(sessionId: string | null): { systemTokens: number; toolsTokens: number; messageTokens: number } | null {
+    if (!sessionId) return null;
+    const raw = this.projections.get(sessionId)?.get("contextBreakdown") as
+      | { systemTokens?: unknown; toolsTokens?: unknown; messageTokens?: unknown }
+      | null
+      | undefined;
+    if (!raw || typeof raw !== "object") return null;
+    return {
+      systemTokens: typeof raw.systemTokens === "number" ? raw.systemTokens : 0,
+      toolsTokens: typeof raw.toolsTokens === "number" ? raw.toolsTokens : 0,
+      messageTokens: typeof raw.messageTokens === "number" ? raw.messageTokens : 0,
+    };
   }
 
   private post(message: HostMessage): void {
@@ -2458,6 +2776,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         plugin: this.options.updateCenter?.installedVersion() ?? "",
         dsh: dshVersion,
       });
+      this.postCapabilitiesToSettings();
     }
     if (!this.client) {
       this.postSettingsError("harness 未连接");
@@ -2469,7 +2788,16 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         await this.postSettingsPresets();
         await this.postSettingsCatalog();
         await this.postPlugins();
+        void this.postSettingsExtras();
         break;
+      case "openExternal": {
+        try {
+          void vscode.env.openExternal(vscode.Uri.parse(String((msg as { url?: unknown }).url ?? "")));
+        } catch {
+          /* malformed URL */
+        }
+        break;
+      }
       case "pluginsReady":
         await this.postPlugins();
         break;
@@ -2707,9 +3035,20 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           break;
         }
         try {
+          const [configurable, providers] = await Promise.all([
+            this.client.listConfigurableProviders(),
+            this.client.listLlmProviders(),
+          ]);
+          const entry = configurable.find((c) => c.provider === provider);
+          const registered = providers.some((p) => p.id === provider);
           const keyRef = await this.resolveProviderKeyRef(provider, true);
           await this.client.setCredential(keyRef, value);
-          this.postSettingsSaved(`API Key 已保存：${provider}`);
+          if (!registered && entry && !entry.declared && provider !== "deepseek-official") {
+            await this.activateDormantProvider(entry, value, keyRef);
+            this.postSettingsSaved(`已保存 API Key 并接入「${entry.displayName || provider}」`);
+          } else {
+            this.postSettingsSaved(`API Key 已保存：${provider}`);
+          }
           await this.postProviderKeys();
         } catch (error) {
           this.postSettingsError(describeHarnessFailure("保存 API Key 失败", error));
@@ -2830,14 +3169,148 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async postSettingsData(): Promise<void> {
-    if (!this.client) return;
+  /** Compatibility note for the settings page (any tab may show it). */
+  private postCapabilitiesToSettings(): void {
+    if (this.capabilities) this.settingsPanel?.webview.postMessage({ type: "capabilities", report: this.capabilities });
+  }
+
+  private async postSettingsData(): Promise<void> {    if (!this.client) return;
     try {
       const value = await this.client.settingsDescribe();
       this.settingsPanel?.webview.postMessage({ type: "settingsData", value });
     } catch (error) {
       this.postSettingsError(describeHarnessFailure("读取配置失败", error));
     }
+  }
+
+  /** Settings page extras: workspace registry + the read-only account card. */
+  private async postSettingsExtras(): Promise<void> {
+    this.postWorkspaces();
+    if (!this.client) return;
+    try {
+      const state = await this.client.getAccountState();
+      let profile: { name?: string; contact?: string; avatarUrl?: string } | null = null;
+      try {
+        const p = await this.client.getAccountProfile("dsh-vsc", "zh-CN");
+        if (p && p.status === "ready") {
+          profile = {
+            name: p.value.name ?? undefined,
+            contact: p.value.contact ?? undefined,
+            avatarUrl: p.value.avatarUrl ?? undefined,
+          };
+        }
+      } catch {
+        /* profile is best-effort; state alone still renders */
+      }
+      this.settingsPanel?.webview.postMessage({
+        type: "settingsAccount",
+        state: state
+          ? { status: state.status, usageUrl: state.links?.usageUrl, topUpUrl: state.links?.topUpUrl }
+          : null,
+        profile,
+      });
+    } catch (error) {
+      this.settingsPanel?.webview.postMessage({ type: "settingsAccount", state: null, profile: null });
+      this.log(`account card failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Workspace registry rows for the settings page (from workspace/follow). */
+  private postWorkspaces(): void {
+    this.settingsPanel?.webview.postMessage({
+      type: "settingsWorkspaces",
+      workspaces: this.workspaces.map((w) => ({
+        workspaceId: w.workspaceId,
+        path: w.path,
+        title: w.title,
+        sessionCount: Array.isArray(w.sessionIds) ? w.sessionIds.length : 0,
+      })),
+      pinnedSessionIds: Array.from(this.pinnedSessionIds),
+    });
+  }
+
+  /* ---------- turn outline / schedules / skills / references ---------- */
+
+  /** Whole-log turn outline (turnOutline projection) for the jump menu. */
+  private postOutline(sessionId: string | null): void {
+    if (!sessionId) return;
+    const raw = this.projections.get(sessionId)?.get("turnOutline");
+    const list = Array.isArray(raw) ? raw : [];
+    this.post({
+      type: "outline",
+      sessionId,
+      turns: list
+        .map((entry) => {
+          const e = entry as Record<string, unknown>;
+          return {
+            turn: typeof e.turn === "number" ? e.turn : 0,
+            seq: typeof e.seq === "number" ? e.seq : 0,
+            prompt: typeof e.prompt === "string" ? e.prompt : "",
+            response: typeof e.response === "string" ? e.response : "",
+          };
+        })
+        .filter((t) => t.turn > 0),
+    });
+  }
+
+  /** Scheduled tasks of the viewed session (schedule/catalog, plan-scoped). */
+  private async postSchedules(sessionId: string | null): Promise<void> {
+    if (!this.client || !sessionId) return;
+    try {
+      const all = await this.client.scheduleCatalog();
+      const entries = all
+        .filter((e) => e.sessionId === sessionId)
+        .map((e) => ({
+          id: e.id,
+          title: e.title,
+          prompt: e.prompt,
+          kind: e.kind,
+          status: e.status,
+          scheduledAt: e.scheduledAt,
+          time: e.time,
+          timeZone: e.timeZone,
+          weekdays: e.weekdays,
+          expression: e.expression,
+          everySeconds: e.everySeconds,
+          afterSeconds: e.afterSeconds,
+          lastDeliveredAt: e.lastDelivery?.deliveredAt,
+        }));
+      if (this.viewSessionId() === sessionId) this.post({ type: "schedules", sessionId, entries });
+    } catch (error) {
+      this.log(`schedule catalog failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Human-invocable skills of the viewed session (/name triggers). */
+  private async postSkills(sessionId: string | null): Promise<void> {
+    if (!this.client || !sessionId) return;
+    try {
+      const { skills } = await this.client.skillsList(sessionId);
+      if (this.viewSessionId() === sessionId) {
+        this.post({
+          type: "skills",
+          sessionId,
+          skills: (skills ?? []).map((s) => ({ name: s.name, description: s.description, whenToUse: s.whenToUse })),
+        });
+      }
+    } catch (error) {
+      this.log(`skills list failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** @ menu candidates: workspace files + conversation mentions. */
+  private async postRefs(sessionId: string, requestId: string, query: string): Promise<void> {
+    if (!this.client) return;
+    const [files, sessions] = await Promise.all([
+      this.client.fileReferences(sessionId, query).catch(() => []),
+      this.client.sessionReferenceCandidates(sessionId, query || undefined).catch(() => []),
+    ]);
+    this.post({
+      type: "refs",
+      requestId,
+      files: files.map((f) => ({ path: f.path, kind: f.kind })),
+      sessions: sessions.map((s) => ({ sessionId: s.sessionId, label: s.label, mention: s.mention })),
+    });
   }
 
   private async postSettingsPresets(): Promise<void> {
@@ -3072,6 +3545,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         this.client.settingsDescribe(),
       ]);
       const rows = buildProviderKeyRows(providers, configurable, settings);
+      const catalog = buildProviderCatalog(providers, configurable);
       const refs = Array.from(
         new Set(rows.flatMap((r) => [r.ref, r.derivedRef]).filter((x): x is string => typeof x === "string" && x.length > 0))
       );
@@ -3083,10 +3557,46 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         row.source = info?.source;
         row.writable = info === undefined || info.writable !== false;
       }
-      this.settingsPanel?.webview.postMessage({ type: "providerKeys", rows, writable: settings.writable !== false });
+      this.settingsPanel?.webview.postMessage({ type: "providerKeys", rows, catalog, writable: settings.writable !== false });
     } catch (error) {
       this.postSettingsError(describeHarnessFailure("读取供应商列表失败", error));
     }
+  }
+
+  /** Dormant catalog provider: write its llm-pi-ai route profile (official
+   *  endpoint + protocol + derived key ref), then discover models with the
+   *  fresh key. The route only becomes a model group once the profile exists,
+   *  which is exactly what the official models page does when a key is added. */
+  private async activateDormantProvider(entry: LlmConfigurableProvider, apiKey: string, keyRef: string): Promise<void> {
+    const client = this.client!;
+    const baseURL = entry.defaultBaseURL ?? "";
+    const api = inferProviderApi(entry.provider);
+    const profile: Record<string, unknown> = {
+      displayName: entry.displayName || entry.provider,
+      apiKeyEnv: keyRef,
+      api,
+      ...(baseURL ? { baseURL } : {}),
+    };
+    try {
+      const models = await client.discoverModels(entry.settingsNs, {
+        baseURL,
+        api,
+        apiKey,
+      });
+      if (models.length) {
+        profile.models = models.map((m) => ({
+          id: m.id,
+          ...(m.name ? { name: m.name } : {}),
+          ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+        }));
+      }
+    } catch {
+      // Discovery is best-effort; the route profile alone is still valid.
+    }
+    const settings = await client.settingsDescribe();
+    const ns = settings.namespaces.find((n) => n.ns === entry.settingsNs);
+    if (!ns) return;
+    await client.settingsMutate(entry.settingsNs, [{ op: "set", path: entry.settingsPath, value: profile }], ns.revision);
   }
 
   /** The credential ref a provider's key lives under: the recorded apiKeyEnv,
@@ -3134,6 +3644,8 @@ interface ProviderKeyRow {
   account?: boolean;
   /** Recorded credential ref (profile apiKeyEnv); absent when none recorded. */
   ref?: string;
+  /** Platform endpoint used when the profile leaves baseURL empty. */
+  defaultBaseURL?: string;
   /** Derived <ROUTE>_API_KEY ref (the fallback every provider gets). */
   derivedRef?: string;
   configured?: boolean;
@@ -3143,6 +3655,34 @@ interface ProviderKeyRow {
 }
 
 /** The derived credential ref for a provider without a recorded apiKeyEnv. */
+/** pi-ai protocol guess for a dormant catalog provider (mirrors the official
+ *  catalog: Anthropic-style routes speak Messages, everything else OpenAI). */
+function inferProviderApi(id: string): string {
+  return /anthropic|claude|minimax|kimi|moonshot|zai|bigmodel|ant-ling/i.test(id) ? "anthropic-messages" : "openai-completions";
+}
+
+/** Dormant catalog: every declared pi-ai route that is not registered yet.
+ *  The official models page lists these too; configuring one activates it. */
+function buildProviderCatalog(providers: LlmProviderInfo[], configurable: LlmConfigurableProvider[]): ProviderKeyRow[] {
+  const registered = new Set(providers.map((p) => p.id));
+  const seen = new Set<string>();
+  const catalog: ProviderKeyRow[] = [];
+  for (const entry of configurable) {
+    if (entry.declared === true) continue;
+    if (entry.provider === ACCOUNT_PROVIDER_ID || entry.provider === "deepseek-official") continue;
+    if (registered.has(entry.provider) || seen.has(entry.provider)) continue;
+    seen.add(entry.provider);
+    catalog.push({
+      provider: entry.provider,
+      displayName: entry.displayName || entry.provider,
+      error: entry.error,
+      defaultBaseURL: entry.defaultBaseURL,
+      derivedRef: deriveKeyRef(entry.provider),
+    });
+  }
+  return catalog;
+}
+
 function deriveKeyRef(provider: string): string {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
 }
@@ -3196,6 +3736,7 @@ function buildProviderKeyRows(
       if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) row.ref = profile.apiKeyEnv;
     }
     row.derivedRef = deriveKeyRef(p.id);
+    row.defaultBaseURL = entry?.defaultBaseURL;
     rows.push(row);
   }
   for (const entry of configurable) {

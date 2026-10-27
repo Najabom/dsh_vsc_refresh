@@ -28,6 +28,15 @@
   #ws-line { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 8px;
              font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
   #ws-line[hidden] { display: none; }
+  /* DSH compatibility note (version band / per-feature protocol failures).
+     Honest reporting: the surface stays visible and usable; the note explains
+     that the running DSH is too old/new for that interface. */
+  #compat-line { flex: none; padding: 3px 10px; font-size: 11px; line-height: 1.5;
+                 color: var(--vscode-editorWarning-foreground, #e0b94a);
+                 border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden;
+                 text-overflow: ellipsis; cursor: help; }
+  #compat-line[hidden] { display: none; }
+  body.ask-mode #compat-line { display: none; }
   #ws-label { flex: none; }
   /* Truncate at the head (not the tail): the leaf folder is the informative part.
      direction:rtl + unicode-bidi:plaintext keeps the path rendered LTR while the
@@ -50,7 +59,9 @@ body.ask-mode #effort-btn,
 body.ask-mode #goal-btn,
 body.ask-mode #goal-row,
 body.ask-mode #goal-create,
-body.ask-mode #jobs-bar { display: none !important; }
+body.ask-mode #jobs-bar,
+body.ask-mode #schedules-bar,
+body.ask-mode #fork-session { display: none !important; }
   body.ask-mode #input-foot { display: none; }
   /* connection dot — compact: no text, color carries the state */
   .pill { flex: none; width: 10px; height: 10px; border-radius: 50%; font-size: 0; }
@@ -73,6 +84,20 @@ body.ask-mode #jobs-bar { display: none !important; }
   #session-menu .cp-row.sm-empty:hover { background: transparent; }
   #session-menu .cp-row.sm-mine .cp-label { font-weight: 600; }
   #session-menu .cp-row.sm-toggle { color: var(--fg); }
+  #session-menu .cp-search { padding: 2px 4px 4px 4px; position: sticky; top: 0; background: inherit; }
+  #session-menu .cp-search input { width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg);
+                                   border: 1px solid var(--border); border-radius: 3px; padding: 3px 6px; font-size: 13px; }
+  #session-menu .cp-search input:focus { outline: none; border-color: var(--accent); }
+  #session-menu .cp-search input:disabled { opacity: .55; }
+  #session-menu .cp-child { padding-left: 22px; }
+  #session-menu .cp-child .cp-label { color: var(--muted); }
+  #session-menu .cp-star { flex: none; cursor: pointer; background: none; border: none; padding: 0 2px;
+                           color: var(--muted); font-size: 12px; }
+  #session-menu .cp-star.on { color: #e0b94a; }
+  #session-menu .cp-hit { display: flex; flex-direction: column; gap: 1px; white-space: normal; }
+  #session-menu .cp-hit .cp-snippet { color: var(--muted); font-size: 11px; }
+  #session-menu .cp-off { color: var(--muted); cursor: default; white-space: normal; font-size: 11px; }
+  #session-menu .cp-off:hover { background: transparent; }
   #new-session { flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 2px;
                  background: transparent; color: var(--fg); cursor: pointer; }
   #new-session:hover { background: var(--input-bg); }
@@ -98,8 +123,9 @@ body.ask-mode #jobs-bar { display: none !important; }
               pointer-events: none; /* pure hint: never intercept hover/clicks over the menu rows */
               white-space: pre-wrap; }
   #mode-tip[hidden] { display: none; }
-  #delete-session, #delete-session-hard { flex: none; width: auto; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px;
+  #delete-session, #delete-session-hard, #fork-session { flex: none; width: auto; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px;
                     background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; line-height: 1; white-space: nowrap; }
+  #fork-session:hover { background: var(--input-bg); border-color: var(--accent); }
   #delete-session:hover { background: var(--input-bg); border-color: #e0b94a; }
   #delete-session-hard:hover { background: var(--input-bg); border-color: var(--err); }
   #delete-session[data-arm="1"], #delete-session-hard[data-arm="1"] { color: var(--err); border-color: var(--err); font-weight: 600; }
@@ -389,8 +415,14 @@ body.ask-mode #jobs-bar { display: none !important; }
                        border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; font-size: 13px; }
   #goal-create input:focus { outline: none; border-color: var(--accent); }
 
-  /* Background jobs bar (job/list): running rows carry a stop control. */
-  #jobs-bar { display: flex; flex-direction: column; gap: 2px; padding: 2px 8px; font-size: 12px; }
+  /* Background jobs bar (job events): collapsed by default, one summary line. */
+  #jobs-bar { padding: 0 8px; font-size: 13px; }
+  .card-head { display: flex; align-items: center; gap: 6px; height: 28px; cursor: pointer; user-select: none;
+               background: none; border: none; color: var(--muted); font-size: 13px; padding: 0; }
+  .card-head:hover { color: var(--fg); }
+  .card-head .chevron { font-size: 11px; }
+  #jobs-summary b { font-weight: 600; color: var(--vscode-charts-blue, #61afef); }
+  #jobs-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 2px 14px; }
   .job-row { display: flex; align-items: baseline; gap: 8px; color: var(--muted); }
   .job-row .jdot { flex: none; }
   .job-row.running .jdot { color: var(--vscode-charts-blue, #61afef); }
@@ -401,11 +433,29 @@ body.ask-mode #jobs-bar { display: none !important; }
   .job-row .jkill { flex: none; cursor: pointer; color: var(--muted); background: none; border: none; font-size: 12px; padding: 0 3px; }
   .job-row .jkill:hover { color: var(--err); }
 
+  /* Scheduled tasks card (schedule/catalog): same collapsed-card pattern. */
+  #schedules-bar { padding: 0 8px; font-size: 13px; }
+  #schedules-toggle { display: flex; align-items: center; gap: 6px; height: 28px; cursor: pointer; user-select: none;
+                      background: none; border: none; color: var(--muted); font-size: 13px; padding: 0; }
+  #schedules-toggle:hover { color: var(--fg); }
+  #schedules-toggle .chevron { font-size: 11px; }
+  #schedules-list { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 2px 14px; }
+  .sched-row { display: flex; align-items: baseline; gap: 8px; }
+  .sched-row .sched-title { color: var(--fg); flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sched-row .sched-meta { flex: none; color: var(--muted); }
+  .sched-row .sched-btn { flex: none; cursor: pointer; background: none; border: none; color: var(--muted); font-size: 12px; padding: 0 3px; }
+  .sched-row .sched-btn:hover { color: var(--fg); }
+  .sched-edit { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px 0; }
+  .sched-edit input { background: var(--input-bg); color: var(--fg); border: 1px solid var(--border);
+                      border-radius: 3px; padding: 3px 6px; font-size: 12px; font-family: inherit; }
+  .sched-edit input:focus { outline: none; border-color: var(--accent); }
+  .sched-edit .sched-actions { display: flex; gap: 6px; }
+
   /* Per-turn workspace changes + presented deliverables. */
-  #changes-bar { padding: 2px 8px; font-size: 12px; }
-  .changes-head { display: flex; align-items: center; }
-  #changes-toggle { cursor: pointer; user-select: none; background: none; border: none; color: var(--muted);
-                    font-size: 12px; padding: 0; }
+  #changes-bar { padding: 0 8px 6px; font-size: 13px; }
+  .changes-head { display: flex; align-items: center; gap: 6px; height: 28px; }
+  #changes-toggle { display: flex; align-items: center; gap: 6px; height: 28px; cursor: pointer; user-select: none;
+                    background: none; border: none; color: var(--muted); font-size: 13px; padding: 0; }
   #changes-toggle:hover { color: var(--fg); }
   #changes-sum .cadd { color: var(--vscode-charts-green, #89d185); }
   #changes-sum .cdel { color: var(--vscode-charts-red, #f48771); }
@@ -690,12 +740,14 @@ body.ask-mode #jobs-bar { display: none !important; }
   body.subview #delete-session, body.subview #delete-session-hard, body.subview #perm-btn,
   body.subview #plan-btn, body.subview #model-btn, body.subview #effort-btn,
   body.subview #attach-btn, body.subview #todo-bar, body.subview #queue-row,
-body.subview #goal-btn, body.subview #goal-row, body.subview #goal-create,
-body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
+  body.subview #goal-btn, body.subview #goal-row, body.subview #goal-create,
+  body.subview #jobs-bar, body.subview #changes-bar, body.subview #schedules-bar,
+  body.subview #fork-session { display: none !important; }
 </style>
 </head>
 <body>
   <div id="ws-line" hidden><span id="ws-label">工作区</span><span id="ws-path"></span><button id="workspace-btn" title="选择工作区文件夹（默认使用当前打开的文件夹；选定后新会话在该文件夹创建）">工作区</button></div>
+  <div id="compat-line" hidden></div>
   <header>
     <span id="pill" class="pill off" title="DSH Bridge: 正在加载…"></span>
     <div id="session-picker">
@@ -708,6 +760,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       <button id="new-session" title="新会话（选择模式）">＋</button>
       <div id="mode-menu" hidden></div>
     </div>
+    <button id="fork-session" title="分叉当前会话：复制到最近一轮为止的历史，生成一个新会话（原会话不变）">分叉</button>
     <button id="delete-session" title="归档当前会话（停止运行中的任务并从列表移除；harness 侧记录保留，等价 web 的归档）">归档</button>
     <button id="delete-session-hard" title="彻底删除当前会话：停止任务并删除 harness 的会话历史文件（不可恢复）">彻底删除</button>
   </header>
@@ -763,7 +816,18 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       <button id="goal-complete" class="mini" title="标记目标完成">完成</button>
       <button id="goal-clear" class="mini" title="清除目标">✕</button>
     </div>
-    <div id="jobs-bar" hidden></div>
+    <section id="jobs-bar" hidden>
+      <button id="jobs-toggle" class="card-head" title="展开/折叠后台任务"><span id="jobs-chevron" class="chevron">▸</span> 任务 <span id="jobs-summary"></span></button>
+      <div id="jobs-list" hidden></div>
+    </section>
+    <section id="schedules-bar" hidden>
+      <div class="changes-head">
+        <button id="schedules-toggle" title="展开/折叠计划任务"><span id="schedules-chevron" class="chevron">▸</span> 计划 <span id="schedules-sum"></span></button>
+        <span class="in-spacer"></span>
+        <button id="schedule-new" class="mini" title="新建计划：预填一条消息，DSH 的 schedule 工具会据其创建定时任务">新建</button>
+      </div>
+      <div id="schedules-list" hidden></div>
+    </section>
     <section id="changes-bar" hidden>
       <div class="changes-head">
         <button id="changes-toggle" title="展开/折叠变更"><span id="changes-chevron">▸</span> 变更 <span id="changes-sum"></span></button>
@@ -808,7 +872,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
   var $ = function (id) { return document.getElementById(id); };
   var messagesEl = $("messages"), pillEl = $("pill"),
       selBtnEl = $("session-btn"), selMenuEl = $("session-menu"),
-      wsLineEl = $("ws-line"), wsPathEl = $("ws-path"),
+      wsLineEl = $("ws-line"), wsPathEl = $("ws-path"), compatEl = $("compat-line"),
       attachEl = $("attach-row"), queueEl = $("queue-row"),
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
       permBtnEl = $("perm-btn"), planBtnEl = $("plan-btn"), balanceChipEl = $("balance-chip"),
@@ -827,7 +891,12 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       goalCompleteEl = $("goal-complete"), goalClearEl = $("goal-clear"),
       goalCreateEl = $("goal-create"), goalInputEl = $("goal-input"),
       goalStartEl = $("goal-start"), goalCancelEl = $("goal-cancel"),
-      jobsBarEl = $("jobs-bar"),
+      jobsBarEl = $("jobs-bar"), jobsToggleEl = $("jobs-toggle"), jobsSummaryEl = $("jobs-summary"),
+      jobsChevronEl = $("jobs-chevron"), jobsListEl = $("jobs-list"),
+      schedulesBarEl = $("schedules-bar"), schedulesToggleEl = $("schedules-toggle"),
+      schedulesSumEl = $("schedules-sum"), schedulesChevronEl = $("schedules-chevron"),
+      schedulesListEl = $("schedules-list"), scheduleNewEl = $("schedule-new"),
+      forkBtnEl = $("fork-session"),
       changesBarEl = $("changes-bar"), changesToggleEl = $("changes-toggle"),
       changesChevronEl = $("changes-chevron"), changesSumEl = $("changes-sum"),
       changesFilesEl = $("changes-files"), deliveriesWrapEl = $("deliveries-wrap"),
@@ -844,6 +913,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     connected: false, version: null, phase: "searching",
     sessions: [], activeSessionId: null,
     workspace: null,         // effective workspace folder (provider-reported)
+    capabilities: null,      // DSH compatibility ledger (version band + problems)
     mode: "main",            // "ask" = dedicated question-conversation window
     items: [], seqs: new Set(), oldestSeq: Infinity,
     running: false, lastTurn: -1,
@@ -870,6 +940,20 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     changes: null,           // latest workspace/changes summary {turn,files,total,added,deleted}
     deliveries: null,        // latest deliverables/presented {turn,files}
     changesOpen: false,      // changes card expanded?
+    schedules: [],           // schedule/catalog entries of the viewed session
+    schedulesOpen: false,    // schedules card expanded?
+    jobsOpen: (function () { try { return localStorage.getItem("dsh.jobsOpen") === "1"; } catch (e) { return false; } })(), // jobs card expanded?
+    outline: [],             // turnOutline projection entries
+    searchItems: null,       // session/search hits (null = no active search)
+    searchError: "",
+      searchTimer: null,
+      searchAvailable: null,
+      searchProbe: null,
+    refSessions: [],         // session-reference candidates for the @ menu
+    skills: [],              // human-invocable skills (skills/list)
+    skillsAsked: false,      // skills/list request already sent for this view
+    pinned: {},              // sessionId -> true (registry pin set)
+    breakdown: null,         // contextBreakdown {systemTokens,toolsTokens,messageTokens}
     goalCreating: false,     // inline goal composer open?
   noticeOpen: false,       // "后台任务通知" group expanded?
     commands: [],            // slash-command catalog (commands/list)
@@ -2160,6 +2244,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     switch (item.kind) {
       case "turn": {
         el.className = "turn-sep";
+        el.dataset.turn = String(item.turn);
         // Totals of a finished turn live on the bottom summary strip
         // (kind "turn-end"), not here — so the newest content shows them
         // without scrolling back up. The running turn keeps the live clock
@@ -2178,6 +2263,8 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
           if (ltd && (ltd.added || ltd.deleted)) label += " · " + diffChipHtml(ltd);
         }
         el.innerHTML = "<span>" + label + " —</span>";
+        el.title = "点击查看轮次大纲";
+        el.addEventListener("click", function () { showOutlineMenu(el); });
         if (item.reason && item.reason.kind !== "completed") el.className = "turn-sep failed";
         break;
       }
@@ -2845,7 +2932,26 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
   function renderJobs() {
     var jobs = state.jobs || [];
     jobsBarEl.hidden = jobs.length === 0;
-    jobsBarEl.innerHTML = "";
+    if (jobsBarEl.hidden) return;
+    var running = 0, failed = 0;
+    jobs.forEach(function (j) { if (j.status === "running" || j.status === "stopping") running++; else if (j.status === "failed") failed++; });
+    jobsSummaryEl.textContent = String(jobs.length);
+    jobsSummaryEl.title = jobs.length + " 个后台任务" + (running ? "（" + running + " 运行中）" : "");
+    if (running) {
+      var rb = document.createElement("b");
+      rb.textContent = " · " + running + " 运行中";
+      jobsSummaryEl.appendChild(rb);
+    }
+    if (failed) {
+      var fb = document.createElement("b");
+      fb.style.color = "var(--err)";
+      fb.textContent = " · " + failed + " 失败";
+      jobsSummaryEl.appendChild(fb);
+    }
+    jobsChevronEl.textContent = state.jobsOpen ? "▾" : "▸";
+    jobsListEl.hidden = !state.jobsOpen;
+    jobsListEl.innerHTML = "";
+    if (!state.jobsOpen) return;
     jobs.forEach(function (job) {
       var row = document.createElement("div");
       row.className = "job-row " + (job.status || "");
@@ -2868,9 +2974,104 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
         kill.addEventListener("click", function () { post({ type: "jobKill", jobId: job.id }); });
         row.appendChild(kill);
       }
-      jobsBarEl.appendChild(row);
+      jobsListEl.appendChild(row);
     });
   }
+  if (jobsToggleEl) jobsToggleEl.addEventListener("click", function () {
+    state.jobsOpen = !state.jobsOpen;
+    try { localStorage.setItem("dsh.jobsOpen", state.jobsOpen ? "1" : "0"); } catch (e) { /* private mode */ }
+    renderJobs();
+  });
+
+  /* ---------- schedules card (collapsed by default) ---------- */
+  function schedMeta(entry) {
+    var kind = entry.kind || "";
+    if (kind === "every" && entry.everySeconds) return "每 " + Math.round(entry.everySeconds / 60) + " 分钟";
+    if (kind === "after" && entry.afterSeconds) return "仅一次 · " + Math.round(entry.afterSeconds / 60) + " 分钟后";
+    if (kind === "at") return "仅一次 · " + fmtClock(entry.scheduledAt);
+    if (kind === "daily") return "每天 " + (entry.time || "") + (entry.timeZone ? " (" + entry.timeZone + ")" : "");
+    if (kind === "weekly") return "每周 " + ((entry.weekdays || []).join(",") || "?") + " " + (entry.time || "");
+    if (kind === "cron") return "cron " + (entry.expression || "");
+    return kind || "计划";
+  }
+  function fmtClock(ms) {
+    if (!ms) return "?";
+    var d = new Date(ms);
+    return d.toLocaleString();
+  }
+  function renderSchedules() {
+    var entries = state.schedules || [];
+    schedulesBarEl.hidden = entries.length === 0;
+    if (schedulesBarEl.hidden) return;
+    schedulesSumEl.textContent = String(entries.length);
+    schedulesChevronEl.textContent = state.schedulesOpen ? "▾" : "▸";
+    schedulesListEl.hidden = !state.schedulesOpen;
+    schedulesListEl.innerHTML = "";
+    if (!state.schedulesOpen) return;
+    entries.forEach(function (entry) {
+      var row = document.createElement("div");
+      row.className = "sched-row";
+      var title = document.createElement("span");
+      title.className = "sched-title";
+      title.textContent = entry.title || entry.prompt || entry.id;
+      title.title = entry.title + (entry.prompt ? "\n" + entry.prompt : "");
+      var meta = document.createElement("span");
+      meta.className = "sched-meta";
+      meta.textContent = schedMeta(entry) + (entry.status === "inactive" ? " · 已停用" : "");
+      var edit = document.createElement("button");
+      edit.className = "sched-btn";
+      edit.textContent = "编辑";
+      edit.title = "编辑标题与指令（时间改动可让智能体用 schedule 工具完成）";
+      var del = document.createElement("button");
+      del.className = "sched-btn";
+      del.textContent = "✕";
+      del.title = "删除该计划";
+      del.addEventListener("click", function () {
+        post({ type: "scheduleDelete", id: entry.id, sessionId: state.viewSessionId });
+      });
+      var editor = null;
+      edit.addEventListener("click", function () {
+        if (editor) { editor.remove(); editor = null; return; }
+        editor = document.createElement("div");
+        editor.className = "sched-edit";
+        var ti = document.createElement("input");
+        ti.value = entry.title || "";
+        ti.placeholder = "标题";
+        var pi = document.createElement("input");
+        pi.value = entry.prompt || "";
+        pi.placeholder = "指令（到点后发给会话的消息）";
+        var actions = document.createElement("div");
+        actions.className = "sched-actions";
+        var save = document.createElement("button");
+        save.className = "mini";
+        save.textContent = "保存";
+        save.addEventListener("click", function () {
+          post({ type: "scheduleUpdate", id: entry.id, sessionId: state.viewSessionId, title: ti.value.trim(), prompt: pi.value.trim() });
+          if (editor) { editor.remove(); editor = null; }
+        });
+        var cancel = document.createElement("button");
+        cancel.className = "mini";
+        cancel.textContent = "取消";
+        cancel.addEventListener("click", function () { if (editor) { editor.remove(); editor = null; } });
+        actions.appendChild(save); actions.appendChild(cancel);
+        editor.appendChild(ti); editor.appendChild(pi); editor.appendChild(actions);
+        row.parentNode.insertBefore(editor, row.nextSibling);
+      });
+      row.appendChild(title); row.appendChild(meta); row.appendChild(edit); row.appendChild(del);
+      schedulesListEl.appendChild(row);
+    });
+  }
+  if (schedulesToggleEl) schedulesToggleEl.addEventListener("click", function () {
+    state.schedulesOpen = !state.schedulesOpen;
+    renderSchedules();
+  });
+  if (scheduleNewEl) scheduleNewEl.addEventListener("click", function () {
+    inputEl.value = "请用 schedule 工具为当前会话创建一个定时任务：任务名「」，到点发送的消息「」，时间规则（如每天 09:00 / 每 30 分钟 / 指定时间一次）：";
+    autoGrow();
+    inputEl.focus();
+    var at = inputEl.value.indexOf("「");
+    try { inputEl.setSelectionRange(at + 1, at + 1); } catch (e) { /* ignore */ }
+  });
 
   /* ---------- goal strip ---------- */
   var GOAL_PHASE_TEXT = { active: "进行中", paused: "已暂停", blocked: "受阻", complete: "已完成" };
@@ -2989,6 +3190,23 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     var msg = event.data;
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
+      case "ping": {
+        // Liveness reply (host watchdog). The screen metrics let the host spot
+        // a display-topology change that killed the render surface.
+        var payload = { type: "pong" };
+        try {
+          if (typeof screen !== "undefined" && screen) {
+            payload.screen = { w: screen.width, h: screen.height, dpr: window.devicePixelRatio || 1 };
+          }
+        } catch (e) {}
+        post(payload);
+        break;
+      }
+      case "capabilities": {
+        state.capabilities = msg.report || null;
+        renderCompatLine();
+        break;
+      }
       case "state": {
         var wasConnected = state.connected;
         state.connected = msg.connected;
@@ -2999,6 +3217,11 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
         state.workspace = msg.workspace || null;
         state.viewSessionId = msg.viewSessionId || msg.activeSessionId || null;
         state.subview = msg.subview || null;
+        state.pinned = {};
+        (msg.pinnedSessionIds || []).forEach(function (id) { state.pinned[id] = true; });
+        state.breakdown = msg.breakdown || null;
+        state.capabilities = msg.capabilities || null;
+        renderCompatLine();
         if (msg.mode && msg.mode !== state.mode) {
           state.mode = msg.mode;
           applyAskMode();
@@ -3057,7 +3280,9 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
           // Per-session artifact cards belong to the conversation on screen.
           state.jobs = []; state.goal = null; state.changes = null; state.deliveries = null;
           state.changesOpen = false; state.goalCreating = false;
-          renderJobs(); renderGoal(); renderChanges();
+          state.schedules = []; state.outline = [];
+          state.refSessions = []; state.skills = []; state.skillsAsked = false;
+          renderJobs(); renderGoal(); renderChanges(); renderSchedules();
           goalCreateEl.hidden = true;
           state.running = state.subview ? false : !!(act && act.running);
           suspended = false;
@@ -3315,6 +3540,51 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
         renderChanges();
         break;
       }
+      case "schedules": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.schedules = msg.entries || [];
+        renderSchedules();
+        break;
+      }
+      case "outline": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.outline = msg.turns || [];
+        renderOutlineMenu();
+        break;
+      }
+      case "skills": {
+        if (msg.sessionId !== state.viewSessionId) return;
+        state.skills = msg.skills || [];
+        state.skillsAsked = true;
+        if (menuActive && menuMode === "slash") refreshMentionMenu();
+        break;
+      }
+      case "refs": {
+        if (String(msg.requestId) !== String(lastRefsRequestId)) return;
+        state.refSessions = msg.sessions || [];
+        if (menuActive && menuMode === "mention") refreshMentionMenu();
+        break;
+      }
+      case "searchResults": {
+        if (msg.query === state.searchProbe && state.searchAvailable === null) {
+          state.searchProbe = null;
+          state.searchAvailable = !/disabled/i.test(String(msg.error || ""));
+          state.searchError = state.searchAvailable ? "" : String(msg.error || "搜索不可用");
+          if (!state.searchAvailable) { state.searchQuery = ""; state.searchItems = null; }
+          if (!selMenuEl.hidden) renderSessionMenu();
+          return;
+        }
+        if (msg.query !== state.searchQuery) return;
+        state.searchItems = msg.items || [];
+        state.searchError = msg.error || "";
+        if (msg.error) {
+          if (/disabled/i.test(String(msg.error))) state.searchAvailable = false;
+        } else {
+          state.searchAvailable = true;
+        }
+        renderSessionMenu();
+        break;
+      }
       case "toolDiff": {
         if (msg.sessionId !== state.viewSessionId) return;
         state.diffByCall[msg.callId] = { added: msg.added, deleted: msg.deleted, path: msg.path };
@@ -3401,6 +3671,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
   var menuItems = [], menuIndex = 0, menuActive = false, menuMode = "mention";
   var fileIndex = { files: [], dirs: [] };
   var currentDir = "";
+  var lastRefsQuery = null, lastRefsRequestId = 0;
 
   function mentionMatch(value) {
     var m = /(?:^|\s)@([^\s@]*)$/.exec(value);
@@ -3416,6 +3687,26 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     var before = m ? inputEl.value.slice(0, m.start) : inputEl.value;
     var after = m ? inputEl.value.slice(m.start + m.query.length + 1) : "";
     inputEl.value = before + mention + " " + after;
+    inputEl.focus();
+    autoGrow();
+    hideMenu();
+  }
+  /** Insert a ready-made @ mention (a conversation reference's `mention`). */
+  function insertMentionText(text) {
+    var m = mentionMatch(inputEl.value);
+    var before = m ? inputEl.value.slice(0, m.start) : inputEl.value;
+    var after = m ? inputEl.value.slice(m.start + m.query.length + 1) : "";
+    inputEl.value = before + text + " " + after;
+    inputEl.focus();
+    autoGrow();
+    hideMenu();
+  }
+  /** Insert a skill invocation prefix (/name ) without sending it. */
+  function runSkill(name) {
+    var m = slashMatch(inputEl.value);
+    var before = m ? inputEl.value.slice(0, m.start) : inputEl.value;
+    var after = m ? inputEl.value.slice(m.start + m.query.length + 1) : "";
+    inputEl.value = before + "/" + name + " " + after;
     inputEl.focus();
     autoGrow();
     hideMenu();
@@ -3493,6 +3784,28 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
         div.appendChild(d);
         div.onclick = function () { runSlash(it.cmd); };
         div.onmouseenter = function () { if (menuIndex !== i) { menuIndex = i; drawMenu(); } };
+      } else if (it.kind === "skill") {
+        var k3 = document.createElement("span");
+        k3.className = "m-kind";
+        k3.textContent = "技能";
+        var n3 = document.createTextNode("·" + it.name + " ");
+        var d3 = document.createElement("span");
+        d3.className = "m-path";
+        d3.textContent = it.desc;
+        div.appendChild(k3);
+        div.appendChild(n3);
+        div.appendChild(d3);
+        div.onclick = function () { runSkill(it.cmd); };
+        div.onmouseenter = function () { if (menuIndex !== i) { menuIndex = i; drawMenu(); } };
+      } else if (it.kind === "sref") {
+        var k4 = document.createElement("span");
+        k4.className = "m-kind";
+        k4.textContent = "会话";
+        var n4 = document.createTextNode("·" + it.name + " ");
+        div.appendChild(k4);
+        div.appendChild(n4);
+        div.onclick = function () { insertMentionText(it.mention); };
+        div.onmouseenter = function () { if (menuIndex !== i) { menuIndex = i; drawMenu(); } };
       } else {
         var kind = document.createElement("span");
         kind.className = "m-kind";
@@ -3520,19 +3833,40 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     var m = mentionMatch(inputEl.value);
     if (m) {
       menuMode = "mention";
+      if (m.query !== lastRefsQuery) {
+        lastRefsQuery = m.query;
+        lastRefsRequestId += 1;
+        post({ type: "references", requestId: String(lastRefsRequestId), query: m.query });
+      }
+      var ql = m.query.trim().toLowerCase();
+      var refRows = [];
+      (state.refSessions || []).forEach(function (r) {
+        var label = r.label || r.sessionId;
+        if (ql && String(label).toLowerCase().indexOf(ql) < 0) return;
+        refRows.push({ kind: "sref", name: label, rel: r.mention, mention: r.mention });
+      });
       if (fileIndex.files.length === 0 && fileIndex.dirs.length === 0) {
-        showMenu([{ kind: "hint", name: "文件索引加载中…", rel: null }]);
+        showMenu(refRows.length ? refRows : [{ kind: "hint", name: "文件索引加载中…", rel: null }]);
         post({ type: "refreshFiles" });
         return;
       }
-      var items = menuRows(m.query);
+      var items = refRows.concat(menuRows(m.query));
       showMenu(items.length ? items : [{ kind: "hint", name: "无匹配", rel: null }]);
       return;
     }
     var s = slashMatch(inputEl.value);
     if (s) {
       menuMode = "slash";
+      if (!state.skillsAsked) {
+        state.skillsAsked = true;
+        if (state.viewSessionId) post({ type: "skillsList", sessionId: state.viewSessionId });
+      }
       var rows = slashRows(s.query);
+      var vq = s.query.trim().toLowerCase();
+      (state.skills || []).forEach(function (sk) {
+        if (vq && String(sk.name || "").toLowerCase().indexOf(vq) < 0) return;
+        rows.push({ kind: "skill", name: "/" + sk.name, desc: sk.description || "", cmd: sk.name });
+      });
       showMenu(rows.length ? rows : [{ kind: "hint", name: "无匹配", rel: null }]);
       return;
     }
@@ -3614,6 +3948,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     selBtnEl.title = s && s.cwd ? (selLabel + "\n" + s.cwd) : "切换会话";
     if (!selMenuEl.hidden) renderSessionMenu();
     cancelBtn.hidden = !state.running;
+    forkBtnEl.hidden = !s || !!state.subview;
     // Composer takeover: while an interaction is pending the main input row is
     // hidden entirely (regardless of connectivity changes).
     if (inputRowEl) inputRowEl.hidden = !!state.interact;
@@ -3635,6 +3970,35 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       : "未打开文件夹，也未手选工作区";
   }
 
+  /* Compatibility note: never hide a surface because of a version mismatch —
+     tell the user exactly which DSH version is too old/new for it. */
+  function compatText(rep) {
+    if (!rep) return "";
+    var bits = [];
+    if (rep.versionBand === "older") {
+      bits.push("当前 DSH " + (rep.version || "未知") + " 低于已验证范围（" + rep.testedMin + " 起），接口可能缺失");
+    } else if (rep.versionBand === "newer") {
+      bits.push("当前 DSH " + (rep.version || "未知") + " 高于已验证范围（" + rep.testedMax + " 前），未经验证");
+    }
+    var problems = rep.problems || [];
+    if (problems.length) {
+      var head = problems.slice(0, 2).map(function (p) { return p.label + "：" + p.reason; }).join("；");
+      bits.push(head + (problems.length > 2 ? "；等 " + problems.length + " 项" : ""));
+    }
+    return bits.join(" · ");
+  }
+
+  function renderCompatLine() {
+    if (!compatEl) return;
+    var text = compatText(state.capabilities);
+    compatEl.hidden = !text;
+    compatEl.textContent = text;
+    var problems = (state.capabilities && state.capabilities.problems) || [];
+    compatEl.title = problems.length
+      ? problems.map(function (p) { return p.label + " — " + p.reason; }).join("\n")
+      : text;
+  }
+
   /* Ask mode chrome switch (state.mode === "ask"). */
   function applyAskMode() {
     document.body.classList.toggle("ask-mode", state.mode === "ask");
@@ -3649,21 +4013,143 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
     if (!p) return "";
     return String(p).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
   }
+  /* History search rides session/search (server-side full-text). A deployment
+     with the session-query index disabled answers gateway/internal — the box
+     greys out and shows the reason instead of failing silently. */
+  function scheduleSearch(q) {
+    state.searchQuery = q;
+    if (state.searchTimer) clearTimeout(state.searchTimer);
+    if (state.searchAvailable !== true) {
+      state.searchItems = null;
+      renderSessionMenu();
+      return;
+    }
+    if (!q.trim()) {
+      state.searchItems = null; state.searchError = "";
+      renderSessionMenu();
+      return;
+    }
+    state.searchItems = null;
+    renderSessionMenu();
+    state.searchTimer = setTimeout(function () {
+      post({ type: "sessionSearch", query: q });
+    }, 250);
+  }
+  /* Probe once per menu open: a non-empty one-letter query distinguishes
+     "index disabled" (gateway/internal … disabled) from a working deployment. */
+  function ensureSearchAvailability() {
+    if (state.searchAvailable !== null || state.searchProbe) return;
+    state.searchProbe = "a";
+    post({ type: "sessionSearch", query: "a" });
+    setTimeout(function () {
+      if (state.searchProbe) {
+        state.searchProbe = null;
+        if (!selMenuEl.hidden) renderSessionMenu();
+      }
+    }, 8000);
+  }
+  function renderSearchResults() {
+    if (state.searchError) {
+      var off = document.createElement("div");
+      off.className = "cp-row cp-off";
+      off.textContent = "搜索不可用：" + state.searchError;
+      selMenuEl.appendChild(off);
+      return;
+    }
+    var items = state.searchItems;
+    if (items === null) {
+      var wait = document.createElement("div");
+      wait.className = "cp-row sm-empty";
+      wait.textContent = "搜索中…";
+      selMenuEl.appendChild(wait);
+      return;
+    }
+    if (!items.length) {
+      var none = document.createElement("div");
+      none.className = "cp-row sm-empty";
+      none.textContent = "无匹配会话";
+      selMenuEl.appendChild(none);
+      return;
+    }
+    items.forEach(function (hit) {
+      var sess = state.sessions.find(function (s) { return s.sessionId === hit.sessionId; });
+      var row = document.createElement("div");
+      row.className = "cp-row cp-hit";
+      var label = document.createElement("span");
+      label.className = "cp-label";
+      var title = (sess && (state.titles[sess.sessionId] || sess.title)) || sess && ("会话 " + shortId(sess.sessionId)) || hit.sessionId;
+      label.textContent = title;
+      var snip = document.createElement("span");
+      snip.className = "cp-snippet";
+      snip.textContent = String(hit.snippet || "").replace(/\s+/g, " ").slice(0, 140);
+      row.appendChild(label); row.appendChild(snip);
+      row.addEventListener("click", function () {
+        selMenuEl.hidden = true;
+        if (hit.sessionId !== state.activeSessionId) post({ type: "selectSession", sessionId: hit.sessionId });
+      });
+      selMenuEl.appendChild(row);
+    });
+  }
   function renderSessionMenu() {
     selMenuEl.innerHTML = "";
+    var searchWrap = document.createElement("div");
+    searchWrap.className = "cp-search";
+    var searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.placeholder = state.searchAvailable === false
+      ? "搜索不可用"
+      : state.searchAvailable === null ? "检查搜索可用性…" : "搜索会话…";
+    searchInput.disabled = state.searchAvailable !== true;
+    searchInput.title = state.searchAvailable === false ? state.searchError : "";
+    searchInput.value = state.searchQuery || "";
+    searchInput.addEventListener("click", function (ev) { ev.stopPropagation(); });
+    searchInput.addEventListener("input", function () { scheduleSearch(searchInput.value); });
+    searchInput.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+      if (ev.key === "Escape") { searchInput.value = ""; scheduleSearch(""); }
+    });
+    searchWrap.appendChild(searchInput);
+    selMenuEl.appendChild(searchWrap);
+    if (state.searchAvailable === false) {
+      var offRow = document.createElement("div");
+      offRow.className = "cp-row cp-off";
+      offRow.textContent = "搜索不可用：" + (state.searchError || "当前部署未启用会话索引");
+      selMenuEl.appendChild(offRow);
+    }
+    if (state.searchQuery) {
+      renderSearchResults();
+      return;
+    }
     var sessions = state.sessions || [];
     var cur = normPath(state.workspace);
     var title = document.createElement("div");
     title.className = "cp-title";
     title.textContent = cur ? "当前工作区" : "会话";
     selMenuEl.appendChild(title);
+    var top = [], children = {};
+    sessions.forEach(function (sess) {
+      var parent = sess.parentSessionId && sessions.some(function (p) { return p.sessionId === sess.parentSessionId; })
+        ? sess.parentSessionId
+        : null;
+      if (parent) {
+        if (!children[parent]) children[parent] = [];
+        children[parent].push(sess);
+      } else {
+        top.push(sess);
+      }
+    });
+    var byPin = function (a, b) {
+      var pa = state.pinned[a.sessionId] ? 0 : 1, pb = state.pinned[b.sessionId] ? 0 : 1;
+      return pa !== pb ? pa - pb : 0;
+    };
+    top.sort(byPin);
     var mine = [], others = [];
     if (cur) {
-      sessions.forEach(function (sess) {
+      top.forEach(function (sess) {
         if (normPath(sess.cwd) === cur) mine.push(sess); else others.push(sess);
       });
     } else {
-      mine = sessions; // no folder open: flat list, same as before
+      mine = top;
     }
     if (!sessions.length) {
       var empty = document.createElement("div");
@@ -3672,13 +4158,18 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       selMenuEl.appendChild(empty);
       return;
     }
+    var pushRow = function (sess, bold, isChild) {
+      appendSessionRow(sess, bold, isChild);
+      var kids = (children[sess.sessionId] || []).slice().sort(byPin);
+      kids.forEach(function (kid) { appendSessionRow(kid, false, true); });
+    };
     if (!mine.length) {
-      var none = document.createElement("div");
-      none.className = "cp-row sm-empty";
-      none.textContent = "当前工作区暂无会话";
-      selMenuEl.appendChild(none);
+      var no = document.createElement("div");
+      no.className = "cp-row sm-empty";
+      no.textContent = "当前工作区暂无会话";
+      selMenuEl.appendChild(no);
     }
-    mine.forEach(function (sess) { appendSessionRow(sess, !!cur); });
+    mine.forEach(function (sess) { pushRow(sess, !!cur, false); });
     if (!others.length) return;
     var toggle = document.createElement("div");
     toggle.className = "cp-row sm-toggle";
@@ -3702,16 +4193,17 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       head.textContent = group.path || "（未指定工作区）";
       head.title = group.path;
       selMenuEl.appendChild(head);
-      group.items.forEach(function (sess) { appendSessionRow(sess); });
+      group.items.forEach(function (sess) { pushRow(sess, false, false); });
     });
   }
-  function appendSessionRow(sess, bold) {
+  function appendSessionRow(sess, bold, isChild) {
     var row = document.createElement("div");
-    row.className = "cp-row" + (sess.sessionId === state.activeSessionId ? " sel" : "") + (bold ? " sm-mine" : "");
+    row.className = "cp-row" + (sess.sessionId === state.activeSessionId ? " sel" : "") + (bold ? " sm-mine" : "") + (isChild ? " cp-child" : "");
     var label = document.createElement("span");
     label.className = "cp-label";
     var title = state.titles[sess.sessionId] || sess.title || "";
     var text = title ? title : ("会话 " + shortId(sess.sessionId));
+    if (isChild) text = "↳ " + text;
     var time = relTime(sess.updatedAt);
     label.textContent = time ? (text + " · " + time) : text;
     row.appendChild(label);
@@ -3721,13 +4213,91 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
       dot.textContent = "●";
       row.appendChild(dot);
     }
+    var pin = document.createElement("button");
+    pin.className = "cp-star" + (state.pinned[sess.sessionId] ? " on" : "");
+    pin.textContent = state.pinned[sess.sessionId] ? "★" : "☆";
+    pin.title = state.pinned[sess.sessionId] ? "取消置顶" : "置顶该会话";
+    pin.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      post({ type: "pinSession", sessionId: sess.sessionId, pinned: !state.pinned[sess.sessionId] });
+    });
+    row.appendChild(pin);
     if (sess.cwd) row.title = sess.cwd;
     row.addEventListener("click", function () {
       selMenuEl.hidden = true;
+      if (isChild) {
+        post({ type: "childOpen", childSessionId: sess.sessionId, parentSessionId: sess.parentSessionId });
+        return;
+      }
       if (sess.sessionId !== state.activeSessionId) post({ type: "selectSession", sessionId: sess.sessionId });
     });
     selMenuEl.appendChild(row);
   }
+
+  /* ---------- turn outline (turnOutline projection) ---------- */
+  var outlinePopupEl = null;
+  function closeOutlineMenu() {
+    if (outlinePopupEl) { outlinePopupEl.remove(); outlinePopupEl = null; }
+  }
+  function showOutlineMenu(anchor) {
+    if (state.outline.length === 0 && state.viewSessionId) {
+      post({ type: "outlineRequest", sessionId: state.viewSessionId });
+    }
+    if (outlinePopupEl) { closeOutlineMenu(); return; }
+    var pop = document.createElement("div");
+    pop.id = "outline-menu";
+    pop.className = "combo-popup";
+    pop.style.position = "fixed";
+    pop.style.maxHeight = "50vh";
+    pop.style.overflowY = "auto";
+    pop.style.zIndex = "1150";
+    document.body.appendChild(pop);
+    var r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 280)) + "px";
+    pop.style.top = Math.min(Math.max(8, window.innerHeight - 240), r.bottom + 4) + "px";
+    outlinePopupEl = pop;
+    renderOutlineMenu();
+  }
+  function renderOutlineMenu() {
+    var pop = outlinePopupEl;
+    if (!pop) return;
+    pop.innerHTML = "";
+    if (!state.outline.length) {
+      var hint = document.createElement("div");
+      hint.className = "cp-row sm-empty";
+      hint.textContent = "轮次大纲加载中…";
+      pop.appendChild(hint);
+      return;
+    }
+    state.outline.slice().reverse().forEach(function (t) {
+      var row = document.createElement("div");
+      row.className = "cp-row";
+      var b = document.createElement("span");
+      b.className = "cp-label";
+      b.textContent = "第 " + t.turn + " 轮 · " + String(t.prompt || "").replace(/\s+/g, " ").slice(0, 70);
+      row.appendChild(b);
+      row.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        closeOutlineMenu();
+        var target = messagesEl.querySelector('[data-turn="' + t.turn + '"]');
+        if (target) target.scrollIntoView({ block: "start" });
+      });
+      pop.appendChild(row);
+    });
+  }
+  document.addEventListener("mousedown", function (ev) {
+    if (!outlinePopupEl) return;
+    if (outlinePopupEl.contains(ev.target)) return;
+    if (ev.target.closest && ev.target.closest(".turn-sep")) return;
+    closeOutlineMenu();
+  });
+
+  if (forkBtnEl) forkBtnEl.addEventListener("click", function () {
+    if (!state.connected || !state.activeSessionId) return;
+    forkBtnEl.disabled = true;
+    setTimeout(function () { forkBtnEl.disabled = false; }, 1500);
+    post({ type: "forkSession", sessionId: state.activeSessionId });
+  });
 
   /* ---------- ＋ new-session mode picker (agent presets) ----------
      Clicking ＋ opens a dropdown of the four modes (标准 / PTC / 极简 / 创造,
@@ -4430,7 +5000,12 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
         var R = 5, C = 2 * Math.PI * R;
         var frac = Math.max(0.02, pct / 100);
         var col = pct >= 90 ? "var(--err)" : pct >= 70 ? "#e0b94a" : "var(--ok)";
-        ring = "<span title='上下文占用 ~" + fmtTok(used) + " / " + fmtTok(ctx.contextWindow) + " tok' style='white-space:nowrap;vertical-align:middle'>" +
+        var bd = state.breakdown;
+        var bdTip = "";
+        if (bd) {
+          bdTip = "\n系统 " + fmtTok(bd.systemTokens || 0) + " · 工具 " + fmtTok(bd.toolsTokens || 0) + " · 消息 " + fmtTok(bd.messageTokens || 0);
+        }
+        ring = "<span title='上下文占用 ~" + fmtTok(used) + " / " + fmtTok(ctx.contextWindow) + " tok" + bdTip + "' style='white-space:nowrap;vertical-align:middle'>" +
           "<svg width='13' height='13' viewBox='0 0 14 14' style='vertical-align:-2px;margin-right:3px'>" +
           "<circle cx='7' cy='7' r='" + R + "' fill='none' stroke='var(--border)' stroke-width='2'/>" +
           "<circle cx='7' cy='7' r='" + R + "' fill='none' stroke='" + col + "' stroke-width='2' stroke-linecap='round' " +
@@ -5056,7 +5631,7 @@ body.subview #jobs-bar, body.subview #changes-bar { display: none !important; }
   });
   selBtnEl.addEventListener("click", function (ev) {
     ev.stopPropagation();
-    if (selMenuEl.hidden) { renderSessionMenu(); selMenuEl.hidden = false; }
+    if (selMenuEl.hidden) { ensureSearchAvailability(); renderSessionMenu(); selMenuEl.hidden = false; }
     else selMenuEl.hidden = true;
   });
   $("new-session").addEventListener("click", function () {

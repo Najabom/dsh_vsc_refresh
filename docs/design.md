@@ -205,8 +205,8 @@ DSH 有一套**运行时补丁机制（overlay）**：在官方进程**加载模
 
 - **发现**：启动时先探测配置地址（默认 3080）。三态结果——正常 / 未授权 / 不可达——分别走不同策略：正常就复用；未授权会提示「API 拒绝访问」（多半是 overlay 失配，见 §4.2）；不可达才考虑自启。
 - **自启**：从全局 npm 安装里解析 `@deepseek-ai/dsh` 的真实入口（绕过 npm 的 `.cmd` shim，避免弹出黑窗口），以**无窗口、分离进程**方式启动，注入 overlay 与 PID 记录。
-- **确定性关闭（多窗口）**：自启的实例是**从属（owned）**的。多个 VS Code 窗口共享同一个 harness：每个窗口在 `%TEMP%\dsh-vsc-clients` 下写 5 秒心跳（pid + 所连地址），窗口退出时先注销自己再判断——还有其它活着的窗口则**不停**，最后一个窗口退出才按记录的 PID **确定性停掉**；配套 PID 复用护栏（对命令行里 `--port <port>` 二次核对），绝不误杀别人的进程。手动启动的 harness 永远不在清理范围。
-- **全窗崩溃守卫**：整个 VS Code 被强杀时没有任何 deactivate 机会——所以自启路径在 harness 前面包了一层守卫进程（`dist/harness-guard.mjs`，随 VSIX 打包、纯 node 内置模块）：它轮询心跳目录，最后一个心跳过期约 45 秒后 taskkill 整棵进程树并退出；正常停止时扩展对守卫 pid 做 `taskkill /T`，守卫与 harness 一起消失。
+- **确定性关闭（多窗口）**：自启的实例是**从属（owned）**的。多个 VS Code 窗口共享同一个 harness：每个窗口在 `%TEMP%\dsh-vsc-clients` 下写**自适应心跳**（pid + 所连地址：前台每 30 秒、后台每 120 秒，焦点变化与会话活动即刻补写），窗口退出时先注销自己再判断——还有其它活着的窗口则**不停**，最后一个窗口退出才按记录的 PID **确定性停掉**；配套 PID 复用护栏（对命令行里 `--port <port>` 二次核对），绝不误杀别人的进程。手动启动的 harness 永远不在清理范围。
+- **全窗崩溃守卫**：整个 VS Code 被强杀时没有任何 deactivate 机会——所以自启路径在 harness 前面包了一层守卫进程（`dist/harness-guard.mjs`，随 VSIX 打包、纯 node 内置模块）：它每 20 秒轮询心跳目录（心跳 150 秒内算活），最后一个心跳过期 60 秒后 taskkill 整棵进程树并退出——即孤儿清理延迟约 3.5 分钟；正常停止时扩展对守卫 pid 做 `taskkill /T`，守卫与 harness 一起消失。
 - **孤儿治理**：若上次进程被强杀（deactivate 没跑到），下次启动会认出这个「孤儿」并复用或接管，而不是又拉起第二个。
 - **冷启动容忍**：大版本更新后（npm 换掉整棵依赖树），harness 冷启动实测可达 ~45 秒；重启验证路径给了 90 秒启动窗口 + 45 秒验证重试窗口，避免把「还在启动」误判成「挂了」。
 
@@ -269,6 +269,39 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 **每轮变更**是 `workspace/changes` 事件里的「turn + seq」，具体内容走 HTTP：`/api/changes.summary?sessionId&seq` 取文件合计与逐文件 +/−，`/api/changes.diff?sessionId&seq&index` 取单文件对比；扩展把 before/after 拼成统一 diff 文本并以只读 `diff` 文档打开——不重造 diff 引擎，也不碰 DSH 的临时快照生命周期。`deliverables/presented` 同理只读声明（`{turn,callId,files:[{path,description}]}`），相对路径按**会话 cwd**解析后打开。
 
 **即时失效**：设置页、模型/凭据、权限目录、预设、插件市场都订阅 `$events` 的官方失效事件（`settings/document-updated`、`llm/adapters-updated`、`credentials/*`、`permission-presets/catalog-changed`、`agent-preset/selected`、`plugin-market/changed`），变化即在界面里反映，不需要用户手动刷新。
+
+### 5.9 预览型数据面：搜索、引用、大纲与设置表单
+
+**休眠供应商目录**：`llm/listConfigurableProviders` 返回全部内置路由（含未注册的休眠项，带 `defaultBaseURL`）。设置页为其列出「配置 Key」入口：写 `providers.<route>` 配置（官方端点 + 协议 + 派生 key ref），用新 Key 调 `llm/discoverModels` 补全模型列表——与官方「模型」页添加供应商的写入完全一致；新建供应商的预设列表也由这份目录动态生成。
+
+**会话搜索**用 `session/search`（`{request:{query}}`）得命中与 240 码点片段；部署可以在 session-query 索引上禁用搜索（`openAt: never`），此时 RPC 返回明确的 `gateway/internal` 原因，面板选择框灰显并原样展示——能力存在与否由服务端裁决，扩展不猜测。
+
+**@ 引用**是两层拼合：`fileReferences/list {agentId, query}` 给工作区文件（相对路径，上限 20）；`sessionReferenceResolver/candidates` 给历史会话，并自带可直接插入 prompt 的 **mention 文本**（`@[标签](dsh-session:<base64>)`）。面板只做补全与插入，文本原样进输入框，解析交给 DSH。`skills/list` 同理：列出技能并插入 `/名称 `，触发由 DSH 处理。
+
+**轮次大纲**读 `turnOutline` 投影（`[{turn,seq,prompt,response}]`），点轮次分隔行弹出跳转；**上下文分解**读 `contextBreakdown` 投影（`{systemTokens,toolsTokens,messageTokens}`），只进环的 tooltip，不参与任何计算。
+
+**子代理会话**用 `address {kind:'subagent',parentSessionId,childSessionId,mode:'continuable'}` 打开（one-shot 地址会被服务端以 `subagent/unauthorized` 拒绝）；选择框按 `parentSessionId` 嵌套，团队成员的会话复用同一视图。
+
+**工作区管理**建立在 `workspace/follow` 的完整基线上（`items / archivedSessionIds / pinnedSessionIds`，增量 `replace|upsert|remove|order|archived|pinned`），增删改与排序走 `workspace/*` 单请求；`pinnedSessionIds` 同时驱动选择框置顶。**定时任务**只读 `schedule/catalog` 快照，改名/改指令/删除走 `schedule/update|delete`；DSH 只允许模型工具创建计划，因此「新建」预填一条给 agent 的指令，而不是伪造创建表单。**设置大类**由 `settings/describe` 的 schema 直接生成表单（`root=refs[uid].dict`），写回 `set/unset`，默认值只读展示——扩展不维护第二份设置真相。
+
+**账户卡**读 `account/getState` + `account/getProfile`（只读；余额另有接口）；**守卫与守卫进程**仍按 5.1 的多窗口心跳执行，本层不改变生命周期语义。
+
+### 5.10 面板自愈：webview 存活与显示拓扑
+
+显示器断开/切换时 Electron 可能让 webview 的渲染面失效：面板整块空白，直到窗口（连同 webview）重建才恢复。面板因此维护三条被动防线：
+
+- **存活探针（低频）**：仅当视图可见且窗口聚焦时每 60s 发 `ping`（后台窗口零流量），webview 回 `pong`；一次探测 12s 无应答即 `webview.html` 重建（`NativePanelProvider.reloadWebview`）。webview 的 `ready` 本来就会重拉 state/历史/目录，所以重建不丢数据，只丢滚动与展开状态。
+- **显示拓扑**：`pong` 携带 `screen.width/height`；宿主记录基线，屏幕尺寸变化视为显示器组变化（渲染面可疑），主动重建一次。窗口重新聚焦（`onDidChangeWindowState`）时对两个面板各做一次即时探测（`nudge`），6 秒内无回应直接重建。
+- **手动逃生口**：命令 `dsh.reloadPanel`（DSH: 重新加载侧边栏面板）随时重建侧边栏与问题窗口。
+
+### 5.11 DSH 版本兼容台账：如实报告，而不是隐藏
+
+协议客户端最怕上游改名/改形。这里不做「猜」，也不做「默默隐藏」：
+
+- **特性 → 端点**：`src/harness/capabilities.ts` 把每个可选面（插件、作业、定时任务、目标、搜索、分叉、引用、技能、工作区管理、账户、高级设置、权限、附件、子代理）映射到它的 RPC 前缀。核心会话流量不在册，不受影响。
+- **运行时判定**：`HarnessClient.call` 在业务错误时回调 `onProtocolError`；`gateway/not-found`（接口消失）→ unsupported，`gateway/arguments-invalid`（参数契约变了）→ incompatible，`disabled` → 部署关闭。台账按严重度取最高，版本变化时清空。
+- **诚实呈现**：面板顶栏固定一行（不隐藏任何入口）说明「当前 DSH 0.2.2 高于已验证范围 / 插件管理：0.2.2 没有该接口（gateway/not-found）：…」，设置页每个标签页顶部同样显示；失败的操作本身仍按原有错误提示。版本低于 `TESTED_DSH_MIN` 或高于 `TESTED_DSH_MAX` 标为 too low / too high（未经验证），而不是假装可用或假装坏了。
+- **与更新中心配合**：升级前的静态端点预检（§5.2）挡大改动，升级后的运行时台账报告漏网之鱼；两者都指向同一个事实来源——服务端自己的错误码。
 
 ---
 

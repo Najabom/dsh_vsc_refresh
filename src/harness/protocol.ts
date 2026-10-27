@@ -87,6 +87,24 @@ export const METHODS = {
   goalsComplete: "goals/complete",
   goalsClear: "goals/clear",
   accountGetBalance: "account/getBalance",
+  accountGetState: "account/getState",
+  accountGetProfile: "account/getProfile",
+  workspaceCreate: "workspace/create",
+  workspaceRename: "workspace/rename",
+  workspaceDelete: "workspace/delete",
+  workspaceInsertBefore: "workspace/insertBefore",
+  workspacePinSession: "workspace/pinSession",
+  workspaceUnpinSession: "workspace/unpinSession",
+  sessionSearch: "session/search",
+  sessionFork: "session/fork",
+  skillsList: "skills/list",
+  fileReferences: "fileReferences/list",
+  sessionReferenceCandidates: "sessionReferenceResolver/candidates",
+  scheduleList: "schedule/list",
+  scheduleCatalog: "schedule/catalog",
+  scheduleHistory: "schedule/history",
+  scheduleUpdate: "schedule/update",
+  scheduleDelete: "schedule/delete",
   llmListProviders: "llm/listProviders",
   llmListConfigurableProviders: "llm/listConfigurableProviders",
   llmDiscoverModels: "llm/discoverModels",
@@ -159,6 +177,107 @@ export interface AccountBalanceWire {
   value?: AccountWalletWire[];
   bonusWallets?: AccountWalletWire[];
 }
+
+/** account/getState snapshot. */
+export interface AccountStateWire {
+  status: string;
+  links?: { usageUrl?: string; topUpUrl?: string };
+  attempt?: unknown;
+}
+
+/** account/getProfile result (read-only account card). */
+export type AccountProfileWire =
+  | null
+  | { status: "failed" }
+  | {
+      status: "ready";
+      value: { id: string; name?: string | null; contact?: string | null; avatarUrl?: string | null };
+    };
+
+/* ---------- workspace / search / fork / skills / references ---------- */
+
+/** One workspace/follow item. */
+export interface WorkspaceViewWire {
+  workspaceId: string;
+  path: string;
+  title: string;
+  sessionIds: string[];
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** workspace/follow baseline: workspaces + the archived/pinned session sets. */
+export interface WorkspaceBaselineWire {
+  items: WorkspaceViewWire[];
+  archivedSessionIds: string[];
+  pinnedSessionIds: string[];
+}
+
+/** session/search hits (snippet is a bounded excerpt). */
+export interface SessionSearchItemWire {
+  sessionId: string;
+  snippet: string;
+}
+
+export interface SessionSearchView {
+  items: SessionSearchItemWire[];
+  hasMore: boolean;
+}
+
+/** skills/list row (human-invocable skills, triggered by /name). */
+export interface SkillWire {
+  name: string;
+  description: string;
+  whenToUse?: string;
+  modelInvocable?: boolean;
+  path?: string;
+}
+
+/** fileReferences/list row (workspace-relative path). */
+export interface FileReferenceWire {
+  path: string;
+  kind: "file" | "directory";
+}
+
+/** sessionReferenceResolver/candidates row; insert `mention` verbatim. */
+export interface SessionReferenceCandidateWire {
+  sessionId: string;
+  label: string;
+  displayTitle?: string;
+  cwd?: string;
+  sameWorkspace?: boolean;
+  createdAt?: number;
+  mention: string;
+}
+
+/* ---------- schedules ---------- */
+
+/** schedule/catalog entry: the stored record plus delivery status. */
+export interface ScheduleCatalogEntryWire {
+  id: string;
+  sessionId: string;
+  title: string;
+  prompt: string;
+  scheduledAt: number;
+  kind: "after" | "at" | "every" | "daily" | "weekly" | "cron";
+  afterSeconds?: number;
+  everySeconds?: number;
+  time?: string;
+  timeZone?: string;
+  weekdays?: number[];
+  expression?: string;
+  status?: "active" | "inactive";
+  lastDelivery?: { scheduledAt: number; deliveredAt: number; messageId?: string };
+}
+
+/** schedule/update timing change (snake_case wire fields). */
+export type ScheduleTimingChangeWire =
+  | { kind: "after"; after_seconds: number }
+  | { kind: "at"; at: number }
+  | { kind: "every"; every_seconds: number }
+  | { kind: "daily"; daily: { time: string; time_zone: string } }
+  | { kind: "weekly"; weekly: { time: string; time_zone: string; weekdays: number[] } }
+  | { kind: "cron"; cron: { expression: string; time_zone: string } };
 
 /* ---------- session/list + projection values ---------- */
 
@@ -361,6 +480,8 @@ export interface LlmConfigurableProvider {
   settingsNs: string;
   settingsPath: string[];
   declared?: boolean;
+  /** Route endpoint used when the profile leaves baseURL empty. */
+  defaultBaseURL?: string;
   error?: string;
 }
 

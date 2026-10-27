@@ -6,6 +6,7 @@
   "dsh.command.openWebView": "DSH: 打开 Web 界面（高级）",
   "dsh.command.askSelection": "DSH: 询问选中内容",
   "dsh.command.reviewChanges": "DSH: 审查 Agent 改动",
+  "dsh.command.reloadPanel": "DSH: 重新加载侧边栏面板",
   "dsh.config.url": "扩展连接的 DSH harness 地址。默认 3080 即网页端的 harness：扩展以共享客户端接入，绝不自起或杀掉它。无人应答时扩展会自启自己的实例（PID 记录在 %TEMP%\\dsh-vsc-harness.pid，VS Code 退出时关闭），并注入绕过 dsh 0.1.7 启动令牌鉴权的运行时 overlay。也认 DSH_WEB_URL。",
   "dsh.config.autoStart": "配置地址无人应答时自动启动 `dsh web`。",
   "dsh.config.followAgentEdits": "DSH 修改文件时自动在编辑器打开对应文件，并把光标定位到第一个修改行（跟随 agent 编辑：预览标签、不抢焦点，磁盘更新实时刷新）。覆盖直接写入/编辑工具、代码执行内的嵌套调用（tools.write/edit 等），以及任务运行期间经 shell 命令等外部方式的写入（工作区文件监控捕获）。",

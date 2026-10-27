@@ -27,9 +27,22 @@ export interface WaterfallFrame {
   clientId: string;
 }
 
-/** workspace/follow state relevant to the panel. */
+/** workspace/follow state relevant to the panel: the ordered workspace
+ *  registry plus the archived and pinned session sets. */
 export interface WorkspaceState {
-  archivedSessionIds?: string[];
+  items: WorkspaceView[];
+  archivedSessionIds: string[];
+  pinnedSessionIds: string[];
+}
+
+/** One workspace registry row (workspace/follow WorkspaceView). */
+export interface WorkspaceView {
+  workspaceId: string;
+  path: string;
+  title: string;
+  sessionIds: string[];
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 /** A mux follow target: a top-level session, or a child conversation
@@ -301,6 +314,7 @@ export class HarnessEventStream implements vscode.Disposable {
 
   /** mux clientId captured from the $events ready frame (needed to answer). */
   private clientId = "";
+  private workspaceState: WorkspaceState = { items: [], archivedSessionIds: [], pinnedSessionIds: [] };
 
   private handleControlValue(value: unknown): void {
     const v = value as { type?: unknown; value?: unknown; sessionId?: unknown; key?: unknown } | null;
@@ -325,15 +339,61 @@ export class HarnessEventStream implements vscode.Disposable {
   }
 
   private handleWorkspaceValue(value: unknown): void {
-    const v = value as { type?: unknown; value?: { archivedSessionIds?: unknown }; archivedSessionIds?: unknown } | null;
+    const v = value as Record<string, unknown> | null;
     if (!v || typeof v.type !== "string") return;
-    if (v.type === "baseline") {
-      this.onWorkspace({ archivedSessionIds: toIdList(v.value?.archivedSessionIds) });
-      return;
+    const takeBaseline = (raw: unknown): void => {
+      const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      this.workspaceState = {
+        items: toWorkspaceItems(b.items),
+        archivedSessionIds: toIdList(b.archivedSessionIds) ?? [],
+        pinnedSessionIds: toIdList(b.pinnedSessionIds) ?? [],
+      };
+    };
+    switch (v.type) {
+      case "baseline":
+      case "replace":
+        takeBaseline(v.value);
+        break;
+      case "upsert": {
+        const item = toWorkspaceItem(v.workspace);
+        if (!item) return;
+        const items = this.workspaceState.items.filter((w) => w.workspaceId !== item.workspaceId);
+        items.push(item);
+        this.workspaceState = { ...this.workspaceState, items };
+        break;
+      }
+      case "remove": {
+        const id = String(v.workspaceId ?? "");
+        this.workspaceState = {
+          ...this.workspaceState,
+          items: this.workspaceState.items.filter((w) => w.workspaceId !== id),
+        };
+        break;
+      }
+      case "order": {
+        const ids = toIdList(v.workspaceIds) ?? [];
+        const byId = new Map(this.workspaceState.items.map((w) => [w.workspaceId, w] as const));
+        const items = ids.map((id) => byId.get(id)).filter((w): w is WorkspaceView => Boolean(w));
+        for (const w of this.workspaceState.items) if (!ids.includes(w.workspaceId)) items.push(w);
+        this.workspaceState = { ...this.workspaceState, items };
+        break;
+      }
+      case "archived":
+        this.workspaceState = {
+          ...this.workspaceState,
+          archivedSessionIds: toIdList(v.archivedSessionIds) ?? [],
+        };
+        break;
+      case "pinned":
+        this.workspaceState = {
+          ...this.workspaceState,
+          pinnedSessionIds: toIdList(v.pinnedSessionIds) ?? [],
+        };
+        break;
+      default:
+        return;
     }
-    if (v.type === "archived") {
-      this.onWorkspace({ archivedSessionIds: toIdList(v.archivedSessionIds) });
-    }
+    this.onWorkspace({ ...this.workspaceState, items: [...this.workspaceState.items] });
   }
 
   private handleFollowValue(sessionId: string, value: unknown): void {
@@ -392,4 +452,23 @@ export class HarnessEventStream implements vscode.Disposable {
 function toIdList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.map((v) => String(v));
+}
+
+function toWorkspaceItem(value: unknown): WorkspaceView | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.workspaceId !== "string" || typeof v.path !== "string") return null;
+  return {
+    workspaceId: v.workspaceId,
+    path: v.path,
+    title: typeof v.title === "string" ? v.title : v.path,
+    sessionIds: toIdList(v.sessionIds) ?? [],
+    createdAt: typeof v.createdAt === "number" ? v.createdAt : undefined,
+    updatedAt: typeof v.updatedAt === "number" ? v.updatedAt : undefined,
+  };
+}
+
+function toWorkspaceItems(value: unknown): WorkspaceView[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(toWorkspaceItem).filter((w): w is WorkspaceView => Boolean(w));
 }

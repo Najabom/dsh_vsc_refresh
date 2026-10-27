@@ -3,6 +3,8 @@
  * The panel is plain JS (inline in panel.html); these types drive the host side.
  */
 
+import type { CompatibilityReport } from "../harness/capabilities";
+
 /** A raw session event forwarded to the panel (wire passthrough). */
 export interface PanelEvent {
   type: string;
@@ -62,8 +64,15 @@ export type HostMessage =
       /** Surface mode: "ask" renders the dedicated question conversation
        *  (session picker / workspace strip / utility buttons hidden). */
       mode?: "main" | "ask";
+      /** Registry-global pinned session ids (most recently pinned first). */
+      pinnedSessionIds?: string[];
+      /** Context composition (contextBreakdown projection). */
+      breakdown?: { systemTokens: number; toolsTokens: number; messageTokens: number } | null;
+      /** DSH compatibility ledger: verified version band + recorded problems. */
+      capabilities?: CompatibilityReport | null;
     }
   | { type: "event"; sessionId: string; event: PanelEvent }
+  | { type: "capabilities"; report: CompatibilityReport }
   | { type: "history"; sessionId: string; events: PanelEvent[]; hasMore: boolean; isOlder?: boolean; toolDiffs?: Record<string, ToolLineDiff> }
   | { type: "running"; sessionId: string; running: boolean }
   | {
@@ -155,6 +164,60 @@ export type HostMessage =
       files: { index: number; path: string; description?: string }[];
     }
   | { type: "balance"; value: AccountBalanceView | null }
+  | { type: "ping" }
+  | {
+      /** Whole-log turn outline (turnOutline projection) for the jump menu. */
+      type: "outline";
+      sessionId: string;
+      turns: { turn: number; seq: number; prompt: string; response: string }[];
+    }
+  | {
+      /** Scheduled tasks of the viewed session (schedule/catalog). */
+      type: "schedules";
+      sessionId: string;
+      entries: {
+        id: string;
+        title: string;
+        prompt: string;
+        kind: string;
+        status?: string;
+        scheduledAt: number;
+        time?: string;
+        timeZone?: string;
+        weekdays?: number[];
+        expression?: string;
+        everySeconds?: number;
+        afterSeconds?: number;
+        lastDeliveredAt?: number;
+      }[];
+    }
+  | { type: "skills"; sessionId: string; skills: { name: string; description: string; whenToUse?: string }[] }
+  | {
+      /** @ menu candidates: workspace files/directories + conversation mentions. */
+      type: "refs";
+      requestId: string;
+      files: { path: string; kind: string }[];
+      sessions: { sessionId: string; label: string; mention: string }[];
+    }
+  | {
+      /** session/search result (disabled deployments carry `error`). */
+      type: "searchResults";
+      query: string;
+      items: { sessionId: string; snippet: string }[];
+      error?: string;
+    }
+  | {
+      /** Settings page: workspace registry + pinned set. */
+      type: "settingsWorkspaces";
+      workspaces: { workspaceId: string; path: string; title: string; sessionCount: number }[];
+      pinnedSessionIds: string[];
+    }
+  | {
+      /** Settings page: read-only account card. */
+      type: "settingsAccount";
+      state: { status: string; usageUrl?: string; topUpUrl?: string } | null;
+      profile: { name?: string; contact?: string; avatarUrl?: string } | null;
+    }
   | { type: "toolDiff"; sessionId: string; callId: string; added: number; deleted: number; path?: string }
   | {
       type: "ask";
@@ -261,6 +324,20 @@ export type WebviewMessage =
   | { type: "selectSession"; sessionId: string }
   | { type: "teamOpen"; childSessionId: string }
   | { type: "teamBack" }
+  | { type: "childOpen"; childSessionId: string; parentSessionId: string }
+  | { type: "pinSession"; sessionId: string; pinned: boolean }
+  | { type: "forkSession"; sessionId: string; atSeq?: number }
+  | { type: "sessionSearch"; query: string }
+  | { type: "skillsList"; sessionId: string }
+  | { type: "references"; requestId: string; query: string }
+  | { type: "outlineRequest"; sessionId: string }
+  | { type: "scheduleList"; sessionId: string }
+  | { type: "scheduleUpdate"; id: string; sessionId: string; title?: string; prompt?: string }
+  | { type: "scheduleDelete"; id: string; sessionId: string }
+  | { type: "workspaceCreate"; path: string }
+  | { type: "workspaceRename"; workspaceId: string; title: string }
+  | { type: "workspaceDelete"; workspaceId: string }
+  | { type: "workspaceMove"; workspaceId: string; beforeWorkspaceId?: string }
   | { type: "newSession"; agentPreset?: string }
   | { type: "getAgentPresets" }
   | { type: "deleteSession"; sessionId: string }
@@ -305,6 +382,7 @@ export type WebviewMessage =
   | { type: "planMode"; action: "soft" | "hard" | "off" }
   | { type: "openExternal"; url: string }
   | { type: "panelWidth"; px: number }
+  | { type: "pong"; screen?: { w: number; h: number; dpr: number } }
   | {
       /** Lazy fetch of one logged image's bytes (harness session.attachment). */
       type: "getAttachment";
@@ -343,6 +421,8 @@ export interface PanelSession {
   title?: string;
   /** Session working directory — the picker groups rows by this. */
   cwd?: string;
+  /** Parent conversation for subagent child sessions (nested in the picker). */
+  parentSessionId?: string;
   /** Current agent preset of the session (agentPresets/list domain). */
   agentPreset?: string;
   /** tokenUsage projection (aggregate over the durable log). */

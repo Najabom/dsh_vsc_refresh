@@ -25,8 +25,10 @@ import { join } from "node:path";
 
 export const CLIENTS_DIR = process.env.DSH_VSC_CLIENTS_DIR ?? join(tmpdir(), "dsh-vsc-clients");
 
-/** A heartbeat older than this no longer counts as a live window. */
-const FRESH_MS = 15_000;
+/** A heartbeat older than this no longer counts as a live window. Must stay
+ *  comfortably above the extension's slowest write cadence (120s when the
+ *  window is in the background); overridable for the guard tests. */
+const FRESH_MS = Number(process.env.DSH_VSC_FRESH_MS ?? 150_000);
 /** Files older than this are pruned — crashed windows never clean up. */
 const STALE_MS = 60 * 60 * 1000;
 

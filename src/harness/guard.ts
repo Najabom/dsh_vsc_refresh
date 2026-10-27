@@ -28,11 +28,13 @@ import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 
-const INTERVAL_MS = Number(process.env.DSH_VSC_GUARD_INTERVAL_MS ?? 5000);
-const GRACE_MS = Number(process.env.DSH_VSC_GUARD_GRACE_MS ?? 45_000);
+const INTERVAL_MS = Number(process.env.DSH_VSC_GUARD_INTERVAL_MS ?? 20_000);
+const GRACE_MS = Number(process.env.DSH_VSC_GUARD_GRACE_MS ?? 60_000);
 const INITIAL_MS = Number(process.env.DSH_VSC_GUARD_INITIAL_MS ?? 180_000);
 const CLIENTS_DIR = process.env.DSH_VSC_CLIENTS_DIR ?? join(tmpdir(), "dsh-vsc-clients");
-const FRESH_MS = 15_000;
+// Must mirror clientRegistry.ts: the extension writes every 30s (focused) or
+// 120s (background), so 150s is "no live window". Env-overridable for tests.
+const FRESH_MS = Number(process.env.DSH_VSC_FRESH_MS ?? 150_000);
 
 function parsePort(args: string[]): number | null {
   const i = args.indexOf("--port");

@@ -11,6 +11,7 @@ import { syncCompanion, type CompanionStatus } from "./harness/companion";
 import { configuredBase, discover, portOf } from "./harness/discover";
 import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
 import { isLocalBase, liveOtherClients, pruneStale, removeHeartbeat, writeHeartbeat } from "./harness/clientRegistry";
+import { CapabilityLedger } from "./harness/capabilities";
 import { setNativeWebAuthEnabled } from "./harness/nativeAuth";
 import { ensureWorkspaceAcl, repairWorkspaceAclElevated } from "./harness/workspaceAcl";
 import {
@@ -59,14 +60,22 @@ const DSH_UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000; // long-running windows must n
 let shuttingDown = false;
 
 /**
- * Multi-window liveness: this window writes a 5s heartbeat (via
- * clientRegistry) naming the harness base it is connected to. Shutdown uses
- * it to tell "other windows still need the service" (leave it) apart from
- * "we are the last one" (stop it), and dist/harness-guard.mjs uses the same
- * files to clean up after an all-windows crash.
+ * Multi-window liveness: this window writes an adaptive heartbeat (via
+ * clientRegistry) naming the harness base it is connected to — 30s while the
+ * window is focused, 120s in the background, plus an immediate write on every
+ * focus change and session activity. Shutdown uses it to tell "other windows
+ * still need the service" (leave it) apart from "we are the last one" (stop
+ * it), and dist/harness-guard.mjs uses the same files to clean up after an
+ * all-windows crash.
  */
 let heartbeatTimer: NodeJS.Timeout | undefined;
 let heartbeatBase: string | undefined;
+let lastBeatAt = 0;
+const HEARTBEAT_FOCUSED_MS = 30_000;
+const HEARTBEAT_IDLE_MS = 120_000;
+const HEARTBEAT_MIN_WRITE_MS = 10_000;
+/** DSH version/compatibility ledger for the current connection. */
+const capabilities = new CapabilityLedger();
 
 export function activate(context: vscode.ExtensionContext): void {
   shuttingDown = false;
@@ -125,16 +134,42 @@ export function activate(context: vscode.ExtensionContext): void {
   let checkTimer: NodeJS.Timeout | null = null;
   let dshUpdateTimer: NodeJS.Timeout | null = null;
   let lastDshUpdateCheckAt = 0;
-  heartbeatTimer = setInterval(() => {
-    if (heartbeatBase) {
+  // Adaptive liveness heartbeat: focused windows beat every 30s, background
+  // windows every 120s; a focus change or real activity writes immediately so
+  // the guard never has to infer more than "no window has spoken recently".
+  const scheduleHeartbeat = (): void => {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    const delay = vscode.window.state.focused ? HEARTBEAT_FOCUSED_MS : HEARTBEAT_IDLE_MS;
+    heartbeatTimer = setTimeout(() => {
+      heartbeatTimer = undefined;
+      if (!heartbeatBase) return;
+      lastBeatAt = Date.now();
       pruneStale();
       writeHeartbeat(heartbeatBase);
+      scheduleHeartbeat();
+    }, delay);
+  };
+  /** Write a heartbeat now (real activity/focus), rate-limited unless forced. */
+  const beatNow = (force = false): void => {
+    if (!heartbeatBase) return;
+    const now = Date.now();
+    if (!force && now - lastBeatAt < HEARTBEAT_MIN_WRITE_MS) {
+      if (!heartbeatTimer) scheduleHeartbeat();
+      return;
     }
-  }, 5000);
+    lastBeatAt = now;
+    pruneStale();
+    writeHeartbeat(heartbeatBase);
+    scheduleHeartbeat();
+  };
+  context.subscriptions.push(vscode.window.onDidChangeWindowState((state) => {
+    if (state.focused) beatNow(true);
+    else scheduleHeartbeat();
+  }));
   context.subscriptions.push({
     dispose: () => {
       if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
+        clearTimeout(heartbeatTimer);
         heartbeatTimer = undefined;
       }
     },
@@ -269,6 +304,18 @@ export function activate(context: vscode.ExtensionContext): void {
     externalChanges,
     vscode.commands.registerCommand("dsh.openSidebar", () => {
       void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`);
+    }),
+    vscode.commands.registerCommand("dsh.reloadPanel", () => {
+      // Escape hatch for a wedged webview (e.g. after a monitor disconnect the
+      // render surface can stay blank even though the harness is healthy).
+      panel.reloadWebview("手动重载");
+      askProvider.reloadWebview("手动重载");
+    }),
+    vscode.window.onDidChangeWindowState((state) => {
+      if (!state.focused) return;
+      // Display reconnect usually lands as a focus event; probe both surfaces.
+      panel.nudge();
+      askProvider.nudge();
     }),
     vscode.commands.registerCommand("dsh.start", () => {
       // Explicit start: clear every "don't respawn" latch and retry for real.
@@ -510,16 +557,26 @@ export function activate(context: vscode.ExtensionContext): void {
     const d = await discover();
     if (d.alive) {
       client = new HarnessClient(d.base);
+      client.onProtocolError = (method, code, message) => {
+        if (!capabilities.recordError(method, code, message)) return;
+        const report = capabilities.report();
+        log.appendLine(`compat: ${method} failed (${code}) — ${message}`);
+        panel.setCapabilities(report);
+        askProvider.setCapabilities(report);
+      };
+      capabilities.setVersion(d.version ?? "");
       status.setOnline(d.version ?? "?");
       log.appendLine(`harness connected at ${d.base} (version ${d.version})`);
       panel.setClient(client, d.version);
       askProvider.setClient(client, d.version);
+      panel.setCapabilities(capabilities.report());
+      askProvider.setCapabilities(capabilities.report());
       ensureStream(d.base);
       // Liveness: name ourselves for this base now and every 5s (covers the
       // "which window is still using the shared harness" decision in
       // deactivate, and the guard's crash cleanup).
       heartbeatBase = d.base;
-      writeHeartbeat(d.base);
+      beatNow(true);
       void runCompanionSync();
       return;
     }
@@ -605,6 +662,7 @@ export function activate(context: vscode.ExtensionContext): void {
     streamBase = base;
     stream = new HarnessEventStream(base);
     stream.onSessionEvent = (sessionId, event) => {
+      beatNow();
       tracker.handleEvent(sessionId, event);
       followEdits.handleEvent(sessionId, event);
       externalChanges.handleEvent(sessionId, event);
