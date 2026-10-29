@@ -1,7 +1,7 @@
 {
   "name": "dsh-vsc",
   "displayName": "DSH Bridge",
-  "description": "DeepSeek Harness (DSH) in VS Code: native sidebar panel + editor bridge for the local AI agent 鈥?a pure protocol client, no second server.",
+  "description": "DeepSeek Harness (DSH) in VS Code: native sidebar panel + editor bridge for the local AI agent — a pure protocol client, no second server.",
   "keywords": [
     "deepseek",
     "deepseek-harness",
@@ -19,8 +19,8 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.4.1",
-  "publisher": "local",
+  "version": "1.5.0",
+  "publisher": "najabom",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
   "repository": {
@@ -81,6 +81,10 @@
         "title": "%dsh.command.stop%"
       },
       {
+        "command": "dsh.restart",
+        "title": "%dsh.command.restart%"
+      },
+      {
         "command": "dsh.refreshStatus",
         "title": "%dsh.command.refreshStatus%"
       },
@@ -123,6 +127,9 @@
           "command": "dsh.reviewChanges"
         },
         {
+          "command": "dsh.restart"
+        },
+        {
           "command": "dsh.reloadPanel"
         },
         {
@@ -138,15 +145,25 @@
           "default": "http://127.0.0.1:3080",
           "description": "%dsh.config.url%"
         },
+        "dshVsc.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "%dsh.config.nodePath%"
+        },
+        "dshVsc.dshScriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "%dsh.config.dshScriptPath%"
+        },
+        "dshVsc.pnpmPath": {
+          "type": "string",
+          "default": "",
+          "description": "%dsh.config.pnpmPath%"
+        },
         "dshVsc.autoStart": {
           "type": "boolean",
           "default": true,
           "description": "%dsh.config.autoStart%"
-        },
-        "dshVsc.followAgentEdits": {
-          "type": "boolean",
-          "default": true,
-          "description": "%dsh.config.followAgentEdits%"
         },
         "dshVsc.autoFixWorkspaceAcl": {
           "type": "boolean",
@@ -198,7 +215,8 @@
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "record-pristine": "node scripts/record-pristine.mjs",
-    "package": "node esbuild.js && vsce package --no-dependencies"
+    "package": "node esbuild.js && vsce package --no-dependencies",
+    "install:local": "npm run package && node scripts/install-local.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

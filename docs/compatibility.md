@@ -8,11 +8,29 @@ DSH Bridge 是 DSH 的协议客户端：能力由 DSH 提供的 RPC 决定。本
 | 项目 | 值 |
 |---|---|
 | 最低验证版本 | `0.1.7-rc.2` |
-| 最高验证版本（开区间） | `0.2.2`（即含 0.2.1 / 0.2.0 全部功能） |
+| 最高验证版本（开区间） | `0.2.3`（即含 0.2.2 全部功能；0.2.2-alpha.2 已通过合同检查） |
 | 运行形态 | 0.2.x（`@deepseek-ai/dsh`） |
 
 版本低于下限或高于上限时，扩展照常连接并保留全部入口，只在面板顶部、设置页横幅
 与日志（`compat:` 行）中**如实报告**「低于/高于已验证范围」，绝不会隐藏按钮。
+
+区间上界的维护规则：**先跑合同检查，再改常量**。对某个新版本执行
+`node scripts/contract-check.mjs <version>` 全绿（本扩展用到的全部接口标识都能在
+该版本的官方包里找到）之后，才把 `src/harness/capabilities.ts` 的
+`TESTED_DSH_MAX` 抬到下一个补丁版本号。CI 的合同任务对下方矩阵里的固定版本
+自动运行同一检查，接口缺失即报红。
+
+## 当前 npm dist-tags（2026-10-29 核对）
+
+| 通道 | 版本 |
+|---|---|
+| `latest` | `0.2.1-rc.2` |
+| `next` | `0.2.1-rc.4` |
+| `alpha` | `0.2.2-alpha.2` |
+
+注意 `latest` 长期停在旧版（预发布通道推进更快），这也是更新中心默认
+「通道感知」（`dshVsc.dshUpdateChannel = auto`）的原因：稳定版安装对照 `latest`，
+预发布安装跟随最新发布版本。
 
 ## 能力矩阵
 
@@ -45,6 +63,16 @@ DSH Bridge 是 DSH 的协议客户端：能力由 DSH 提供的 RPC 决定。本
 `◐ 会话搜索`：部分部署在会话索引上禁用了全文搜索，此时 RPC 返回明确的
 `gateway/internal` 原因，选择框灰显并展示官方原因——扩展不猜测、不隐藏入口。
 
+### 运行时 overlay 的版本核对
+
+扩展对**自启的受管 harness** 注入一个内存补丁（浏览器鉴权 bypass），其完整性与
+指定 dsh 版本绑定：`src/harness/overlay/pristine.ts` 的 `PRISTINE_HOST_VERSION`
+当前为 `0.2.2-alpha.2`（SHA256 表由 `npm run record-pristine -- --write` 从该版本
+的 npm 发布包记录）。安装的是**表内版本**才逐文件比对 SHA256；其它版本如实报告
+「此版本尚未核验」（unverified），而不会误报「文件被改」。升级 dsh 后按
+[AGENTS.md](../AGENTS.md) 的 overlay 规则重新记录；已记录的哈希与 0.2.1-rc.4
+相同（该文件在这两个版本间未变），因此跨版本升级不会引入新的 patch 风险。
+
 ## 版本不匹配如何报告
 
 扩展内置能力台账（`src/harness/capabilities.ts`）：
@@ -62,7 +90,18 @@ DSH Bridge 是 DSH 的协议客户端：能力由 DSH 提供的 RPC 决定。本
 
 - 扩展自更新前会做接口预检（`src/harness/updatePreflight.ts`）：扫描目标版本的
   发布说明与关键包内容，命中本扩展使用的接口标识时先提示风险。
-- CI 合同任务（`.github/workflows/contract.yml`）每周对固定版本
-  `0.1.7-rc.2` 与 `0.2.1-rc.4` 运行 `scripts/contract-check.mjs`：任一接口标识缺失
-  或能力映射引用了未知接口，流水线报红。新增 DSH 版本时把该版本加入矩阵并
-  扩展已验证区间。
+- CI 合同任务（`.github/workflows/contract.yml`）每周对固定版本矩阵
+  `0.1.7-rc.2` / `0.2.1-rc.4` / `0.2.2-alpha.2` 运行
+  `scripts/contract-check.mjs`：任一接口标识缺失或能力映射引用了未知接口，
+  流水线报红。新增 DSH 版本时把该版本加入矩阵，并扩展已验证区间。
+- 发布流水线（`.github/workflows/release.yml`）在打包前先跑 `npm run typecheck`，
+  并为每个 `.vsix` 生成 `SHA256SUMS.txt` 随 Release 一起发布。
+
+## 前置条件速查
+
+| 依赖 | 要求 | 说明 |
+|---|---|---|
+| VS Code | `^1.90.0` | Windows / macOS / Linux |
+| Node.js | `>= 24.9`（DSH 的 engines 要求） | 扩展自动探测；可用 `dshVsc.nodePath` 指定 |
+| `@deepseek-ai/dsh` | `0.1.7-rc.2` 起，实测至 `0.2.2-alpha.2` | `npm i -g @deepseek-ai/dsh`；可用 `dshVsc.dshScriptPath` 指定入口 |
+| pnpm | `>= 11`（插件安装所需，自行安装） | DSH 插件检索调用 `pnpm view ... --config.fetch-retries=0`，pnpm 9/10 的 `view` 会转调 npm 并失败（`EUNKNOWNCONFIG`）。扩展只探测 PATH / PNPM_HOME 上版本 ≥11 的 pnpm 并如实报告，**不代装**；请自行 `npm i -g pnpm@11` 或用 `dshVsc.pnpmPath` 指定 |

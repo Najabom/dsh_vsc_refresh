@@ -100,24 +100,56 @@
   .pl-row .pl-del.confirm { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
   .hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
   .err-text { color: #e06c75; }
-  /* API 密钥 / 供应商 */
-  .pk-row { border: 1px solid var(--border); border-radius: 4px; padding: 7px 12px; margin: 6px 0; }
-  .pk-row .pk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .pk-row .pk-name { font-weight: 600; }
-  .pk-row .pk-tag { border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
+  /* 账户卡片：登录 / 退出登录 */
+  .acct-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .acct-actions .save { margin-top: 0; }
+  .btn-ghost { background: none; border: 1px solid var(--border); color: var(--fg);
+    border-radius: 3px; height: 28px; padding: 0 14px; cursor: pointer; font-size: 12px; }
+  .btn-ghost:disabled { opacity: .5; cursor: default; }
+  .acct-danger { background: none; border: 1px solid var(--border); color: var(--err);
+    border-radius: 3px; height: 28px; padding: 0 14px; cursor: pointer; font-size: 12px; }
+  .acct-danger:disabled { opacity: .5; cursor: default; }
+  .acct-confirm { border: 1px solid var(--err); border-radius: 4px; padding: 8px 10px; margin-top: 8px; }
+  .acct-confirm .acct-confirm-text { font-size: 12px; line-height: 1.6; margin-bottom: 8px; }
+  .acct-confirm .acct-actions { margin-top: 0; }
+  .acct-confirm .danger { background: var(--err); border: none; color: #fff; border-radius: 3px;
+    height: 28px; padding: 0 14px; cursor: pointer; font-size: 12px; }
+  .acct-confirm .danger:disabled { opacity: .5; cursor: default; }
+  /* 页签级渲染错误（一个渲染器抛错不整页空白） */
+  .tab-err { color: var(--err); font-size: 12px; white-space: pre-line; margin: 4px 0 8px; }
+  .tab-err[hidden] { display: none; }
+  /* 运行环境自检 */
+  .env-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; flex-wrap: wrap; }
+  .env-dot { font-size: 11px; color: var(--muted); }
+  .env-dot.ok { color: var(--ok); }
+  .env-dot.err { color: var(--err); }
+  .env-name { min-width: 120px; font-weight: 600; }
+  .env-state { color: var(--muted); }
+  .env-state.ok { color: var(--ok); }
+  .env-state.err { color: var(--err); }
+  .env-detail { color: var(--muted); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px;
+    padding: 0 0 2px 19px; word-break: break-all; }
+  .env-detail:empty { display: none; }
+  /* API 密钥 / 供应商：单一下拉 + 单一 Key 输入（镜像官方「模型」页） */
+  .pk-status { margin: 4px 0 2px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--input-bg); }
+  .pk-srow { display: flex; gap: 8px; font-size: 12px; padding: 1px 0; }
+  .pk-srow .pk-slabel { color: var(--muted); min-width: 64px; flex: none; }
+  .pk-srow .pk-sval { word-break: break-all; }
+  .pk-state { font-weight: 600; }
+  .pk-state.ok { color: var(--ok); }
+  .pk-state.err { color: var(--err); }
+  .pk-sum-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; flex-wrap: wrap; }
+  .pk-sum-row .pk-sum-name { min-width: 130px; }
+  .pk-sum-row .pk-sum-ref { color: var(--muted); font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px; word-break: break-all; }
+  .pk-sum-row .pk-sum-btn { margin-left: auto; }
+  .pk-tag { border: 1px solid var(--border); border-radius: 3px; color: var(--muted);
     font-size: 10px; padding: 0 5px; }
-  .pk-row .pk-tag.on { color: var(--ok); border-color: var(--ok); }
-  .pk-row .pk-sub { color: var(--muted); font-size: 12px; margin-top: 3px; word-break: break-all; }
-  .pk-row .pk-edit { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-  .pk-row .pk-edit input { width: 260px; }
-  .pk-row .pk-clr { background: none; border: 1px solid var(--border); color: var(--muted);
+  .pk-tag.on { color: var(--ok); border-color: var(--ok); }
+  .pk-clr { background: none; border: 1px solid var(--border); color: var(--muted);
     border-radius: 3px; height: 28px; padding: 0 10px; cursor: pointer; font-size: 12px; }
-  .pk-cat-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; flex-wrap: wrap; }
-  .pk-cat-row .pk-cat-name { flex: 1 1 auto; min-width: 120px; }
-  .pk-cat-row .pk-cat-id { color: var(--muted); font-family: Consolas, monospace; font-size: 11px; }
-  .pk-cat-row .pk-edit { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
-  .pk-cat-row .pk-edit input { width: 260px; }
-  #pk-catalog summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+  .pk-clr:disabled { opacity: .5; cursor: default; }
   .cp-mrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
   .cp-mrow input { width: 150px; }
   .cp-mrow .cp-mdel { background: none; border: 1px solid var(--border); color: var(--err);
@@ -170,6 +202,22 @@
 
   <!-- 通用设置 -->
   <section id="tab-general">
+    <div class="tab-err" id="tab-err-general" hidden></div>
+    <div class="card" id="env-card">
+      <h3>运行环境</h3>
+      <div class="env-row"><span class="env-dot" id="env-node-dot">●</span><span class="env-name">Node.js</span><span class="env-state" id="env-node-state">检测中…</span></div>
+      <div class="env-detail" id="env-node-detail"></div>
+      <div class="env-row"><span class="env-dot" id="env-dsh-dot">●</span><span class="env-name">DSH</span><span class="env-state" id="env-dsh-state">检测中…</span></div>
+      <div class="env-detail" id="env-dsh-detail"></div>
+      <div class="env-row"><span class="env-dot" id="env-pnpm-dot">●</span><span class="env-name">pnpm</span><span class="env-state" id="env-pnpm-state">检测中…</span></div>
+      <div class="env-detail" id="env-pnpm-detail"></div>
+      <div class="row">
+        <button class="save" id="env-refresh">重新检测</button>
+        <button class="save" id="env-restart">重启 DSH 服务</button>
+        <span class="hint" id="env-msg"></span>
+      </div>
+      <div class="hint">外部依赖由你自行安装（本扩展只检测、不下载）：Node.js ≥24.9、全局 <span class="mono">@deepseek-ai/dsh</span>、插件安装另需 <span class="mono">pnpm 11+</span>（<span class="mono">npm i -g pnpm@11</span>）。装好或升级后，点「重启 DSH 服务」让托管实例用新环境启动（手动启动的 <span class="mono">dsh web</span> 需你自己重启）。</div>
+    </div>
     <div class="card" id="upd-plugin">
       <h3>扩展更新 <span class="mono">(dsh_vsc_refresh)</span></h3>
       <div class="row"><label>当前版本</label><span class="mono" id="ext-ver">—</span></div>
@@ -238,6 +286,7 @@
 
   <!-- 模型 -->
   <section id="tab-models" hidden>
+    <div class="tab-err" id="tab-err-models" hidden></div>
     <p class="hint">LLM provider 配置（settings 域 llm-* namespace）。</p>
     <div id="llm-cards"></div>
     <h2>原始值（只读）</h2>
@@ -246,22 +295,40 @@
 
   <!-- API 密钥 / 自定义供应商 -->
   <section id="tab-api" hidden>
-    <p class="hint">为各供应商配置 API Key：值写入 harness 的 credentials 服务（加密存储、永不回读），与官方 web「模型」页同一机制。
-    内置渠道 <span class="mono">deepseek-official</span> 用 Platform API Key；<span class="mono">deepseek-account</span> 由 DSH 登录管理；
+    <div class="tab-err" id="tab-err-api" hidden></div>
+    <p class="hint">为供应商配置 API Key：值写入 harness 的 credentials 服务（加密存储、永不回读），与官方 web「模型」页同一机制。
+    内置渠道 <span class="mono">deepseek-official</span> 用 Platform API Key；<span class="mono">deepseek-account</span> 由 DSH 登录管理、无需 Key；
     自定义/第三方供应商可在下方新建（端点 + 协议 + 模型，支持从端点一键发现模型）。</p>
-    <h2>供应商与 API Key</h2>
-    <div id="pk-rows"></div>
-    <h2>所有内置供应商</h2>
-    <p class="hint">DSH 内置的完整供应商目录（<span class="mono">llm/listConfigurableProviders</span>，默认休眠）：为其中任一供应商配置 Key 即接入并使用其官方端点，与官方「模型」页同一份目录。</p>
-    <div id="pk-catalog"></div>
+    <h2>已配置的供应商</h2>
+    <div id="pk-configured" class="hint">加载中…</div>
+    <h2>供应商 API Key</h2>
+    <div class="card" id="pk-card">
+      <div class="row"><label>供应商</label><select id="pk-provider" style="width:340px"></select></div>
+      <div class="pk-status" id="pk-status">
+        <div class="pk-srow"><span class="pk-slabel">路由</span><span class="pk-sval mono" id="pk-status-route">—</span></div>
+        <div class="pk-srow"><span class="pk-slabel">名称</span><span class="pk-sval" id="pk-status-name">—</span></div>
+        <div class="pk-srow" id="pk-status-endpoint-row" hidden><span class="pk-slabel">默认端点</span><span class="pk-sval mono" id="pk-status-endpoint">—</span></div>
+        <div class="pk-srow"><span class="pk-slabel">凭据</span><span class="pk-sval mono" id="pk-status-ref">—</span></div>
+        <div class="pk-srow"><span class="pk-slabel">状态</span><span class="pk-sval pk-state" id="pk-status-state">—</span></div>
+      </div>
+      <div class="row">
+        <label>API Key</label>
+        <input id="pk-key" type="password" autocomplete="off" placeholder="输入 API Key（仅本机保存）" style="width:280px">
+        <button class="pl-btn" id="pk-reveal" type="button">显示</button>
+        <button class="save" id="pk-save">保存</button>
+        <button class="pk-clr" id="pk-clear">清除</button>
+      </div>
+      <div class="hint" id="pk-msg"></div>
+    </div>
     <h2>新建供应商</h2>
-    <div class="card">
-      <div class="row"><label>供应商</label><select id="cp-preset"></select></div>
-      <div class="row" id="cp-row-route" hidden><label>路由 id</label><input id="cp-route" type="text" placeholder="小写字母开头，如 my-provider"></div>
+    <div class="card" id="cp-form">
+      <p class="hint" style="margin-top:0">路由 id 会成为 <span class="mono">llm-pi-ai.providers.&lt;路由&gt;</span> 的设置键；API Key 保存在
+      <span class="mono">&lt;路由大写&gt;_API_KEY</span>（例如 my-provider → MY_PROVIDER_API_KEY）。</p>
+      <div class="row"><label>路由 id（必填）</label><input id="cp-route" type="text" required pattern="[a-z][a-z0-9]*(?:-[a-z0-9]+)*" placeholder="my-provider（小写字母开头，可含数字/连字符）"></div>
       <div class="row"><label>显示名称（可选）</label><input id="cp-name" type="text" placeholder="My Provider"></div>
-      <div class="row"><label>端点 URL</label><input id="cp-baseurl" type="text" placeholder="https://api.example.com/v1"></div>
-      <div class="row" id="cp-row-api" hidden><label>协议</label><select id="cp-api"></select></div>
-      <div class="row"><label>API Key（可留空）</label><input id="cp-key" type="password" placeholder="创建时一并保存（之后可补）"></div>
+      <div class="row"><label>端点 URL（必填）</label><input id="cp-baseurl" type="text" required placeholder="https://api.example.com/v1"></div>
+      <div class="row"><label>协议</label><select id="cp-api"></select></div>
+      <div class="row"><label>API Key（可留空）</label><input id="cp-key" type="password" autocomplete="off" placeholder="创建时一并保存（之后可补）"></div>
       <h3 style="margin:10px 0 4px;font-size:12px;color:var(--muted)">模型列表（至少 1 个）</h3>
       <div id="cp-models"></div>
       <div class="row">
@@ -277,6 +344,7 @@
 
   <!-- 插件 -->
   <section id="tab-plugins" hidden>
+    <div class="tab-err" id="tab-err-plugins" hidden></div>
     <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>，与官方 web 的插件面板同一机制：启停、按需安装、更新、市场检索都在这里。<br>
     spec 可以是 npm 包名、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
     说明：客户端 UI 类 bundle（如 <span class="mono">drop-caret</span>、<span class="mono">webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设 / 团队等其余插件与 web 共用同一个 harness，两边都生效。</p>
@@ -343,34 +411,59 @@
 
   <!-- Agent 预设 -->
   <section id="tab-presets" hidden>
+    <div class="tab-err" id="tab-err-presets" hidden></div>
     <p class="hint">部署提供的预设（内置/自定义）；点「设为默认」切换新会话的默认模式（写入 <span class="mono">agent-preset-registry.selectedDefault</span>，与官方客户端同一机制）。</p>
     <div id="preset-list"></div>
   </section>
 
   <!-- 工作区 + 账户 -->
   <section id="tab-workspaces" hidden>
+    <div class="tab-err" id="tab-err-workspaces" hidden></div>
     <div class="card">
       <h3>工作区</h3>
       <p class="hint">DSH 侧注册的工作区列表（与官方客户端同一份数据）。名称与顺序会影响官方侧栏；删除只移除注册，不动磁盘目录与会话。</p>
       <div id="ws-list"></div>
-      <div class="row"><input id="ws-path" placeholder="要添加的目录绝对路径，如 D:\Projects\demo" style="flex:1" /><button class="save" id="ws-add">添加</button></div>
+      <div class="row"><input id="ws-path" type="text" placeholder="要添加的目录绝对路径，如 D:\Projects\demo" style="flex:1" /><button class="save" id="ws-add">添加</button></div>
       <div class="hint" id="ws-msg"></div>
     </div>
     <div class="card">
-      <h3>账户 <span class="mono">(只读)</span></h3>
+      <h3>账户</h3>
       <div class="row"><label>状态</label><span id="acct-status">—</span></div>
-      <div class="row"><label>名称</label><span id="acct-name">—</span></div>
-      <div class="row"><label>联系方式</label><span id="acct-contact">—</span></div>
-      <div class="row">
-        <button class="save" id="acct-usage">用量页</button>
-        <button class="save" id="acct-topup">充值页</button>
+      <div id="acct-attempt" hidden>
+        <div class="hint" id="acct-attempt-hint"></div>
+        <div class="acct-actions">
+          <button class="btn-ghost" id="acct-open">打开浏览器</button>
+          <button class="btn-ghost" id="acct-cancel">取消</button>
+        </div>
       </div>
-      <div class="hint">登录/退出在官方客户端完成；此处仅展示与跳转。</div>
+      <div id="acct-profile" hidden>
+        <div class="row"><label>名称</label><span id="acct-name">—</span></div>
+        <div class="row"><label>联系方式</label><span id="acct-contact">—</span></div>
+      </div>
+      <div class="row" id="acct-balance" hidden><label>余额</label><span id="acct-balance-value">—</span></div>
+      <div class="acct-actions">
+        <button class="save" id="acct-signin" hidden>登录</button>
+        <button class="btn-ghost" id="acct-retry" hidden>重新登录</button>
+        <button class="acct-danger" id="acct-signout" hidden>退出登录</button>
+      </div>
+      <div id="acct-signout-confirm" class="acct-confirm" hidden>
+        <div class="acct-confirm-text" id="acct-signout-text"></div>
+        <div class="acct-actions">
+          <button class="danger" id="acct-signout-yes">退出登录</button>
+          <button class="btn-ghost" id="acct-signout-no">取消</button>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn-ghost" id="acct-usage" disabled>用量页</button>
+        <button class="btn-ghost" id="acct-topup" disabled>充值页</button>
+      </div>
+      <div class="hint" id="acct-hint">登录 DeepSeek 账号后可使用此账号的额度与用量；登录在浏览器完成，凭据保存在本机 DSH 数据目录。</div>
     </div>
   </section>
 
   <!-- 高级设置（schema 驱动的原始命名空间） -->
   <section id="tab-advanced" hidden>
+    <div class="tab-err" id="tab-err-advanced" hidden></div>
     <p class="hint">DSH 各命名空间的原始配置（与官方设置页同一 schema）。保存写入用户层；「重置」清空该命名空间的用户覆盖（回到部署默认）。</p>
     <div id="adv-list"></div>
   </section>
@@ -406,6 +499,29 @@
     el.textContent = lines.join("\n");
   }
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  /* Render hardening: one failing renderer must never blank a whole tab. Each
+     tab owns a visible error line; every incremental render is guarded so the
+     rest of the page (and the other tabs) keep working. */
+  function clearTabErr(tab) {
+    var el = $("tab-err-" + tab);
+    if (!el) return;
+    el.hidden = true;
+    el.textContent = "";
+  }
+  function addTabErr(tab, text) {
+    var el = $("tab-err-" + tab);
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = (el.textContent ? el.textContent + "\n" : "") + text;
+  }
+  function guard(tab, label, fn) {
+    try {
+      fn();
+    } catch (e) {
+      addTabErr(tab, label + "渲染失败：" + ((e && e.message) ? e.message : String(e)));
+    }
+  }
 
   /* Fill a <select> with {value,label} options, keeping `current` selected.
      A current value outside the list is preserved as its own option so a save
@@ -456,16 +572,19 @@
     });
   });
 
+  function namespacesOf() {
+    return data && Array.isArray(data.namespaces) ? data.namespaces : [];
+  }
   function ns(name) {
-    return (data && data.namespaces || []).find(function (n) { return n.ns === name; });
+    return namespacesOf().find(function (n) { return n && n.ns === name; });
   }
 
   /* ---------- 默认模型：provider → model → reasoningEffort 级联下拉 ---------- */
   var PERM_LABELS = { "read-only": "仅可查看", "workspace-write": "可写入工作区", "danger-full-access": "完全权限" };
 
   function groupOf(providerId) {
-    if (!catalog) return null;
-    return catalog.models.groups.find(function (g) { return g.id === providerId; }) || null;
+    if (!catalog || !catalog.models || !Array.isArray(catalog.models.groups)) return null;
+    return catalog.models.groups.find(function (g) { return g && g.id === providerId; }) || null;
   }
   function refillModels(providerId, currentModel, currentEffort) {
     var grp = groupOf(providerId);
@@ -491,10 +610,14 @@
     refillModels(v.provider || $("in-def-provider").value, v.model, v.reasoningEffort);
   }
   $("in-def-provider").addEventListener("change", function () {
-    refillModels($("in-def-provider").value, null, null);
+    guard("general", "默认模型", function () {
+      refillModels($("in-def-provider").value, null, null);
+    });
   });
   $("in-def-model").addEventListener("change", function () {
-    refillEfforts($("in-def-provider").value, $("in-def-model").value, null);
+    guard("general", "默认模型", function () {
+      refillEfforts($("in-def-provider").value, $("in-def-model").value, null);
+    });
   });
 
   /* ---------- 默认权限（服务端 catalog，同官方三档） ---------- */
@@ -539,28 +662,36 @@
   }
 
   function applyData(value) {
+    value = value && typeof value === "object" ? value : {};
     data = value;
     revisions = {};
-    (value.namespaces || []).forEach(function (n) { revisions[n.ns] = n.revision; });
+    clearTabErr("general");
+    clearTabErr("models");
+    clearTabErr("advanced");
+    namespacesOf().forEach(function (n) { if (n && n.ns) revisions[n.ns] = n.revision; });
 
-    renderDefaultModel();
-    renderPermission();
-    renderDefaultPreset();
-    var lp = ns("agent-loop");
-    if (lp) {
-      var mp = (lp.value || {}).maxParallelToolCalls;
+    guard("general", "默认模型", renderDefaultModel);
+    guard("general", "默认权限", renderPermission);
+    guard("general", "默认模式", renderDefaultPreset);
+    guard("general", "工具并行上限", function () {
+      var lp = ns("agent-loop");
+      if (!lp) return;
+      var v = (lp.value && typeof lp.value === "object") ? lp.value : {};
+      var mp = v.maxParallelToolCalls;
       $("in-maxpar").value = mp === undefined ? "" : String(mp);
-    }
-    var theme = ns("ui-theme");
-    if (theme) {
-      var pref = (theme.value || {}).preference || "system";
+    });
+    guard("general", "主题偏好", function () {
+      var theme = ns("ui-theme");
+      if (!theme) return;
+      var v = (theme.value && typeof theme.value === "object") ? theme.value : {};
+      var pref = v.preference || "system";
       $("in-theme").value = ["system", "light", "dark"].indexOf(pref) >= 0 ? pref : "system";
-    }
+    });
 
-    renderRaw();
-    renderLlm();
-    renderPlugins();
-    renderAdvanced();
+    guard("general", "其余命名空间", renderRaw);
+    guard("models", "LLM 配置", renderLlm);
+    guard("plugins", "插件列表", renderPlugins);
+    guard("advanced", "高级设置", renderAdvanced);
     setStatus(value.writable === false ? "当前只读（writable: false），无法保存。" : "", value.writable === false ? "err" : "");
   }
 
@@ -585,7 +716,7 @@
   }
   function renderRaw() {
     if (!data) return;
-    rawListEl("raw-list", data.namespaces, ["agent-default-model", "permission", "agent-preset-registry", "agent-loop", "ui-theme", "llm-deepseek", "llm-pi-ai"]);
+    rawListEl("raw-list", namespacesOf(), ["agent-default-model", "permission", "agent-preset-registry", "agent-loop", "ui-theme", "llm-deepseek", "llm-pi-ai"]);
   }
 
   /* models tab: editable llm-* namespace scalars + raw values */
@@ -650,7 +781,7 @@
       card.appendChild(btn);
       cards.appendChild(card);
     });
-    rawListEl("raw-models", data.namespaces.filter(function (n) { return n.ns === "llm-deepseek" || n.ns === "llm-pi-ai"; }));
+    rawListEl("raw-models", namespacesOf().filter(function (n) { return n && (n.ns === "llm-deepseek" || n.ns === "llm-pi-ai"); }));
   }
   function saveLlm(name) {
     var ops = [];
@@ -679,6 +810,9 @@
 
   /* ---------- API tab：供应商 API Key（credentials） + 自定义供应商（llm-pi-ai） ---------- */
   var providerKeysWritable = true;
+  var providerRows = [];       // providerKeys payload: [{provider, displayName, kind, configured, ...}]
+  var selectedProvider = "";   // survives the post-save providerKeys refresh
+  var pendingSelectProvider = "";
   var cpModels = [];      // [{id, name?, contextWindow?}]
   var cpDiscovered = [];  // candidates from providerModels
 
@@ -688,47 +822,6 @@
     { value: "anthropic-messages", label: "Anthropic Messages" },
   ];
 
-  /* 供应商预设：由服务端目录动态生成（官方完整目录）；OFF 时用内置兜底列表。 */
-  var CP_PRESETS_FALLBACK = [
-    { id: "openai", label: "OpenAI", route: "openai", name: "OpenAI", api: "openai-completions", baseURL: "https://api.openai.com/v1" },
-    { id: "anthropic", label: "Anthropic", route: "anthropic", name: "Anthropic", api: "anthropic-messages", baseURL: "https://api.anthropic.com" },
-    { id: "deepseek", label: "DeepSeek", route: "deepseek", name: "DeepSeek", api: "openai-completions", baseURL: "https://api.deepseek.com" },
-    { id: "ollama", label: "Ollama（本地）", route: "ollama", name: "Ollama", api: "openai-completions", baseURL: "http://localhost:11434/v1" },
-  ];
-  var CP_PRESETS = CP_PRESETS_FALLBACK.slice();
-
-  function inferProviderApi(id) {
-    return /anthropic|claude|minimax|kimi|moonshot|zai|bigmodel|ant-ling/i.test(String(id || "")) ? "anthropic-messages" : "openai-completions";
-  }
-
-  function rebuildPresets(entries) {
-    var list = [];
-    (entries || []).forEach(function (r) {
-      if (!r || !r.provider || r.account) return;
-      if (r.provider === "deepseek-official" || r.provider === "deepseek-account") return;
-      list.push({
-        id: r.provider,
-        label: r.displayName || r.provider,
-        route: r.provider,
-        name: r.displayName || r.provider,
-        api: inferProviderApi(r.provider),
-        baseURL: r.defaultBaseURL || "",
-      });
-    });
-    if (!list.length) list = CP_PRESETS_FALLBACK.slice();
-    list.push({ id: "custom", label: "自定义…", route: "", name: "", api: "", baseURL: "" });
-    CP_PRESETS = list;
-    var sel = $("cp-preset");
-    if (!sel) return;
-    sel.innerHTML = "";
-    list.forEach(function (p) {
-      var o = document.createElement("option");
-      o.value = p.id;
-      o.textContent = p.label;
-      sel.appendChild(o);
-    });
-  }
-
   CP_PROTOCOLS.forEach(function (p) {
     var o = document.createElement("option");
     o.value = p.value;
@@ -736,173 +829,212 @@
     $("cp-api").appendChild(o);
   });
 
-  rebuildPresets([]);
-
-  function applyPreset() {
-    var preset = CP_PRESETS.find(function (p) { return p.id === $("cp-preset").value; }) || CP_PRESETS[0];
-    var custom = preset.id === "custom";
-    $("cp-row-route").hidden = !custom;
-    $("cp-row-api").hidden = !custom;
-    if (!custom) {
-      $("cp-route").value = preset.route;
-      $("cp-name").value = preset.name;
-      $("cp-baseurl").value = preset.baseURL;
-      $("cp-api").value = preset.api;
-    } else if (!$("cp-route").value) {
-      $("cp-name").value = "";
-      $("cp-baseurl").value = "";
-    }
-  }
-
-  $("cp-preset").addEventListener("change", applyPreset);
-
+  /* ---------- 供应商 API Key：单一下拉 + 单一状态行 + 单一 Key 输入 ---------- */
   function pkTag(text, cls) {
     var t = document.createElement("span");
     t.className = "pk-tag" + (cls ? " " + cls : "");
     t.textContent = text;
     return t;
   }
-
-  function renderProviderCatalog(catalog) {
-    var box = $("pk-catalog");
+  function providerRowById(id) {
+    return providerRows.find(function (r) { return r && r.provider === id; }) || null;
+  }
+  function providerRowGroup(r) {
+    if (r.account || r.configured) return "已配置";
+    if (r.kind === "official" || r.kind === "registered") return "内置";
+    return "内置目录";
+  }
+  function providerOptionLabel(r) {
+    var name = r.displayName || r.provider;
+    if (r.provider && r.provider !== name) name += " (" + r.provider + ")";
+    if (r.account) return name + "（DSH 登录）";
+    if (r.configured) return name + "（已配置 Key）";
+    if (r.kind === "declared") return name + "（自定义）";
+    return name;
+  }
+  function selectedProviderRow() {
+    return providerRowById(selectedProvider) || providerRows[0] || null;
+  }
+  function renderProviderPicker() {
+    var sel = $("pk-provider");
+    if (!sel) return;
+    var want = pendingSelectProvider || selectedProvider || sel.value;
+    pendingSelectProvider = "";
+    sel.innerHTML = "";
+    if (!providerRows.length) {
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "（未读取到供应商目录）";
+      sel.appendChild(none);
+      sel.disabled = true;
+      selectedProvider = "";
+      applyProviderSelection();
+      return;
+    }
+    sel.disabled = false;
+    var groups = { "已配置": [], "内置": [], "内置目录": [] };
+    providerRows.forEach(function (r) {
+      if (!r || !r.provider) return;
+      groups[providerRowGroup(r)].push(r);
+    });
+    Object.keys(groups).forEach(function (label) {
+      if (!groups[label].length) return;
+      var og = document.createElement("optgroup");
+      og.label = label;
+      groups[label].forEach(function (r) {
+        var o = document.createElement("option");
+        o.value = r.provider;
+        o.textContent = providerOptionLabel(r);
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    });
+    var chosen = want && providerRowById(want) ? want : providerRows[0].provider;
+    sel.value = chosen;
+    selectedProvider = chosen;
+    applyProviderSelection();
+  }
+  function setPkState(text, kind) {
+    var el = $("pk-status-state");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "pk-sval pk-state" + (kind ? " " + kind : "");
+  }
+  function applyProviderSelection() {
+    var r = selectedProviderRow();
+    var key = $("pk-key");
+    var save = $("pk-save");
+    var clear = $("pk-clear");
+    var reveal = $("pk-reveal");
+    if (!r) {
+      $("pk-status-route").textContent = "—";
+      $("pk-status-name").textContent = "—";
+      $("pk-status-endpoint-row").hidden = true;
+      $("pk-status-ref").textContent = "—";
+      setPkState("（没有可用的供应商）", "");
+      key.disabled = true;
+      save.disabled = true;
+      clear.disabled = true;
+      reveal.disabled = true;
+      return;
+    }
+    $("pk-status-route").textContent = r.provider;
+    $("pk-status-name").textContent = r.displayName || r.provider;
+    var endpointRow = $("pk-status-endpoint-row");
+    endpointRow.hidden = !r.defaultBaseURL;
+    $("pk-status-endpoint").textContent = r.defaultBaseURL || "";
+    $("pk-status-ref").textContent = r.account ? "—（DSH 登录）" : (r.ref || r.derivedRef || "—");
+    var readOnly = !providerKeysWritable || r.writable === false;
+    var stateText;
+    var stateKind = "";
+    if (r.account) {
+      stateText = "由 DSH 登录管理，无需 API Key";
+      stateKind = "ok";
+    } else if (!providerKeysWritable) {
+      stateText = "只读：当前设置文档由部署提供，扩展不可修改";
+      stateKind = "err";
+    } else if (r.writable === false) {
+      stateText = "只读：该凭据由部署/环境变量提供，扩展不可修改";
+      stateKind = "err";
+    } else if (r.configured) {
+      stateText = "已配置" + (r.source ? "（来源 " + r.source + "）" : "");
+      stateKind = "ok";
+    } else {
+      stateText = "未配置";
+    }
+    var error = r.error ? String(r.error) : "";
+    if (error) stateText += " · " + error;
+    setPkState(stateText, stateKind);
+    var disabled = !!r.account || readOnly;
+    key.disabled = disabled;
+    save.disabled = disabled;
+    reveal.disabled = disabled;
+    clear.disabled = disabled || !r.configured;
+    key.type = "password";
+    reveal.textContent = "显示";
+    key.placeholder = r.account
+      ? "由 DSH 登录管理，无需 API Key"
+      : r.configured
+        ? "已配置，输入新 Key 可覆盖"
+        : "输入 API Key（仅本机保存）";
+  }
+  function renderConfiguredSummary() {
+    var box = $("pk-configured");
     if (!box) return;
     box.innerHTML = "";
-    if (!catalog || !catalog.length) {
-      var empty = document.createElement("div");
-      empty.className = "hint";
-      empty.textContent = "（当前 DSH 未返回内置供应商目录）";
-      box.appendChild(empty);
+    var configured = providerRows.filter(function (r) { return r && (r.account || r.configured); });
+    if (!configured.length) {
+      box.textContent = "（尚无已配置的供应商；在下方选择供应商并保存 API Key）";
       return;
     }
-    var details = document.createElement("details");
-    var summary = document.createElement("summary");
-    summary.textContent = "共 " + catalog.length + " 家内置供应商——配置 Key 即启用";
-    details.appendChild(summary);
-    catalog.forEach(function (r) {
+    configured.forEach(function (r) {
       var row = document.createElement("div");
-      row.className = "pk-cat-row";
+      row.className = "pk-sum-row";
       var name = document.createElement("span");
-      name.className = "pk-cat-name";
+      name.className = "pk-sum-name";
       name.textContent = r.displayName || r.provider;
-      var id = document.createElement("span");
-      id.className = "pk-cat-id";
-      id.textContent = r.provider;
-      var btn = document.createElement("button");
-      btn.className = "save";
-      btn.style.marginTop = "0";
-      btn.textContent = "配置 Key";
-      var edit = document.createElement("div");
-      edit.className = "pk-edit";
-      edit.hidden = true;
-      var input = document.createElement("input");
-      input.type = "password";
-      input.placeholder = "输入 API Key（仅本机保存）";
-      var save = document.createElement("button");
-      save.className = "save";
-      save.textContent = "保存";
-      save.addEventListener("click", function () {
-        var value = input.value;
-        if (!value) return;
-        vscode.postMessage({ type: "setProviderKey", provider: r.provider, value: value });
-        setStatus("保存 " + r.provider + " 凭证 …");
-      });
-      var cancel = document.createElement("button");
-      cancel.className = "secondary";
-      cancel.textContent = "取消";
-      cancel.addEventListener("click", function () {
-        edit.hidden = true;
-        input.value = "";
-      });
-      btn.addEventListener("click", function () {
-        edit.hidden = !edit.hidden;
-        if (!edit.hidden) input.focus();
-      });
       row.appendChild(name);
-      row.appendChild(id);
-      row.appendChild(btn);
-      edit.appendChild(input);
-      edit.appendChild(save);
-      edit.appendChild(cancel);
-      row.appendChild(edit);
-      details.appendChild(row);
+      row.appendChild(pkTag(r.account ? "DSH 登录" : (r.source ? "来源 " + r.source : "已配置 Key"), "on"));
+      var ref = document.createElement("span");
+      ref.className = "pk-sum-ref";
+      ref.textContent = r.account ? "由 DSH 登录管理" : (r.ref || r.derivedRef || "");
+      row.appendChild(ref);
+      var manage = document.createElement("button");
+      manage.className = "pl-btn pk-sum-btn";
+      manage.textContent = "管理";
+      manage.addEventListener("click", function () { selectProvider(r.provider); });
+      row.appendChild(manage);
+      box.appendChild(row);
     });
-    box.appendChild(details);
+  }
+  function selectProvider(id) {
+    if (!providerRowById(id)) return;
+    selectedProvider = id;
+    var sel = $("pk-provider");
+    if (sel) sel.value = id;
+    applyProviderSelection();
+  }
+  function setPkMsg(text, kind) {
+    var el = $("pk-msg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = kind === "err" ? "var(--err)" : (kind === "ok" ? "var(--ok)" : "");
   }
 
-  function renderProviderKeys(rows, catalog) {
-    renderProviderCatalog(catalog);
-    var box = $("pk-rows");
-    box.innerHTML = "";
-    if (!rows || !rows.length) {
-      var empty = document.createElement("div");
-      empty.className = "hint";
-      empty.textContent = "（未读取到供应商；检查 harness 连接后重新打开本页）";
-      box.appendChild(empty);
+  $("pk-provider").addEventListener("change", function () {
+    selectedProvider = $("pk-provider").value;
+    setPkMsg("");
+    guard("api", "供应商选择", applyProviderSelection);
+  });
+  $("pk-reveal").addEventListener("click", function () {
+    var input = $("pk-key");
+    var reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    $("pk-reveal").textContent = reveal ? "隐藏" : "显示";
+  });
+  $("pk-save").addEventListener("click", function () {
+    var r = selectedProviderRow();
+    if (!r) { setPkMsg("没有可保存的供应商", "err"); return; }
+    if (r.account) { setPkMsg("该供应商由 DSH 登录管理，无需 API Key", "err"); return; }
+    if (!providerKeysWritable || r.writable === false) {
+      setPkMsg("该供应商凭据只读（由部署或环境变量提供），扩展不可修改", "err");
       return;
     }
-    rows.forEach(function (r) {
-      var card = document.createElement("div");
-      card.className = "pk-row";
-      var head = document.createElement("div");
-      head.className = "pk-head";
-      var name = document.createElement("span");
-      name.className = "pk-name";
-      name.textContent = r.displayName || r.provider;
-      head.appendChild(name);
-      head.appendChild(pkTag(r.declared ? "自定义" : "内置"));
-      if (r.account) head.appendChild(pkTag("DSH 登录", "on"));
-      else if (r.configured) head.appendChild(pkTag("已配置 Key", "on"));
-      card.appendChild(head);
-
-      var sub = document.createElement("div");
-      sub.className = "pk-sub";
-      if (r.account) {
-        sub.textContent = "账户渠道：登录/登出与用量由 DSH 管理（见官方界面），此处无需 API Key。";
-      } else {
-        var refText = r.ref ? ("引用 " + r.ref) : ("将使用 " + r.derivedRef);
-        sub.textContent = "路由 " + r.provider + " · " + refText +
-          (r.configured ? (" · 已配置" + (r.source ? "（来源 " + r.source + "）" : "")) : " · 未配置") +
-          (r.error ? (" · " + r.error) : "");
-      }
-      card.appendChild(sub);
-
-      if (!r.account) {
-        var edit = document.createElement("div");
-        edit.className = "pk-edit";
-        var input = document.createElement("input");
-        input.type = "password";
-        input.placeholder = "输入 API Key";
-        var saveBtn = document.createElement("button");
-        saveBtn.className = "save";
-        saveBtn.textContent = "保存";
-        saveBtn.style.marginTop = "0";
-        saveBtn.addEventListener("click", function () {
-          if (!input.value.trim()) { setStatus("请输入 API Key", "err"); return; }
-          vscode.postMessage({ type: "setProviderKey", provider: r.provider, value: input.value.trim() });
-          setStatus("保存 " + r.provider + " 的 API Key …");
-          input.value = "";
-        });
-        var clearBtn = document.createElement("button");
-        clearBtn.className = "pk-clr";
-        clearBtn.textContent = "清除";
-        clearBtn.addEventListener("click", function () {
-          vscode.postMessage({ type: "clearProviderKey", provider: r.provider });
-          setStatus("清除 " + r.provider + " 的 API Key …");
-        });
-        edit.appendChild(input);
-        edit.appendChild(saveBtn);
-        edit.appendChild(clearBtn);
-        if (r.writable === false || !providerKeysWritable) {
-          input.disabled = true;
-          saveBtn.disabled = true;
-          clearBtn.disabled = true;
-          sub.textContent += " · 只读（由部署提供，扩展不可改）";
-        }
-        card.appendChild(edit);
-      }
-      box.appendChild(card);
-    });
-  }
+    var value = $("pk-key").value.trim();
+    if (!value) { setPkMsg("请输入 API Key", "err"); return; }
+    vscode.postMessage({ type: "setProviderKey", provider: r.provider, value: value });
+    setPkMsg("保存 " + r.provider + " 的 API Key …");
+    $("pk-key").value = "";
+  });
+  $("pk-clear").addEventListener("click", function () {
+    var r = selectedProviderRow();
+    if (!r) return;
+    if (r.account) { setPkMsg("该供应商由 DSH 登录管理，没有可清除的 API Key", "err"); return; }
+    if (!providerKeysWritable || r.writable === false) { setPkMsg("该供应商凭据只读，扩展不可修改", "err"); return; }
+    vscode.postMessage({ type: "clearProviderKey", provider: r.provider });
+    setPkMsg("清除 " + r.provider + " 的 API Key …");
+    $("pk-key").value = "";
+  });
 
   function cpMsg(text, kind) {
     var el = $("cp-msg");
@@ -988,13 +1120,15 @@
   }
 
   $("cp-model-add").addEventListener("click", function () {
-    var v = $("cp-model-new").value.trim();
-    if (!v) return;
-    if (!cpModels.some(function (m) { return m.id === v; })) {
-      cpModels.push({ id: v });
-      renderCpModels();
-    }
-    $("cp-model-new").value = "";
+    guard("api", "模型列表", function () {
+      var v = $("cp-model-new").value.trim();
+      if (!v) return;
+      if (!cpModels.some(function (m) { return m.id === v; })) {
+        cpModels.push({ id: v });
+        renderCpModels();
+      }
+      $("cp-model-new").value = "";
+    });
   });
   $("cp-model-new").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); $("cp-model-add").click(); }
@@ -1030,7 +1164,6 @@
     });
   });
   renderCpModels();
-  applyPreset();
 
   /* ---------- 插件 tab：pluginManager（检索 / 安装 / 开关 / 删除） ---------- */
   var pluginBundles = [];
@@ -1584,7 +1717,7 @@
   });
   $("pl-more").addEventListener("click", function () {
     moreOpen = !moreOpen;
-    renderPluginBundles();
+    guard("plugins", "实验性功能", renderPluginBundles);
   });
   $("pl-market-save").addEventListener("click", function () {
     var urls = $("pl-market-indexes").value.split(/\r?\n/)
@@ -1716,6 +1849,74 @@
     mutate("ui-theme", [{ op: "set", path: ["preference"], value: $("in-theme").value }], "保存主题偏好");
   });
 
+  /* ---------- 运行环境自检：Node / DSH / pnpm（envDoctor / envDoctorStatus） ---------- */
+  /* 外部依赖由用户自行安装：这里只检测 + 诚实地给安装命令，绝不代装任何东西。 */
+  function setEnvMsg(text, kind) {
+    var el = $("env-msg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = kind === "err" ? "var(--err)" : (kind === "ok" ? "var(--ok)" : "");
+  }
+  function renderEnvPart(key, part, requirement, fix) {
+    var dot = $("env-" + key + "-dot");
+    var state = $("env-" + key + "-state");
+    var detail = $("env-" + key + "-detail");
+    if (!dot || !state || !detail) return false;
+    if (!part || typeof part !== "object") {
+      dot.className = "env-dot";
+      state.className = "env-state";
+      state.textContent = requirement + "：未知";
+      detail.textContent = "";
+      return false;
+    }
+    var ok = part.ok === true;
+    dot.className = "env-dot " + (ok ? "ok" : "err");
+    state.className = "env-state " + (ok ? "ok" : "err");
+    state.textContent = requirement + "：" + (ok ? "已就绪" : "不可用");
+    var bits = [];
+    if (part.version) bits.push("版本 " + part.version);
+    if (part.path) bits.push(part.path);
+    if (part.binDir && part.binDir !== part.path) bits.push("bin 目录 " + part.binDir);
+    if (part.source) bits.push("来源 " + part.source);
+    if (part.reason && !ok) bits.push(part.reason);
+    if (!ok && fix) bits.push("安装：" + fix);
+    detail.textContent = bits.join(" · ");
+    return ok;
+  }
+  function renderEnvDoctor(status, errorMessage) {
+    if (!status || typeof status !== "object") {
+      setEnvMsg("环境自检不可用：" + (errorMessage || "未收到诊断结果"), "err");
+      return;
+    }
+    renderEnvPart("node", status.node, "需要 Node.js ≥24.9", "安装 Node.js 24.9+（https://nodejs.org）");
+    renderEnvPart("dsh", status.dsh, "需要全局 @deepseek-ai/dsh / dsh shim", "npm i -g @deepseek-ai/dsh");
+    renderEnvPart("pnpm", status.pnpm, "插件安装需要 pnpm 11+", "npm i -g pnpm@11");
+    var restart = $("env-restart");
+    if (restart) restart.disabled = false;
+    if (status.node && status.node.ok === false) {
+      setEnvMsg("Node.js 未就绪：DSH 需要 Node ≥24.9，请安装后重载窗口。", "err");
+    } else if (status.dsh && status.dsh.ok === false) {
+      setEnvMsg("DSH 未就绪：请执行 npm i -g @deepseek-ai/dsh。", "err");
+    } else if (status.pnpm && status.pnpm.ok === false) {
+      setEnvMsg(
+        "pnpm 未就绪或版本过旧：DSH 插件管理与伴生插件安装需要 pnpm 11+（pnpm 9/10 的 view 会转调 npm 而失败）；" +
+          "请自行执行 npm i -g pnpm@11，然后重启 DSH 服务。",
+        "err"
+      );
+    } else if (status.ok === true) {
+      setEnvMsg("运行环境已就绪。", "ok");
+    }
+  }
+  $("env-refresh").addEventListener("click", function () {
+    setEnvMsg("正在检测运行环境 …");
+    vscode.postMessage({ type: "envDoctor" });
+  });
+  $("env-restart").addEventListener("click", function () {
+    $("env-restart").disabled = true;
+    setEnvMsg("正在重启 DSH 服务 …");
+    vscode.postMessage({ type: "restartHarness" });
+  });
+
   /* ---------- update center (plugin self-update + DSH npm) ---------- */
   function updateEls(target) {
     return {
@@ -1832,15 +2033,147 @@
     vscode.postMessage({ type: "workspaceCreate", path: p });
     $("ws-path").value = "";
   });
-  function renderAccount(state, profile) {
-    $("acct-status").textContent = state ? (state.status === "credential-stored" ? "已登录（凭据已保存）" : "未登录") : "—";
+  /* ---------- 账户：登录 / 退出登录 ---------- */
+  var ACCOUNT_ACTIVE_PHASES = { initializing: true, "waiting-browser": true, exchanging: true, committing: true };
+  var ACCOUNT_PHASE_TEXT = {
+    initializing: "正在发起登录…",
+    "waiting-browser": "请在浏览器中继续",
+    exchanging: "正在完成登录…",
+    committing: "正在完成登录…",
+    succeeded: "已登录",
+    cancelled: "已取消"
+  };
+  var ACCOUNT_ERROR_TEXT = {
+    expired: "登录已过期，请重新登录。",
+    "no-response": "登录未完成：未能收到平台响应，请检查网络状况后重试。",
+    network: "登录未完成：网络异常，请检查网络状况后重试。",
+    protocol: "登录未完成：登录协议异常，请重试。",
+    storage: "登录未完成：凭据保存失败，请检查 DSH 数据目录权限后重试。"
+  };
+  // Last render inputs, so a busy toggle can re-render without losing data.
+  var acct = { state: null, profile: null, balance: null, busy: false };
+
+  function acctAttempt() {
+    return (acct.state && acct.state.attempt) || null;
+  }
+  function acctActive() {
+    var a = acctAttempt();
+    return !!(a && ACCOUNT_ACTIVE_PHASES[a.phase]);
+  }
+  function acctSettledAttempt() {
+    var a = acctAttempt();
+    if (!a) return null;
+    return a.phase === "failed" || a.phase === "expired" || a.phase === "succeeded" ? a : null;
+  }
+  function acctWalletText(wallets) {
+    if (!Array.isArray(wallets) || !wallets.length) return "";
+    return wallets.map(function (w) {
+      var sym = w && w.currency === "CNY" ? "¥" : "$";
+      var n = w ? Number(w.balance) : NaN;
+      if (!isFinite(n)) return sym + String((w && w.balance) || "");
+      if (n !== 0 && Math.abs(n) < 0.01) return sym + "0.01（不足）";
+      return sym + n.toFixed(2);
+    }).join(" / ");
+  }
+  function acctPhaseText(state) {
+    if (!state) return "—";
+    var attempt = acctAttempt();
+    if (attempt) {
+      if (attempt.phase === "failed") {
+        return "登录失败" + (attempt.errorCode ? "：" + (ACCOUNT_ERROR_TEXT[attempt.errorCode] || attempt.errorCode) : "，请重试。");
+      }
+      if (attempt.phase === "expired") return "登录已过期" + (attempt.errorCode && attempt.errorCode !== "expired" ? "：" + (ACCOUNT_ERROR_TEXT[attempt.errorCode] || attempt.errorCode) : "，请重新登录。");
+      return ACCOUNT_PHASE_TEXT[attempt.phase] || attempt.phase;
+    }
+    return state.status === "credential-stored" ? "已登录" : "未登录";
+  }
+  function acctSend(type) {
+    if (acct.busy) return;
+    acct.busy = true;
+    renderAccount(acct.state, acct.profile, acct.balance);
+    vscode.postMessage({ type: type });
+    // Safety net: if the extension never answers (or only shows an error toast),
+    // re-enable the buttons instead of leaving the card stuck.
+    window.setTimeout(function () {
+      if (!acct.busy) return;
+      acct.busy = false;
+      renderAccount(acct.state, acct.profile, acct.balance);
+    }, 15000);
+  }
+  function renderAccount(state, profile, balance) {
+    acct.state = state || null;
+    acct.profile = profile || null;
+    acct.balance = balance || null;
+    var signedIn = !!(state && state.status === "credential-stored");
+    var attempt = acctAttempt();
+    var active = acctActive();
+    var settled = acctSettledAttempt();
+    var links = (state && state.links) || {};
+    $("acct-status").textContent = acctPhaseText(state);
+    $("acct-attempt").hidden = !active;
+    if (active) {
+      var hint = "请在浏览器中完成授权，成功后自动登录。";
+      if (attempt && typeof attempt.expiresAt === "number" && attempt.expiresAt > Date.now()) {
+        var mins = Math.max(1, Math.round((attempt.expiresAt - Date.now()) / 60000));
+        hint = "请在浏览器中完成授权，成功后自动登录；登录链接约 " + mins + " 分钟内有效。";
+      }
+      $("acct-attempt-hint").textContent = hint;
+    }
+    $("acct-open").disabled = acct.busy || !(attempt && attempt.authorizeUrl);
+    $("acct-cancel").disabled = acct.busy || !active;
+    $("acct-profile").hidden = !signedIn;
     $("acct-name").textContent = (profile && profile.name) || "—";
     $("acct-contact").textContent = (profile && profile.contact) || "—";
-    $("acct-usage").disabled = !(state && state.usageUrl);
-    $("acct-topup").disabled = !(state && state.topUpUrl);
-    $("acct-usage").onclick = function () { if (state && state.usageUrl) vscode.postMessage({ type: "openExternal", url: state.usageUrl }); };
-    $("acct-topup").onclick = function () { if (state && state.topUpUrl) vscode.postMessage({ type: "openExternal", url: state.topUpUrl }); };
+    $("acct-balance").hidden = !(signedIn && balance);
+    if (signedIn && balance) {
+      var main = acctWalletText(balance.wallets);
+      var bonus = acctWalletText(balance.bonusWallets);
+      $("acct-balance-value").textContent = (main || "—") + (bonus ? "（赠金 " + bonus + "）" : "");
+    }
+    $("acct-signin").hidden = !state || signedIn || active || !!settled;
+    $("acct-signin").disabled = acct.busy;
+    $("acct-retry").hidden = !settled || settled.phase === "succeeded";
+    $("acct-retry").disabled = acct.busy;
+    $("acct-signout").hidden = !signedIn || active;
+    $("acct-signout").disabled = acct.busy;
+    $("acct-signout-confirm").hidden = true;
+    $("acct-signout-yes").disabled = acct.busy;
+    $("acct-usage").disabled = acct.busy || !links.usageUrl;
+    $("acct-topup").disabled = acct.busy || !links.topUpUrl;
+    $("acct-usage").onclick = function () { if (links.usageUrl) vscode.postMessage({ type: "openExternal", url: links.usageUrl }); };
+    $("acct-topup").onclick = function () { if (links.topUpUrl) vscode.postMessage({ type: "openExternal", url: links.topUpUrl }); };
+    $("acct-hint").textContent = signedIn
+      ? "凭据保存在本机 DSH 数据目录；退出登录不会删除项目与文件，之后仍可重新登录。"
+      : "登录 DeepSeek 账号后可使用此账号的额度与用量；登录在浏览器完成，凭据保存在本机 DSH 数据目录。";
   }
+  function renderAccountSignOutPrompt(running) {
+    var text;
+    if (running === null) {
+      text = "暂时无法确认任务状态。退出登录可能会中断使用此账号的任务，是否继续？";
+    } else if (running) {
+      text = "当前有进程正在执行中，点击“退出登录”，将会打断进程，是否即刻退出登录？";
+    } else {
+      text = "退出登录不会丢失任何数据，你仍可以登录此账号。";
+    }
+    $("acct-signout-text").textContent = text;
+    $("acct-signout-yes").disabled = acct.busy;
+    $("acct-signout-confirm").hidden = false;
+  }
+  $("acct-signin").addEventListener("click", function () { acctSend("accountSignIn"); });
+  $("acct-retry").addEventListener("click", function () { acctSend("accountSignIn"); });
+  $("acct-cancel").addEventListener("click", function () { acctSend("accountCancelSignIn"); });
+  $("acct-signout").addEventListener("click", function () { acctSend("accountRequestSignOut"); });
+  $("acct-open").addEventListener("click", function () {
+    var a = acctAttempt();
+    if (a && a.authorizeUrl) vscode.postMessage({ type: "openExternal", url: a.authorizeUrl });
+  });
+  $("acct-signout-yes").addEventListener("click", function () {
+    $("acct-signout-confirm").hidden = true;
+    acctSend("accountConfirmSignOut");
+  });
+  $("acct-signout-no").addEventListener("click", function () {
+    $("acct-signout-confirm").hidden = true;
+  });
 
   /* ---------- 高级设置：schema 驱动的命名空间表单 ---------- */
   var ADV_NS = [
@@ -1998,138 +2331,201 @@
     setStatus("保存 " + name + " …");
   }
 
+  /* ---------- 消息分发：每条消息按页签隔离异常，绝不让整页空白 ---------- */
+  function handleMessage(msg) {
+    if (msg.type === "updateStatus") {
+      guard("general", "更新状态", function () { renderUpdateStatus(msg); });
+    } else if (msg.type === "updateVersions") {
+      guard("general", "版本信息", function () {
+        if (msg.plugin) $("ext-ver").textContent = msg.plugin;
+        if (msg.dsh) $("dsh-ver").textContent = msg.dsh;
+      });
+    } else if (msg.type === "envDoctorStatus") {
+      guard("general", "运行环境", function () { renderEnvDoctor(msg.status, msg.error); });
+    } else if (msg.type === "envRestartResult") {
+      guard("general", "运行环境", function () {
+        var v = msg.value && typeof msg.value === "object" ? msg.value : {};
+        $("env-restart").disabled = false;
+        setEnvMsg(v.ok === false
+          ? ("重启 DSH 服务失败：" + (v.message || "未知原因"))
+          : "已请求重启 DSH 服务，稍等片刻后会自动重新检测。", v.ok === false ? "err" : "ok");
+      });
+    } else if (msg.type === "capabilities") {
+      guard("general", "兼容性提示", function () { renderCompatNote(msg.report); });
+    } else if (msg.type === "settingsData") {
+      guard("general", "设置数据", function () { applyData(msg.value); });
+    } else if (msg.type === "settingsWorkspaces") {
+      guard("workspaces", "工作区列表", function () { renderWorkspaces(msg.workspaces, msg.pinnedSessionIds); });
+    } else if (msg.type === "settingsAccount") {
+      guard("workspaces", "账户卡片", function () {
+        acct.busy = false;
+        renderAccount(msg.state, msg.profile, msg.balance);
+      });
+    } else if (msg.type === "settingsAccountSignOutPrompt") {
+      guard("workspaces", "退出登录确认", function () {
+        acct.busy = false; // the extension answered the request; re-enable the buttons
+        renderAccountSignOutPrompt(msg.running === true ? true : msg.running === false ? false : null);
+      });
+    } else if (msg.type === "settingsAgentPresets") {
+      guard("presets", "Agent 预设", function () { applyPresets(msg.value); });
+    } else if (msg.type === "settingsCatalog") {
+      guard("general", "模型目录", function () {
+        clearTabErr("general");
+        catalog = { models: msg.models, permissions: msg.permissions };
+        guard("general", "默认模型", renderDefaultModel);
+        guard("general", "默认权限", renderPermission);
+      });
+    } else if (msg.type === "settingsError") {
+      // A failed account action must not leave its buttons disabled forever.
+      if (acct.busy) {
+        acct.busy = false;
+        renderAccount(acct.state, acct.profile, acct.balance);
+      }
+      setStatus(msg.message, "err");
+    } else if (msg.type === "settingsSaved") {
+      setStatus(msg.message || "已保存", "ok");
+    } else if (msg.type === "providerKeys") {
+      guard("api", "供应商列表", function () {
+        clearTabErr("api");
+        providerKeysWritable = msg.writable !== false;
+        providerRows = Array.isArray(msg.providers) ? msg.providers : [];
+        renderProviderPicker();
+        renderConfiguredSummary();
+      });
+    } else if (msg.type === "providerModels") {
+      guard("api", "模型发现", function () {
+        cpDiscovered = Array.isArray(msg.models) ? msg.models : [];
+        renderCpDiscovered();
+        cpMsg(cpDiscovered.length ? "" : "端点未返回任何模型", cpDiscovered.length ? "" : "err");
+      });
+    } else if (msg.type === "providerCreated") {
+      guard("api", "供应商创建结果", function () {
+        cpModels = [];
+        cpDiscovered = [];
+        $("cp-route").value = "";
+        $("cp-name").value = "";
+        $("cp-baseurl").value = "";
+        $("cp-key").value = "";
+        cpMsg("供应商已创建；已加入上方供应商下拉，可继续为其配置 API Key。", "ok");
+        renderCpModels();
+        renderCpDiscovered();
+        if (msg.route) pendingSelectProvider = String(msg.route);
+      });
+    } else if (msg.type === "settingsPlugins") {
+      guard("plugins", "插件列表", function () {
+        clearTabErr("plugins");
+        pluginBundles = Array.isArray(msg.bundles) ? msg.bundles.slice() : [];
+        pluginEntries = Array.isArray(msg.plugins) ? msg.plugins.slice() : [];
+        pluginExemptions = msg.exemptions && typeof msg.exemptions === "object" ? msg.exemptions : {};
+        pluginCompanion = msg.companion && typeof msg.companion === "object" ? msg.companion : null;
+        pluginInventory = msg.inventory && typeof msg.inventory === "object" ? msg.inventory : null;
+        guard("plugins", "插件注册表", function () { refillRegistries(msg.registries); });
+        guard("plugins", "版本豁免", renderExemptions);
+        guard("plugins", "插件包", renderPlugins);
+        guard("plugins", "配套插件", renderCompanion);
+        if (Array.isArray(msg.exemptionWarnings) && msg.exemptionWarnings.length) {
+          setStatus("版本豁免警告：" + msg.exemptionWarnings.join("；"), "err");
+        }
+      });
+    } else if (msg.type === "pluginMarketIndexes") {
+      guard("plugins", "插件市场索引", function () {
+        marketIndexes = Array.isArray(msg.indexes) ? msg.indexes : [];
+        marketLoaded = true;
+        renderMarketIndexes();
+        if ($("pl-market-error")) $("pl-market-error").textContent = "";
+      });
+    } else if (msg.type === "pluginMarketSearch") {
+      guard("plugins", "插件市场检索", function () {
+        renderMarketResults(msg.value);
+        var mres = msg.value || {};
+        setStatus("市场检索完成：" + ((mres.entries || []).length) + " 条", "ok");
+      });
+    } else if (msg.type === "pluginInspectResult") {
+      guard("plugins", "插件检索", function () {
+        if (msg.spec !== $("pl-spec").value.trim()) return;
+        renderInspect(msg.value);
+        setStatus(msg.value && msg.value.status === "accepted" ? "检索完成，可安装" : "检索完成", msg.value && msg.value.status === "accepted" ? "ok" : "err");
+      });
+    } else if (msg.type === "pluginInstallStarted") {
+      guard("plugins", "安装进度", function () {
+        setInstallBusy(true);
+        lastInstallRequestId = msg.requestId || "";
+        $("pl-incompat").hidden = true;
+        $("pl-builds").hidden = true;
+        $("pl-recheck").hidden = true;
+        $("pl-progress").textContent = "安装中（requestId " + msg.requestId + "）…";
+      });
+    } else if (msg.type === "pluginInstallProgress") {
+      guard("plugins", "安装进度", function () {
+        var pv = msg.value || {};
+        var text = pv.phase === "installing" ? "安装中" : pv.phase === "applying" ? "应用变更中" : pv.phase === "cancelling" ? "取消中" : String(pv.phase || "");
+        if (pv.attempt) text += "（registry " + (pv.attempt.index + "/" + pv.attempt.total) + (pv.attempt.registry ? "：" + pv.attempt.registry : "") + "）";
+        $("pl-progress").textContent = text + " …";
+      });
+    } else if (msg.type === "pluginInstallLog") {
+      guard("plugins", "安装日志", function () {
+        var lv = msg.value || {};
+        if (lv.text) appendLog((lv.stream === "stderr" ? "[stderr] " : "") + lv.text);
+      });
+    } else if (msg.type === "pluginInstallResult") {
+      guard("plugins", "安装结果", function () {
+        var r = msg.value || {};
+        var incompat = r.error && r.error.code === "incompatible-version"
+          && Array.isArray(r.error.incompatible) && r.error.incompatible.length ? r.error.incompatible : null;
+        pendingIncompatible = incompat;
+        $("pl-incompat").hidden = !incompat;
+        if (incompat) {
+          $("pl-incompat-text").textContent = incompat.map(function (p) {
+            var peers = p.peers ? Object.keys(p.peers).map(function (k) { return k + " " + p.peers[k]; }).join("，") : "";
+            return p.name + "@" + p.version + " 与 dsh " + p.runtimeVersion + " 不兼容"
+              + (peers ? "（要求 " + peers + "）" : "")
+              + "：可授予该精确版本的豁免后按原样安装（可能存在崩溃/数据损坏风险，请自行确认）。";
+          }).join("\n");
+        }
+        if (r.application === "applied") setStatus((msg.recovered ? "（经 waitForInstall 恢复）" : "") + "安装完成：" + (r.bundle || msg.spec), "ok");
+        else if (r.application === "restart-required") setStatus("已安装：" + (r.bundle || msg.spec) + "，需重启 harness 生效", "ok");
+        else if (r.application === "cancelled") setStatus("安装已取消", "err");
+        else if (r.application === "overridden") setStatus("安装已应用，但启用状态被其它来源覆盖" + (r.restartReason ? "（" + r.restartReason + "）" : ""), "err");
+        else setStatus("安装未完成：" + (r.application || "failed")
+          + (r.error ? " [" + r.error.code + (r.error.diagnostic ? ": " + r.error.diagnostic : "") + "]" : "")
+          + (incompat ? " —— 可点下方「授予版本豁免并重试」" : ""), "err");
+        if (r.version) appendLog("版本：" + r.version);
+        if (r.restartReason) appendLog("重启原因：" + r.restartReason);
+        if (msg.recovered) appendLog("响应丢失后通过 pluginManager/waitForInstall 恢复结果");
+        $("pl-recheck").hidden = !(r.application === "failed" || (r.error && r.application !== "applied" && r.application !== "restart-required"));
+        if (r.warnings && r.warnings.length) appendLog(r.warnings.join("\n"));
+        lastPendingBuilds = Array.isArray(r.pendingBuilds) ? r.pendingBuilds.slice() : [];
+        $("pl-builds").hidden = !lastPendingBuilds.length;
+        if (lastPendingBuilds.length) {
+          $("pl-builds-text").textContent = "安装包要求执行构建脚本：" + lastPendingBuilds.join("，")
+            + "。批准后安装会按原样运行这些脚本（脚本来自该包自身，请确认来源可信）。";
+        }
+      });
+    } else if (msg.type === "pluginInstallDone") {
+      guard("plugins", "安装进度", function () {
+        setInstallBusy(false);
+        $("pl-progress").textContent = "";
+      });
+    } else if (msg.type === "pluginCancelResult") {
+      guard("plugins", "取消安装", function () {
+        var cv = msg.value || {};
+        setStatus("取消结果：" + (cv.status || "unknown"), cv.status === "cancelled" ? "ok" : "err");
+      });
+    }
+  }
+
   window.addEventListener("message", function (ev) {
     var msg = ev.data;
-    if (!msg) return;
-    if (msg.type === "updateStatus") { renderUpdateStatus(msg); }
-    else if (msg.type === "updateVersions") {
-      if (msg.plugin) $("ext-ver").textContent = msg.plugin;
-      if (msg.dsh) $("dsh-ver").textContent = msg.dsh;
-    }
-    else if (msg.type === "capabilities") { renderCompatNote(msg.report); }
-    else if (msg.type === "settingsData") { applyData(msg.value); }
-    else if (msg.type === "settingsWorkspaces") { renderWorkspaces(msg.workspaces, msg.pinnedSessionIds); }
-    else if (msg.type === "settingsAccount") { renderAccount(msg.state, msg.profile); }
-    else if (msg.type === "settingsAgentPresets") { applyPresets(msg.value); }
-    else if (msg.type === "settingsCatalog") {
-      catalog = { models: msg.models, permissions: msg.permissions };
-      renderDefaultModel();
-      renderPermission();
-    }
-    else if (msg.type === "settingsError") { setStatus(msg.message, "err"); }
-    else if (msg.type === "settingsSaved") { setStatus(msg.message || "已保存", "ok"); }
-    else if (msg.type === "providerKeys") {
-      providerKeysWritable = msg.writable !== false;
-      renderProviderKeys(msg.rows, msg.catalog);
-      rebuildPresets((msg.rows || []).concat(msg.catalog || []));
-    }
-    else if (msg.type === "providerModels") {
-      cpDiscovered = msg.models || [];
-      renderCpDiscovered();
-      cpMsg(cpDiscovered.length ? "" : "端点未返回任何模型", cpDiscovered.length ? "" : "err");
-    }
-    else if (msg.type === "providerCreated") {
-      cpModels = [];
-      cpDiscovered = [];
-      $("cp-route").value = "";
-      $("cp-key").value = "";
-      applyPreset();
-      renderCpModels();
-      renderCpDiscovered();
-      cpMsg("供应商已创建；可在上方为其配置 API Key，或在模型选择器中使用其模型。", "ok");
-    }
-    else if (msg.type === "settingsPlugins") {
-      pluginBundles = (msg.bundles || []).slice();
-      pluginEntries = (msg.plugins || []).slice();
-      pluginExemptions = msg.exemptions || {};
-      pluginCompanion = msg.companion || null;
-      pluginInventory = msg.inventory || null;
-      refillRegistries(msg.registries);
-      renderExemptions();
-      renderPlugins();
-      renderCompanion();
-      if (msg.exemptionWarnings && msg.exemptionWarnings.length) {
-        setStatus("版本豁免警告：" + msg.exemptionWarnings.join("；"), "err");
-      }
-    }
-    else if (msg.type === "pluginMarketIndexes") {
-      marketIndexes = msg.indexes || [];
-      marketLoaded = true;
-      renderMarketIndexes();
-      if ($("pl-market-error")) $("pl-market-error").textContent = "";
-    }
-    else if (msg.type === "pluginMarketSearch") {
-      renderMarketResults(msg.value);
-      var mres = msg.value || {};
-      setStatus("市场检索完成：" + ((mres.entries || []).length) + " 条", "ok");
-    }
-    else if (msg.type === "pluginInspectResult") {
-      if (msg.spec !== $("pl-spec").value.trim()) return;
-      renderInspect(msg.value);
-      setStatus(msg.value && msg.value.status === "accepted" ? "检索完成，可安装" : "检索完成", msg.value && msg.value.status === "accepted" ? "ok" : "err");
-    }
-    else if (msg.type === "pluginInstallStarted") {
-      setInstallBusy(true);
-      lastInstallRequestId = msg.requestId || "";
-      $("pl-incompat").hidden = true;
-      $("pl-builds").hidden = true;
-      $("pl-recheck").hidden = true;
-      $("pl-progress").textContent = "安装中（requestId " + msg.requestId + "）…";
-    }
-    else if (msg.type === "pluginInstallProgress") {
-      var pv = msg.value || {};
-      var text = pv.phase === "installing" ? "安装中" : pv.phase === "applying" ? "应用变更中" : pv.phase === "cancelling" ? "取消中" : String(pv.phase || "");
-      if (pv.attempt) text += "（registry " + (pv.attempt.index + "/" + pv.attempt.total) + (pv.attempt.registry ? "：" + pv.attempt.registry : "") + "）";
-      $("pl-progress").textContent = text + " …";
-    }
-    else if (msg.type === "pluginInstallLog") {
-      var lv = msg.value || {};
-      if (lv.text) appendLog((lv.stream === "stderr" ? "[stderr] " : "") + lv.text);
-    }
-    else if (msg.type === "pluginInstallResult") {
-      var r = msg.value || {};
-      var incompat = r.error && r.error.code === "incompatible-version"
-        && Array.isArray(r.error.incompatible) && r.error.incompatible.length ? r.error.incompatible : null;
-      pendingIncompatible = incompat;
-      $("pl-incompat").hidden = !incompat;
-      if (incompat) {
-        $("pl-incompat-text").textContent = incompat.map(function (p) {
-          var peers = p.peers ? Object.keys(p.peers).map(function (k) { return k + " " + p.peers[k]; }).join("，") : "";
-          return p.name + "@" + p.version + " 与 dsh " + p.runtimeVersion + " 不兼容"
-            + (peers ? "（要求 " + peers + "）" : "")
-            + "：可授予该精确版本的豁免后按原样安装（可能存在崩溃/数据损坏风险，请自行确认）。";
-        }).join("\n");
-      }
-      if (r.application === "applied") setStatus((msg.recovered ? "（经 waitForInstall 恢复）" : "") + "安装完成：" + (r.bundle || msg.spec), "ok");
-      else if (r.application === "restart-required") setStatus("已安装：" + (r.bundle || msg.spec) + "，需重启 harness 生效", "ok");
-      else if (r.application === "cancelled") setStatus("安装已取消", "err");
-      else if (r.application === "overridden") setStatus("安装已应用，但启用状态被其它来源覆盖" + (r.restartReason ? "（" + r.restartReason + "）" : ""), "err");
-      else setStatus("安装未完成：" + (r.application || "failed")
-        + (r.error ? " [" + r.error.code + (r.error.diagnostic ? ": " + r.error.diagnostic : "") + "]" : "")
-        + (incompat ? " —— 可点下方「授予版本豁免并重试」" : ""), "err");
-      if (r.version) appendLog("版本：" + r.version);
-      if (r.restartReason) appendLog("重启原因：" + r.restartReason);
-      if (msg.recovered) appendLog("响应丢失后通过 pluginManager/waitForInstall 恢复结果");
-      $("pl-recheck").hidden = !(r.application === "failed" || (r.error && r.application !== "applied" && r.application !== "restart-required"));
-      if (r.warnings && r.warnings.length) appendLog(r.warnings.join("\n"));
-      lastPendingBuilds = Array.isArray(r.pendingBuilds) ? r.pendingBuilds.slice() : [];
-      $("pl-builds").hidden = !lastPendingBuilds.length;
-      if (lastPendingBuilds.length) {
-        $("pl-builds-text").textContent = "安装包要求执行构建脚本：" + lastPendingBuilds.join("，")
-          + "。批准后安装会按原样运行这些脚本（脚本来自该包自身，请确认来源可信）。";
-      }
-    }
-    else if (msg.type === "pluginInstallDone") {
-      setInstallBusy(false);
-      $("pl-progress").textContent = "";
-    }
-    else if (msg.type === "pluginCancelResult") {
-      var cv = msg.value || {};
-      setStatus("取消结果：" + (cv.status || "unknown"), cv.status === "cancelled" ? "ok" : "err");
+    if (!msg || typeof msg !== "object") return;
+    try {
+      handleMessage(msg);
+    } catch (e) {
+      setStatus("设置页渲染失败（" + String(msg.type || "未知消息") + "）：" + ((e && e.message) ? e.message : String(e)), "err");
     }
   });
 
   vscode.postMessage({ type: "settingsReady" });
+  vscode.postMessage({ type: "envDoctor" });
 })();
 </script>
 </body>

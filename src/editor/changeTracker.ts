@@ -11,12 +11,11 @@ export interface ChangeBatch {
 }
 
 const MUTATING_TOOLS =
-  /^(write|edit|patch|apply_patch|fs[_a-z]*write|fs[_a-z]*edit|fs[_a-z]*create|fs[_a-z]*delete|fs[_a-z]*rename|fs[_a-z]*move|fs[_a-z]*mkdir)$/i;
+  /^(write|edit|patch|apply_patch|ops_(?:edit|write)_file|ops_apply_patch|ops_create_file|ops_delete_path|ops_move_path|fs[_a-z]*write|fs[_a-z]*edit|fs[_a-z]*create|fs[_a-z]*delete|fs[_a-z]*rename|fs[_a-z]*move|fs[_a-z]*mkdir)$/i;
 const STR_COMMANDS = new Set(["create", "str_replace", "insert"]);
 
-/** Absolute path a tool call will mutate, or null when it isn't a file edit.
- *  Shared by ChangeTracker and FollowEdits. */
-export function mutationTargetOf(name: string, args: Record<string, unknown>): string | null {
+/** Absolute path a tool call will mutate, or null when it isn't a file edit. */
+function mutationTargetOf(name: string, args: Record<string, unknown>): string | null {
   let pathVal: unknown;
   if (name === "str_replace_editor") {
     if (!STR_COMMANDS.has(String(args.command ?? ""))) return null;
@@ -37,7 +36,8 @@ export function mutationTargetOf(name: string, args: Record<string, unknown>): s
 
 /**
  * M3 — watch the mux event stream for file mutations (write / edit /
- * str_replace_editor), grouped per agent turn. On turn/end a batch fires.
+ * str_replace_editor / dsh-ops edit_file & write_file), grouped per agent turn.
+ * On turn/end a batch fires.
  */
 export class ChangeTracker implements vscode.Disposable {
   private batches: ChangeBatch[] = [];

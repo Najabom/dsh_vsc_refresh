@@ -12,7 +12,7 @@
 | 刚接触这个领域 | §1 | 建立概念 |
 | 想快速抓住要点 | §2 §3 | 定位 + 四个关键设计 |
 | 想了解唯一的技术取舍（overlay 补丁） | §4 | 它为什么存在、如何保证安全 |
-| 想了解更新、沙箱、跟随编辑这些机制 | §5 | 工程细节的设计取舍 |
+| 想了解更新、沙箱这些机制 | §5 | 工程细节的设计取舍 |
 | 想了解它在官方生态里怎么立得住 | §6 | 从官方、用户、架构三个角度 |
 | 想直接看大白话版本 | §7 | 大白话版本 |
 | 想验证理解是否正确 | §8 | 常见问题回答 |
@@ -204,9 +204,9 @@ DSH 有一套**运行时补丁机制（overlay）**：在官方进程**加载模
 ### 5.1 harness 生命周期：发现 → 复用 → 自启 → 确定性关闭
 
 - **发现**：启动时先探测配置地址（默认 3080）。三态结果——正常 / 未授权 / 不可达——分别走不同策略：正常就复用；未授权会提示「API 拒绝访问」（多半是 overlay 失配，见 §4.2）；不可达才考虑自启。
-- **自启**：从全局 npm 安装里解析 `@deepseek-ai/dsh` 的真实入口（绕过 npm 的 `.cmd` shim，避免弹出黑窗口），以**无窗口、分离进程**方式启动，注入 overlay 与 PID 记录。
-- **确定性关闭（多窗口）**：自启的实例是**从属（owned）**的。多个 VS Code 窗口共享同一个 harness：每个窗口在 `%TEMP%\dsh-vsc-clients` 下写**自适应心跳**（pid + 所连地址：前台每 30 秒、后台每 120 秒，焦点变化与会话活动即刻补写），窗口退出时先注销自己再判断——还有其它活着的窗口则**不停**，最后一个窗口退出才按记录的 PID **确定性停掉**；配套 PID 复用护栏（对命令行里 `--port <port>` 二次核对），绝不误杀别人的进程。手动启动的 harness 永远不在清理范围。
-- **全窗崩溃守卫**：整个 VS Code 被强杀时没有任何 deactivate 机会——所以自启路径在 harness 前面包了一层守卫进程（`dist/harness-guard.mjs`，随 VSIX 打包、纯 node 内置模块）：它每 20 秒轮询心跳目录（心跳 150 秒内算活），最后一个心跳过期 60 秒后 taskkill 整棵进程树并退出——即孤儿清理延迟约 3.5 分钟；正常停止时扩展对守卫 pid 做 `taskkill /T`，守卫与 harness 一起消失。
+- **自启**：按平台探测 Node.js（≥ 24.9）与全局安装的 `@deepseek-ai/dsh` 真实入口（PATH 上的 `dsh` 脚本 / `npm prefix -g` / 常见安装位置，可用 `dshVsc.nodePath` / `dshVsc.dshScriptPath` 覆盖；Windows、macOS、Linux 同一套逻辑），以**无窗口、分离进程**方式启动，注入 overlay 与 PID 记录。DSH 插件管理器安装插件时调用 `pnpm`（要求 **pnpm 11+**：pnpm 9/10 的 `view` 会转调 npm，拒绝 DSH 的 `--config.fetch-retries`）。Node / DSH / pnpm 都是**外部依赖，由用户自行安装**：扩展只探测（PATH / PNPM_HOME / npm 全局 bin），把用户已装好的 pnpm 放到 harness 的 `PATH` 最前面，缺失或过旧时在日志/设置页如实给出安装命令——**绝不下载或代装任何东西**。设置页「运行环境」卡片展示三者的状态（含版本过旧提示）与安装命令，并提供「重启 DSH 服务」（命令 `DSH: 重启 DSH 服务`，只重启扩展自启的实例）让新环境生效。
+- **确定性关闭（多窗口）**：自启的实例是**从属（owned）**的。多个 VS Code 窗口共享同一个 harness：每个窗口在系统临时目录的 `dsh-vsc-clients` 下写**自适应心跳**（pid + 所连地址：前台每 30 秒、后台每 120 秒，焦点变化与会话活动即刻补写），窗口退出时先注销自己再判断——还有其它活着的窗口则**不停**，最后一个窗口退出才按记录的 PID **确定性停掉**（Windows `taskkill /T`，macOS/Linux 对分离进程组发 SIGTERM→SIGKILL）；配套 PID 复用护栏（对命令行里 `--port <port>` 二次核对），绝不误杀别人的进程。手动启动的 harness 永远不在清理范围。
+- **全窗崩溃守卫**：整个 VS Code 被强杀时没有任何 deactivate 机会——所以自启路径在 harness 前面包了一层守卫进程（`dist/harness-guard.mjs`，随 VSIX 打包、纯 node 内置模块）：它每 20 秒轮询心跳目录（心跳 150 秒内算活），最后一个心跳过期 60 秒后杀掉整棵进程树并退出——即孤儿清理延迟约 3.5 分钟；正常停止时扩展杀掉守卫所在进程树（Windows `taskkill /T`，macOS/Linux 进程组信号），守卫与 harness 一起消失。
 - **孤儿治理**：若上次进程被强杀（deactivate 没跑到），下次启动会认出这个「孤儿」并复用或接管，而不是又拉起第二个。
 - **冷启动容忍**：大版本更新后（npm 换掉整棵依赖树），harness 冷启动实测可达 ~45 秒；重启验证路径给了 90 秒启动窗口 + 45 秒验证重试窗口，避免把「还在启动」误判成「挂了」。
 
@@ -217,7 +217,7 @@ DSH 更新很频繁，而每一次协议改动都可能让扩展失配。所以�
 1. **检查**：启动时、以及窗口存续期间每 6 小时查 npm registry，发现新版本弹窗（「暂不更新」记忆到下一个版本）；harness 重连后 30 分钟限频内补查，结果同步写入状态栏提示（上次检测时间/结果）。
    - **通道感知**：npm 的 `latest` 标签长期停在旧版，而 rc/alpha 安装永远「已最新」——所以默认 `auto`：用预发布版的安装跟随全量版本里的最新预发布，稳定版安装对照 `latest`；也可显式选择 `stable` / `next` / `alpha`（`dshVsc.dshUpdateChannel`），比较规则集中在纯模块 `src/harness/updateChannel.ts`。
 2. **接口预检**（升级前）：
-   - **通告扫描**：把官方 Release Notes 里当前版本 → 目标版本之间的说明抓下来（GitHub API，失败回退 atom），逐条扫本扩展用到的**接口标识**（33 个：全部 RPC 端点 + 事件流协议名 + 鉴权协议名）。
+   - **通告扫描**：把官方 Release Notes 里当前版本 → 目标版本之间的说明抓下来（GitHub API，失败回退 atom），逐条扫本扩展用到的**接口标识**（79 个：全部 RPC 端点 + 事件流协议名 + 鉴权协议名）。
    - **包内核验**：把目标版本的 tarball 拉下来，**静态**检查这些接口是否真的存在于三个关键官方包里（`dsh-api-remotes` / `dsh-api-gateway` / `dsh-client-connection`）。
    - **三分支**：有风险 → 警告并建议「先更新扩展，等适配」；通过 → 正常弹更新；预检不可用（断网等）→ 照常弹更新，但如实说明「预检未完成」。无论如何都保留逃生通道：*仍要更新（自检失败自动回滚）*。
 3. **执行**：停掉从属 harness → `npm install -g` 目标版本（超时保护、输出留日志）。安装链路自带三层防护：
@@ -236,31 +236,21 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 扩展的修法：打开/切换工作区时自动尝试 `icacls` 授权（当前用户完全控制，全树继承）；能修就静默修好（顺手消掉「换工作区就失效」的问题）。确实修不了（目录 owner 是系统/别的账户）→ 弹一次警告，提供**管理员一键修复**（UAC 提权跑同一条授权）。
 
-### 5.4 跟随编辑：光标落在真正改动的行上
-
-「agent 改了哪个文件」在协议里有现成事件，但「改了哪一行」没有。跟随编辑用了一个朴素而可靠的办法：
-
-- **记住改动前的内容**：工具调用（直接 `write`/`edit`/`apply_patch`…，以及 PTC 模式下通过 `tool/ptc-dispatch(-start)` 暴露的嵌套写入）一出现，就把目标文件改前文本读进内存。
-- **改动后再读一遍**，按行做公共前缀比较，**第一个不同的行号**就是目标。
-- 打开文件用**预览标签 + 不抢焦点**（你正在输入时不会被拽走），并把光标定位到那一行。
-
-任务运行期间还有第二层兜底：**工作区文件监控**（VS Code FileSystemWatcher）捕捉 shell 命令等外部写入，任务结束时按文件粒度并入同一改动批次（徽章 + 跟随打开），并过滤 `.git`/`node_modules` 等目录与工作区外路径。全部覆盖范围与边界如实写在 README 的「边界」一节——宁可说清楚，不做「看起来全能」的承诺。
-
-### 5.5 问题对话窗口：Ask 有自己的会话与窗口
+### 5.4 问题对话窗口：Ask 有自己的会话与窗口
 
 「选中代码就问」不再挤进最近的会话：每个工作区有专属的**问题对话**（工作区 → 会话 id 的持久映射，失效自动重建），在编辑器侧边新列分屏打开——同一个 `NativePanelProvider` 以 askMode 运行（固定会话、隐藏会话选择器/工作区条/工具按钮的简洁界面），询问卡片、意图选择与回答全部发生在那里。侧边栏的自动打开会跳过问题对话：编码会话之间不再被提问穿插。
 
-### 5.6 API 供应商管理：镜像官方「模型」设置页
+### 5.5 API 供应商管理：镜像官方「模型」设置页
 
-设置页的「API」标签复用 DSH 自己的凭据与设置域：密钥经 `credentials/set|unset` 写入 DSH 凭据存储（环境变量来源只读），自定义供应商走 `settings/mutate` 写入 `llm-pi-ai` 的 `providers` 映射（路由校验、apiKeyEnv 派生、冲突保护）——与官方设置页同款算法。协议不变，扩展只做壳。
+设置页的「API」标签复用 DSH 自己的凭据与设置域：密钥经 `credentials/set|unset` 写入 DSH 凭据存储（环境变量来源只读），自定义供应商走 `settings/mutate` 写入 `llm-pi-ai` 的 `providers` 映射（路由校验、apiKeyEnv 派生、冲突保护）——与官方设置页同款算法。界面按官方「模型」页收敛为**一个供应商下拉 + 一个 API Key 输入 + 一行状态**（路由、默认端点、凭据引用、已配置/只读/账号托管状态），已配置供应商只保留紧凑摘要；新建供应商是纯表单（仅「协议」为下拉，路由 ID 即设置键、Key 存 `<ROUTE>_API_KEY`）。协议不变，扩展只做壳。
 
-### 5.7 官方可选插件与智能体团队：把官方能力搬进侧边栏
+### 5.6 官方可选插件与智能体团队：把官方能力搬进侧边栏
 
 插件的**开关语义完全交还官方**：实验性插件包（智能体团队、语音输入、自动评审、Inspector、会话搜索/标题、终端、ralph、徽章技能、思维链翻译、worktree、插件市场）在插件页单独成组，勾选即调用 `pluginManager/setBundleEnabled` ——官方管理器会从安装副本直接启用，扩展不重装、不改 profile；按需包（Codex / Claude Code 子代理）按其固定 spec 走 `installBundle`；已安装落后的包提供更新；`waitForInstall` 兜住响应丢失；`pluginInventory/list` 以只读清单呈现内置模块（按 Agent 预设分组）。**插件市场**同理：只有官方 market 包启用后才出现索引与检索 UI，扩展绝不自己维护市场源。
 
-智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。不启用该包时按钮与卡片完全隐藏，旧 harness 无感。
+智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。团队数据渲染进底部任务栏的「任务 / 成员 / 共享任务」分组（复用 TODO 行样式）；不启用该包时只显示任务，旧 harness 无感。
 
-### 5.8 作业、目标与每轮变更：只搬数据面，不搬页面
+### 5.7 作业、目标与每轮变更：只搬数据面，不搬页面
 
 **后台作业**由会话事件 `job/registered` / `job/settled` 折出只读花名册（`job/list` 是常驻流，不是快照接口，正常路径不调用）；停止走 `job/kill`，参数是 `{request:{sessionId,jobId}}`——单请求，官方不接受扁平字段。
 
@@ -270,9 +260,9 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 **即时失效**：设置页、模型/凭据、权限目录、预设、插件市场都订阅 `$events` 的官方失效事件（`settings/document-updated`、`llm/adapters-updated`、`credentials/*`、`permission-presets/catalog-changed`、`agent-preset/selected`、`plugin-market/changed`），变化即在界面里反映，不需要用户手动刷新。
 
-### 5.9 预览型数据面：搜索、引用、大纲与设置表单
+### 5.8 预览型数据面：搜索、引用、大纲与设置表单
 
-**休眠供应商目录**：`llm/listConfigurableProviders` 返回全部内置路由（含未注册的休眠项，带 `defaultBaseURL`）。设置页为其列出「配置 Key」入口：写 `providers.<route>` 配置（官方端点 + 协议 + 派生 key ref），用新 Key 调 `llm/discoverModels` 补全模型列表——与官方「模型」页添加供应商的写入完全一致；新建供应商的预设列表也由这份目录动态生成。
+**休眠供应商目录**：`llm/listConfigurableProviders` 返回全部内置路由（含未注册的休眠项，带 `defaultBaseURL`）。设置页把它们并入供应商下拉（与已注册、自定义路由同列），为休眠供应商保存 Key 即写 `providers.<route>` 配置（官方端点 + 协议 + 派生 key ref），并用新 Key 调 `llm/discoverModels` 补全模型列表——与官方「模型」页添加供应商的写入完全一致。
 
 **会话搜索**用 `session/search`（`{request:{query}}`）得命中与 240 码点片段；部署可以在 session-query 索引上禁用搜索（`openAt: never`），此时 RPC 返回明确的 `gateway/internal` 原因，面板选择框灰显并原样展示——能力存在与否由服务端裁决，扩展不猜测。
 
@@ -284,9 +274,9 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 **工作区管理**建立在 `workspace/follow` 的完整基线上（`items / archivedSessionIds / pinnedSessionIds`，增量 `replace|upsert|remove|order|archived|pinned`），增删改与排序走 `workspace/*` 单请求；`pinnedSessionIds` 同时驱动选择框置顶。**定时任务**只读 `schedule/catalog` 快照，改名/改指令/删除走 `schedule/update|delete`；DSH 只允许模型工具创建计划，因此「新建」预填一条给 agent 的指令，而不是伪造创建表单。**设置大类**由 `settings/describe` 的 schema 直接生成表单（`root=refs[uid].dict`），写回 `set/unset`，默认值只读展示——扩展不维护第二份设置真相。
 
-**账户卡**读 `account/getState` + `account/getProfile`（只读；余额另有接口）；**守卫与守卫进程**仍按 5.1 的多窗口心跳执行，本层不改变生命周期语义。
+**账户卡**读 `account/getState` + `account/getProfile`（余额另有接口），登录/退出走 `account/startSignIn` / `cancelSignIn` / `signOut`：`callbackOrigin` 取 harness 基址的 origin（DSH 自身注册 `/oauth/callback`），`authorizeUrl` 交给浏览器打开，登录尝试期间按 1.5s 轮询 `getState`、到期即停；**守卫与守卫进程**仍按 5.1 的多窗口心跳执行，本层不改变生命周期语义。
 
-### 5.10 面板自愈：webview 存活与显示拓扑
+### 5.9 面板自愈：webview 存活与显示拓扑
 
 显示器断开/切换时 Electron 可能让 webview 的渲染面失效：面板整块空白，直到窗口（连同 webview）重建才恢复。面板因此维护三条被动防线：
 
@@ -296,13 +286,13 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 支持面还包括：`dsh.exportDiagnostics`（DSH: 导出诊断报告）把版本、连接阶段、兼容台账、harness 记录、本窗口心跳与日志尾部打包成 Markdown（不含凭据）；伴生插件在 `apply` 内对每个宿主 API 逐项特性探测 + try/catch 注册，缺接口只关闭对应能力并记一条警告，绝不让 harness 启动失败；CI 的 `.github/workflows/contract.yml` 每周用固定版本矩阵跑 `scripts/contract-check.mjs`（与更新预检同一套静态接口扫描），接口缺失即红。
 
-### 5.11 DSH 版本兼容台账：如实报告，而不是隐藏
+### 5.10 DSH 版本兼容台账：如实报告，而不是隐藏
 
 协议客户端最怕上游改名/改形。这里不做「猜」，也不做「默默隐藏」：
 
 - **特性 → 端点**：`src/harness/capabilities.ts` 把每个可选面（插件、作业、定时任务、目标、搜索、分叉、引用、技能、工作区管理、账户、高级设置、权限、附件、子代理）映射到它的 RPC 前缀。核心会话流量不在册，不受影响。
 - **运行时判定**：`HarnessClient.call` 在业务错误时回调 `onProtocolError`；`gateway/not-found`（接口消失）→ unsupported，`gateway/arguments-invalid`（参数契约变了）→ incompatible，`disabled` → 部署关闭。台账按严重度取最高，版本变化时清空。
-- **诚实呈现**：面板顶栏固定一行（不隐藏任何入口）说明「当前 DSH 0.2.2 高于已验证范围 / 插件管理：0.2.2 没有该接口（gateway/not-found）：…」，设置页每个标签页顶部同样显示；失败的操作本身仍按原有错误提示。版本低于 `TESTED_DSH_MIN` 或高于 `TESTED_DSH_MAX` 标为 too low / too high（未经验证），而不是假装可用或假装坏了。
+- **诚实呈现**：面板顶栏固定一行（不隐藏任何入口）说明「当前 DSH 0.2.3 高于已验证范围 / 插件管理：0.2.3 没有该接口（gateway/not-found）：…」，设置页每个标签页顶部同样显示；失败的操作本身仍按原有错误提示。版本低于 `TESTED_DSH_MIN` 或高于 `TESTED_DSH_MAX` 标为 too low / too high（未经验证），而不是假装可用或假装坏了。
 - **与更新中心配合**：升级前的静态端点预检（§5.2）挡大改动，升级后的运行时台账报告漏网之鱼；两者都指向同一个事实来源——服务端自己的错误码。
 
 ---
@@ -325,7 +315,7 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 - **开箱即用**：装了就能用，不用重输 API key；更新有预检、失败能回滚，心里有底。
 - **界面质量**：看起来顺手、干起活来清晰。
 
-我们两者都占了——`dsh-vsc` 是原生 VS Code 面板 + 编辑器右键提问 + 跟随编辑，不是塞一个浏览器 iframe 完事。
+我们两者都占了——`dsh-vsc` 是原生 VS Code 面板 + 编辑器右键提问，不是塞一个浏览器 iframe 完事。
 
 ### 6.3 架构的视角
 
@@ -382,7 +372,7 @@ A：那是唯一动官方的地方，**一个 delta**：DSH 0.1.7-rc.2 起要求
 A：要看升的是哪层。**升级 UI（插件集）→ 跟我无关**，因为我消费的是协议不是 UI。**升级协议（契约）→ 那才是唯一需要适配的信号**——而且扩展内置了「更新中心」：升级前自动做接口预检（扫描官方通告 + 核验新版本包内接口），有风险会先劝你更新扩展；升级后自动重启自检，失败一键回滚。0.1.7 → 0.2.0 的协议大改已经实证过一次：适配只发生在最薄的客户端层。
 
 **Q：为什么不直接把官方网页嵌进侧边栏就行？**
-A：做是可以，但那是「壳」，不解决「你选中代码要问 AI」这类 VS Code 原生交互。真正的价值在**原生桥**：编辑器右键提问、跟随编辑定位到改动行、审批/提问卡片、工作区集成——这些只有做一个协议客户端才能拿到。
+A：做是可以，但那是「壳」，不解决「你选中代码要问 AI」这类 VS Code 原生交互。真正的价值在**原生桥**：编辑器右键提问、审批/提问卡片、工作区集成——这些只有做一个协议客户端才能拿到。
 
 **Q：那 API key 呢？**
 A：不用在插件里配。key 与账号都在 DSH 那边管着，我只是它的一个客户端，**不碰你的 key**。
@@ -411,7 +401,7 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | **PTC 嵌套调用** | PTC 模式下 `run_code` 内部调用工具，经 `tool/ptc-dispatch` 事件暴露 |
 | **overlay** | 运行时内存补丁机制，唯一动官方处；当前只有 1 个 delta（浏览器鉴权 bypass） |
 | **接口预检** | 更新前扫描官方通告 + 静态核验新包接口的护栏流程 |
-| **原生桥** | 选中代码提问、改动文件跟踪、跟随编辑等 VS Code 原生集成 |
+| **原生桥** | 选中代码提问、改动文件跟踪等 VS Code 原生集成 |
 | **pure bridge（纯桥接）** | 只做协议对岸翻译、官方本体一行不改的设计原则 |
 
 ### 9.2 文件地图（想核实细节就看这些）
@@ -424,7 +414,8 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | `src/harness/overlay/deltas.ts` | 唯一 delta（浏览器鉴权 bypass）的真源（锚点/标记） | §4 |
 | `src/harness/overlay/loader.ts` | ESM loader：内存换源 + 日志 + 降级 | §4.2 |
 | `src/harness/overlay/pristine.ts` | 官方 SHA256 表 + 完整性自检 | §4.2 |
-| `src/harness/launcher.ts` | 启动 DSH（注入 overlay、PID 记录、无窗口） | §5.1 |
+| `src/harness/deps.ts` | 跨平台 Node / `@deepseek-ai/dsh` / pnpm 探测（外部依赖，只探测不代装；纯 Node，无 vscode import） | §5.1 |
+| `src/harness/launcher.ts` | 启动 DSH（注入 overlay、PID 记录、无窗口、跨平台进程树关闭） | §5.1 |
 | `src/harness/updater.ts` | 更新检查 / 安装 / 版本比较 | §5.2 |
 | `src/harness/installability.ts` | 目标版本依赖预检（半成品发布拦截，纯模块） | §5.2 |
 | `src/harness/npmFailure.ts` | npm 失败归类（ETARGET/ERESOLVE/EBUSY/网络/权限） | §5.2 |
@@ -432,8 +423,7 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | `src/harness/pluginUpdater.ts` | 扩展自更新（GitHub Release VSIX → code CLI） | §5.2 |
 | `src/harness/updatePreflight.ts` | 接口预检（通告扫描 + 包内静态核验） | §5.2 |
 | `src/harness/workspaceAcl.ts` | Windows 沙箱工作区 ACL 自动修复 | §5.3 |
-| `src/editor/followEdits.ts` | 跟随编辑（改动定位） | §5.4 |
-| `src/editor/changeTracker.ts` | 每轮改动文件跟踪（含 PTC 嵌套） | §5.4 |
+| `src/editor/changeTracker.ts` | 每轮改动文件跟踪（含 PTC 嵌套） | §5.7 |
 | `src/extension.ts` | 激活/关闭逻辑（从属实例确定性关闭） | §5.1 |
 
 > 权威外部依据：官方包 `@deepseek-ai/dsh-api-remotes`（RPC 清单与类型）、`@deepseek-ai/dsh-api-gateway`（流协议与错误形状）、`@deepseek-ai/dsh-client-connection`（浏览器鉴权行为）。

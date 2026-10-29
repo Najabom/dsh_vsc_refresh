@@ -1,12 +1,12 @@
 # DSH Bridge (dsh-vsc)
 
-> DSH Bridge is a VS Code extension (community fork of zhibailu/dsh-vsc, maintained by Najabom) that connects to DeepSeek Harness (DSH) — a local AI agent service (default http://127.0.0.1:3080) — as a **protocol client**: a native sidebar panel plus an editor bridge, without rewriting DSH and without starting a second server (one shared history with the web GUI). It supports the new DSH protocol (0.1.7-rc.2+ through 0.2.0-rc.2): typert RPC gateway, multiplexed event socket (`/api/remote.mux`), waterfall approvals & questions, paginated history, per-session projections. It ships an update center (activation checks, interface preflight via release-notes scan + static package check, one-click update with rollback), Windows sandbox workspace-ACL auto-repair, follow-agent-edits (including nested PTC dispatches and turn-time external writes captured by a workspace watcher), workspace-aware sessions, a dedicated per-workspace ask-conversation window (side editor split), and API-key/provider management (settings page *API* tab). Includes a single in-memory runtime overlay delta — a local-request bypass of DSH's browser-token auth — guarded by SHA-256 verification and canary anchors.
+> DSH Bridge is a VS Code extension (community fork of zhibailu/dsh-vsc, maintained by Najabom) that connects to DeepSeek Harness (DSH) — a local AI agent service (default http://127.0.0.1:3080) — as a **protocol client**: a native sidebar panel plus an editor bridge, without rewriting DSH and without starting a second server (one shared history with the web GUI). It supports the new DSH protocol (0.1.7-rc.2+ through 0.2.2-alpha.2): typert RPC gateway, multiplexed event socket (`/api/remote.mux`), waterfall approvals & questions, paginated history, per-session projections. It runs on Windows, macOS and Linux (cross-platform Node ≥24.9 / `@deepseek-ai/dsh` / pnpm 11+ detection; these are external prerequisites the user installs — the extension only detects and explains, it never downloads or installs them). A settings-page "Runtime environment" card diagnoses Node/DSH/pnpm with exact install commands and can restart the managed harness; the first-party companion plugin is bundled inside the VSIX (no external fetch). It ships an update center (activation checks, interface preflight via release-notes scan + static package check, one-click update with rollback), Windows sandbox workspace-ACL auto-repair, workspace-aware sessions, a dedicated per-workspace ask-conversation window (side editor split), and API-key/provider management (settings page *API* tab: one provider dropdown + one API-key input, mirroring the official models page, plus a dropdown-free custom-provider form). Includes a single in-memory runtime overlay delta — a local-request bypass of DSH's browser-token auth — guarded by SHA-256 verification and canary anchors.
 
 ## Docs
 
 - [README.md](README.md): Project overview, features, requirements, installation, architecture summary, configuration, boundaries. (English)
 - [README.zh.md](README.zh.md): 中文版项目说明。
-- [docs/design.md](docs/design.md): Deep architecture & "pure bridge" philosophy (rewritten for v1.0.0) — the new protocol in plain words, overlay rationale, and the updater/sandbox/follow-edit mechanisms.
+- [docs/design.md](docs/design.md): Deep architecture & "pure bridge" philosophy (rewritten for v1.0.0) — the new protocol in plain words, overlay rationale, and the updater/sandbox mechanisms.
 - [docs/compatibility.md](docs/compatibility.md): DSH version compatibility matrix — capability → RPC map, tested version band, and how mismatches are reported.
 - [src/README.md](src/README.md): Source tree map — what lives in `src/editor`, `src/events`, `src/harness`, `src/panel`.
 - [src/harness/README.md](src/harness/README.md): Harness client / discovery / launcher notes.
@@ -21,11 +21,11 @@
 - [src/harness/overlay/deltas.ts](src/harness/overlay/deltas.ts): The single overlay delta (browser-auth bypass; source of truth).
 - [src/harness/overlay/loader.ts](src/harness/overlay/loader.ts): ESM in-memory loader (swap source, log, degrade).
 - [src/harness/overlay/pristine.ts](src/harness/overlay/pristine.ts): Official SHA-256 table + integrity self-check.
-- [src/harness/launcher.ts](src/harness/launcher.ts): Start DSH windowless (overlay injection, PID record).
+- [src/harness/deps.ts](src/harness/deps.ts): Cross-platform Node / `@deepseek-ai/dsh` / pnpm detection (external prerequisites: detect-and-explain only).
+- [src/harness/launcher.ts](src/harness/launcher.ts): Start DSH windowless (overlay injection, PATH bootstrap, PID record, cross-platform stop).
 - [src/harness/updater.ts](src/harness/updater.ts): Update check / install / version compare.
 - [src/harness/updatePreflight.ts](src/harness/updatePreflight.ts): Interface preflight (release-notes scan + static package check).
 - [src/harness/workspaceAcl.ts](src/harness/workspaceAcl.ts): Windows sandbox workspace-ACL auto-repair.
-- [src/editor/followEdits.ts](src/editor/followEdits.ts): Follow agent edits (open + first-changed-line cursor).
 - [src/editor/externalChanges.ts](src/editor/externalChanges.ts): Turn-time workspace file-watch (shell writes join the change badge).
 - [src/editor/askSessions.ts](src/editor/askSessions.ts): Per-workspace dedicated ask conversation (persistent mapping).
 - [src/extension.ts](src/extension.ts): Activation/shutdown logic (deterministic owned-instance stop).

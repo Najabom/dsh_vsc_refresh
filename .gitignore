@@ -1,5 +1,7 @@
 # Node
 node_modules/
+# Local npm cache (created by `npm install --cache .npm-cache` in some setups)
+.npm-cache/
 
 # Build output
 dist/

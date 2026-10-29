@@ -30,23 +30,38 @@ if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
 
 const dir = await mkdtemp(join(tmpdir(), "dsh-vsc-contract-"));
 const bundle = join(dir, "preflight.cjs");
-await build({
-  entryPoints: ["src/harness/updatePreflight.ts"],
+// The update preflight imports the launcher (for the installed dsh path), which
+// references the `vscode` extension-host module. The check only calls the
+// exported pure functions, so satisfy the import with an empty stub instead of
+// failing to bundle outside an Extension Host (CI never runs one).
+const vscodeStub = {
+  name: "vscode-stub",
+  setup(build) {
+    build.onResolve({ filter: /^vscode$/ }, () => ({ path: "vscode", namespace: "vscode-stub" }));
+    build.onLoad({ filter: /.*/, namespace: "vscode-stub" }, () => ({
+      contents: "module.exports = {};",
+      loader: "js",
+    }));
+  },
+};
+const buildOptions = {
   bundle: true,
   format: "cjs",
   platform: "node",
-  outfile: bundle,
+  plugins: [vscodeStub],
   logLevel: "silent",
+};
+await build({
+  entryPoints: ["src/harness/updatePreflight.ts"],
+  ...buildOptions,
+  outfile: bundle,
 });
 const { INTERFACE_IDS, staticInterfaceCheck } = require(bundle);
 const capsBundle = join(dir, "capabilities.cjs");
 await build({
   entryPoints: ["src/harness/capabilities.ts"],
-  bundle: true,
-  format: "cjs",
-  platform: "node",
+  ...buildOptions,
   outfile: capsBundle,
-  logLevel: "silent",
 });
 const { CAPABILITY_FEATURES, TESTED_DSH_MIN, compareVersions } = require(capsBundle);
 

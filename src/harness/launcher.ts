@@ -1,13 +1,25 @@
-import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as vscode from "vscode";
 import { checkDshPristine, PRISTINE_HOST_VERSION } from "./overlay/pristine";
+import {
+  buildHarnessEnv,
+  depsActionableMessage,
+  depsSummaryLines,
+  describePnpm,
+  missingHarnessDeps,
+  resolveDeps,
+  resolvePnpm,
+  runCaptured,
+  type DepsConfig,
+  type DepsResolutions,
+  type PnpmResolution,
+} from "./deps";
 
 let child: ChildProcess | undefined;
-let launcher: { node: string; script: string } | null = null;
 
 /**
  * Runtime overlay (in-memory patch) entry: dist/overlay-register.mjs is
@@ -75,6 +87,57 @@ export function readPidRecord(): HarnessPidRecord | null {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Cross-platform dependency diagnostics (cached for callers)
+ * ------------------------------------------------------------------ */
+
+let depsCache: DepsResolutions | null = null;
+let depsCacheAt = 0;
+/** Re-probe after a minute: the user may install Node/DSH while a window is
+ *  open; spawn paths force a fresh probe regardless. */
+const DEPS_CACHE_MS = 60_000;
+/** Info-level "deps missing" guidance is logged once per session (the
+ *  extension surfaces the same text in the OutputChannel/notification). */
+let missingDepsNotified = false;
+/** "pnpm missing" hint is logged once per session, not on every spawn. */
+let pnpmMissingNotified = false;
+
+/** Read the dshVsc.* bootstrap settings (deps.ts stays vscode-free). */
+export function readDepsConfig(): DepsConfig {
+  const config = vscode.workspace.getConfiguration("dshVsc");
+  return {
+    nodePath: config.get<string>("nodePath", ""),
+    dshScriptPath: config.get<string>("dshScriptPath", ""),
+    pnpmPath: config.get<string>("pnpmPath", ""),
+  };
+}
+
+/**
+ * Node.js / dsh / pnpm resolutions for the auto-start path (cached; `force`
+ * re-runs the probes — used before every real spawn and by the settings-page
+ * doctor card). Never throws: the resolvers return `{found:false}` + reason.
+ */
+export async function resolveHarnessDeps(force = false): Promise<DepsResolutions> {
+  if (!force && depsCache && Date.now() - depsCacheAt < DEPS_CACHE_MS) return depsCache;
+  depsCache = await resolveDeps(readDepsConfig());
+  depsCacheAt = Date.now();
+  return depsCache;
+}
+
+/** Invalidate the cached resolutions (settings changed / tools just installed). */
+export function invalidateHarnessDeps(): void {
+  depsCache = null;
+  missingDepsNotified = false;
+}
+
+/** Path of the resolved @deepseek-ai/dsh package.json (version display copy). */
+export async function localDshPackageJson(): Promise<string | undefined> {
+  const deps = await resolveHarnessDeps();
+  if (!deps.dsh.found || !deps.dsh.packageRoot) return undefined;
+  const pkg = join(deps.dsh.packageRoot, "package.json");
+  return existsSync(pkg) ? pkg : undefined;
+}
+
 /**
  * Whether the harness is "ours" and still alive.
  *
@@ -106,156 +169,58 @@ function isPidRecordAlive(): boolean {
   }
 }
 
-/**
- * Build the child env: inherit the parent, but ensure GITHUB_TOKEN is present
- * and inject the runtime overlay --import flag.
- *
- * The web profile fails the whole boot when GITHUB_TOKEN is missing
- * (mcp-github config becomes invalid), so fall back to the persistent Windows
- * user env when the process env lacks it (e.g. VS Code launched from a stale
- * session).
- *
- * NODE_OPTIONS (not argv) is the injection mechanism on purpose: it applies
- * to the top-level harness process AND any node child it may spawn, with one
- * flag. The overlay register file lives in dist/ next to extension.js and is
- * bundled into the vsix (dist/** is not in .vscodeignore).
- */
-async function resolveSpawnEnv(): Promise<NodeJS.ProcessEnv> {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (!env.GITHUB_TOKEN) {
-    const userToken = await readWindowsUserEnv("GITHUB_TOKEN");
-    if (userToken) env.GITHUB_TOKEN = userToken;
-  }
-  const register = overlayRegisterPath();
-  if (register) {
-    const flag = `--import=${pathToFileURL(register).href}`;
-    env.NODE_OPTIONS = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ${flag}` : flag;
-  }
-  return env;
-}
-
-function readWindowsUserEnv(name: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    execFile("reg", ["query", "HKCU\\Environment", "/v", name], { windowsHide: true }, (error, stdout) => {
-      if (error) return resolve(undefined);
-      const match = new RegExp(`${name}\\s+REG_\\S+\\s+(.+)`).exec(stdout);
-      resolve(match ? match[1].trim() : undefined);
-    });
-  });
-}
-
-function runWhereAll(name: string): Promise<string[]> {
-  return new Promise((resolve) => {
-    execFile("where.exe", [name], { windowsHide: true }, (error, stdout) => {
-      if (error) return resolve([]);
-      resolve(
-        stdout
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-      );
-    });
-  });
-}
-
-async function resolveNodePath(): Promise<string | undefined> {
-  const hits = await runWhereAll("node");
-  const exe = hits.find((h) => h.toLowerCase().endsWith(".exe"));
-  if (exe) return exe;
-  for (const candidate of ["C:\\Program Files\\nodejs\\node.exe", "C:\\Program Files (x86)\\nodejs\\node.exe"]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-/**
- * Resolve the real dsh entry script. We must NOT launch through `dsh`/`npx`
- * shims: npm .cmd shims chain `cmd.exe → dsh.cmd → cmd.exe`, and the inner cmd
- * opens its own visible console even when the outer spawn used windowsHide.
- * Spawning `node lib/bin.js` directly with windowsHide (CREATE_NO_WINDOW)
- * keeps the whole harness tree windowless (the MCP SDK already hides its own
- * server children).
- */
-async function resolveDshScript(): Promise<string | undefined> {
-  // Prefer the .cmd shim (e.g. %APPDATA%\npm\dsh.cmd); `where` may list a
-  // bare extensionless `dsh` first, which is not executable by CreateProcess.
-  const hits = await runWhereAll("dsh");
-  const shim = hits.find((h) => h.toLowerCase().endsWith(".cmd"));
-  if (shim) {
-    try {
-      const content = readFileSync(shim, "utf8");
-      // The shim references the script as e.g. "%dp0%\node_modules\@deepseek-ai\dsh\lib\bin.js"
-      const m = /((?:node_modules\\)?@deepseek-ai\\dsh\\lib\\bin\.js)/.exec(content);
-      if (m) {
-        let rel = m[1].replace(/\//g, "\\");
-        if (!rel.startsWith("node_modules")) rel = "node_modules\\" + rel;
-        const candidate = join(shim.replace(/[^\\/]+$/, ""), rel);
-        if (existsSync(candidate)) return candidate;
-      }
-    } catch {
-      /* fall through to npm prefix */
-    }
-  }
-  // Fallback: derive from the global npm prefix. execFile CANNOT launch a .cmd
-  // directly (CreateProcess EINVAL), so go through cmd.exe /c.
-  const comspec = process.env.ComSpec || "cmd.exe";
-  const prefix = await new Promise<string | undefined>((resolve) => {
-    execFile(comspec, ["/c", "npm", "prefix", "-g"], { windowsHide: true }, (error, stdout) => {
-      resolve(error ? undefined : stdout.trim() || undefined);
-    });
-  });
-  if (prefix) {
-    const candidate = join(prefix, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-async function resolveLauncher(): Promise<{ node: string; script: string } | null> {
-  if (launcher) return launcher;
+function pidAlive(pid: number): boolean {
   try {
-    const node = await resolveNodePath();
-    const script = await resolveDshScript();
-    if (!node || !script) return null;
-    launcher = { node, script };
-    return launcher;
-  } catch (error) {
-    // Never let a resolution failure hang or crash the watch loop.
-    return null;
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-/** Path of the resolved @deepseek-ai/dsh package.json (version display copy). */
-export async function localDshPackageJson(): Promise<string | undefined> {
-  const l = await resolveLauncher();
-  if (!l) return undefined;
-  const pkg = join(dirname(dirname(l.script)), "package.json");
-  return existsSync(pkg) ? pkg : undefined;
-}
-
 /**
- * Start `dsh web` as a DETACHED, WINDOWLESS background process (no console,
- * no cmd shim). Direct `node bin.js` spawn with windowsHide = CREATE_NO_WINDOW:
+ * Start `dsh web` as a DETACHED, WINDOWLESS background process.
+ *
+ * Cross-platform bootstrap (see harness/deps.ts): resolve a Node.js >= 24.9.0,
+ * the real `@deepseek-ai/dsh/lib/bin.js` entry and a pnpm CLI. The entry is
+ * spawned directly with node — never through the `dsh`/`npx` shims: on Windows
+ * npm .cmd shims chain cmd.exe → shim → cmd.exe and pop a console; on POSIX
+ * they add a shell hop for no benefit. The spawned environment gets the pnpm
+ * bin dir prepended to PATH so the official plugin manager (which shells out to
+ * `pnpm`) can install/update plugins and the companion bundle.
+ *
  * - detached + stdio:'ignore' + unref: the harness is owned by this extension
- *   and is closed when VS Code exits (deactivate → stopHarness).
- * - no console anywhere in the tree, so there is nothing to close and nothing
- *   to kill by accident.
- * - GITHUB_TOKEN resolved (process env, then Windows user env).
+ *   and is closed when VS Code exits (deactivate → stopHarness); on POSIX the
+ *   detached child becomes its own process-group leader so stopHarness can
+ *   signal the whole tree.
  * - Uses the SAME data root as the web GUI (~/.dsh): the extension is a shared
  *   client, so "one runs, the other watches" means ONE history. Port ownership
  *   is the natural exclusivity — our instance takes the same port the web GUI
  *   would use (default 3080), so the two can never co-write the same log.
- * Stop it with the `dsh.stop` command or by closing VS Code
- * (taskkill /T kills the whole tree).
+ *
+ * Missing Node/dsh logs actionable Chinese guidance (install commands + link)
+ * once and returns false immediately — the caller must not burn its
+ * auto-spawn retries on a machine that simply does not have the runtime.
  */
 export async function startHarness(port: number, log: vscode.OutputChannel, cwd?: string): Promise<boolean> {
   if (isRunning()) return true;
-  const env = await resolveSpawnEnv();
-  const l = await resolveLauncher();
-  if (!l) {
-    log.appendLine("cannot resolve node/dsh for the silent launch — PATH missing `node` or the `dsh` shim; run `dsh web` manually for now");
+  // Fresh probe on every spawn attempt: the user may have just installed
+  // Node/DSH or changed one of the dshVsc.* path overrides.
+  const deps = await resolveHarnessDeps(true);
+  if (missingHarnessDeps(deps)) {
+    if (!missingDepsNotified) {
+      missingDepsNotified = true;
+      log.appendLine(depsActionableMessage(deps));
+    }
     return false;
   }
+  missingDepsNotified = false;
+  const node = deps.node;
+  const dsh = deps.dsh;
+  const nodePath = node.path;
+  const dshPath = dsh.path;
+  if (!nodePath || !dshPath) return false; // unreachable when missingHarnessDeps is false
+
   // Runtime overlay status + official-body integrity (read-only, cheap).
   const overlay = overlayRegisterPath();
   if (!overlay) {
@@ -268,7 +233,23 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
     return false;
   }
   log.appendLine(`runtime overlay: on (${overlay} — in-memory auth-bypass patch; official dsh files untouched)`);
-  const subRoot = join(dirname(dirname(l.script)), "node_modules", "@deepseek-ai");
+
+  // pnpm: detected on the machine (PATH / PNPM_HOME / npm global bin). It is an
+  // external prerequisite the user installs; never provisioned here.
+  const config = readDepsConfig();
+  const pnpm: PnpmResolution = await resolvePnpm({
+    config,
+    ...(nodePath ? { nodePath } : {}),
+  });
+  log.appendLine(`deps: ${depsSummaryLines(deps).join(" | ")}`);
+  if ((!pnpm.found || !pnpm.ok) && !pnpmMissingNotified) {
+    pnpmMissingNotified = true;
+    log.appendLine(
+      `deps: ${describePnpm(pnpm)} — 插件检索/安装会失败；pnpm 属于外部依赖，请自行安装（npm i -g pnpm@11，或设置 dshVsc.pnpmPath），然后重启 DSH 服务/该 dsh web 实例`
+    );
+  }
+
+  const subRoot = join(dirname(dirname(dshPath)), "node_modules", "@deepseek-ai");
   const rep = checkDshPristine(subRoot);
   if (rep.ok) {
     log.appendLine(`dsh install integrity: pristine (${rep.pristine.length} official files byte-identical to npm release)`);
@@ -281,26 +262,40 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
       `dsh install integrity: NOT pristine — missing=[${rep.missing.join(", ")}] modified=[${rep.modified.join(", ")}] (the overlay never writes to disk: reinstall with npm i -g @deepseek-ai/dsh@${PRISTINE_HOST_VERSION}; verify via scripts/restore-dsh-pristine.ps1)`
     );
   }
+
+  // Child env: inherited parent env + pnpm/node on PATH (plugin manager) +
+  // the overlay --import flag. GITHUB_TOKEN is NOT required and never read
+  // from the registry — an inherited token is simply passed through.
+  const env = buildHarnessEnv(process.env, node, dsh, pnpm);
+  const flag = `--import=${pathToFileURL(overlay).href}`;
+  env.NODE_OPTIONS = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ${flag}` : flag;
+  if (env.GITHUB_TOKEN) {
+    log.appendLine(`GITHUB_TOKEN: passed through from the host environment (${env.GITHUB_TOKEN.length} chars; not required)`);
+  }
+
   const args = ["web", "--no-open", "--port", String(port)];
   // Wrap in the multi-window guard when available: the guard supervises the
   // heartbeat liveness contract and kills the harness after an all-windows
   // crash. Missing bundle (dev runs) falls back to the direct spawn — still
   // correct, only the crash-cleanup path is lost.
   const guard = guardScriptPath();
-  const spawnArgv = guard ? [guard, l.script, ...args] : [l.script, ...args];
+  const spawnArgv = guard ? [guard, dshPath, ...args] : [dshPath, ...args];
+  const windowsHide = process.platform === "win32";
   log.appendLine(
-    `$ ${l.node} ${spawnArgv.join(" ")} (direct node, windowless, detached, shared ~/.dsh${guard ? ", guard-wrapped" : ""})`
+    `$ ${nodePath} ${spawnArgv.join(" ")} (direct node, windowless, detached process group, shared ~/.dsh${
+      guard ? ", guard-wrapped" : ""
+    })`
   );
   if (!guard) log.appendLine("multi-window guard missing (dist/harness-guard.mjs) — direct spawn without crash cleanup");
   if (cwd) log.appendLine(`harness cwd: ${cwd} (VS Code workspace folder — new sessions and the web GUI start here)`);
-  log.appendLine(
-    env.GITHUB_TOKEN
-      ? `GITHUB_TOKEN: ${env.GITHUB_TOKEN.length} chars (${process.env.GITHUB_TOKEN ? "process env" : "Windows user env fallback"})`
-      : "GITHUB_TOKEN: MISSING — dsh web will fail to boot (mcp-github config)"
-  );
-  const proc = spawn(l.node, spawnArgv, {
+
+  const proc = spawn(nodePath, spawnArgv, {
     shell: false,
-    windowsHide: true,
+    // CREATE_NO_WINDOW on Windows; on POSIX windowsHide is ignored.
+    windowsHide,
+    // detached: on POSIX this makes the child a process-group leader, which is
+    // what stopHarness() signals (-pid); on Windows it detaches from the
+    // console (the tree is killed with taskkill /T).
     detached: true,
     stdio: "ignore",
     env,
@@ -311,8 +306,8 @@ export async function startHarness(port: number, log: vscode.OutputChannel, cwd?
   });
   child = proc;
   // The record names the GUARD pid: its command line carries `--port <N>` and
-  // taskkill /T on it tears down guard + harness together.
-  writePidRecord({ pid: proc.pid ?? 0, port, startedAt: new Date().toISOString(), args: [l.script, ...args] });
+  // a tree kill on it tears down guard + harness together.
+  writePidRecord({ pid: proc.pid ?? 0, port, startedAt: new Date().toISOString(), args: [dshPath, ...args] });
   // Exit/error handlers only clear state that still belongs to THIS process:
   // after a stop→start (or reload→start) the old child's async exit event
   // would otherwise wipe the new instance's handle and pid record — leaving a
@@ -356,9 +351,7 @@ export function stopHarness(): Promise<{ killed: boolean; pid?: number; error?: 
     clearPidRecord();
     return Promise.resolve({ killed: false });
   }
-  try {
-    process.kill(rec.pid, 0);
-  } catch {
+  if (!pidAlive(rec.pid)) {
     clearPidRecord(); // record is stale — process already dead
     return Promise.resolve({ killed: false });
   }
@@ -372,29 +365,93 @@ export function stopHarness(): Promise<{ killed: boolean; pid?: number; error?: 
   });
 }
 
-/** taskkill one process tree, then drop the pid record. */
+/**
+ * Kill one process TREE, then drop the pid record.
+ *
+ * Windows: `taskkill /PID <pid> /T /F` (guard + harness + MCP children).
+ * POSIX: the harness was spawned detached (= process-group leader), so signal
+ * a negative pid to reach guard + harness + descendants: SIGTERM first, then
+ * SIGKILL after a short grace period.
+ */
 function killPid(pid: number): Promise<{ killed: boolean; pid?: number; error?: string }> {
-  return new Promise((resolve) => {
-    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (error) => {
+  if (process.platform === "win32") {
+    return runCaptured("taskkill", ["/PID", String(pid), "/T", "/F"], { timeoutMs: 15_000 }).then((result) => {
       clearPidRecord();
-      resolve(error ? { killed: false, pid, error: error.message } : { killed: true, pid });
+      if (result.ok) return { killed: true as const, pid };
+      // Fallback: terminate the recorded process directly (single process, no
+      // tree). Better a possibly-incomplete kill than a live orphan; only
+      // reached when taskkill itself is unavailable/blocked.
+      try {
+        process.kill(pid);
+        return { killed: true as const, pid };
+      } catch {
+        return { killed: false as const, pid, error: result.error };
+      }
     });
+  }
+  return new Promise((resolve) => {
+    signalTree(pid, "SIGTERM");
+    const deadline = Date.now() + 3_000;
+    const poll = (): void => {
+      if (!pidAlive(pid)) {
+        clearPidRecord();
+        resolve({ killed: true, pid });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        signalTree(pid, "SIGKILL");
+        clearPidRecord();
+        resolve({ killed: true, pid });
+        return;
+      }
+      setTimeout(poll, 100);
+    };
+    poll();
   });
 }
 
+/** Signal a detached child's process group, falling back to the single pid. */
+function signalTree(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch {
+    /* not a group leader (or already gone) — fall back to the single process */
+  }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    /* already gone */
+  }
+}
+
 /** Live command line of a pid (null when it cannot be read — e.g. the process
- *  already exited or CIM is unavailable). Used as the PID-reuse guard. */
+ *  already exited or the platform tool is unavailable). PID-reuse guard. */
 function commandLineOf(pid: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile(
+  if (process.platform === "win32") {
+    return runCaptured(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
-      { windowsHide: true },
-      (error, stdout) => {
-        if (error) return resolve(null);
-        const line = stdout.trim();
-        resolve(line.length > 0 ? line : null);
+      { timeoutMs: 8_000 }
+    ).then((result) => {
+      const line = result.stdout.trim();
+      return result.ok && line.length > 0 ? line : null;
+    });
+  }
+  // POSIX: /proc/<pid>/cmdline on Linux; macOS/BSD fall back to `ps`.
+  return new Promise((resolve) => {
+    try {
+      const raw = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
+      if (raw.length > 0) {
+        resolve(raw);
+        return;
       }
-    );
+    } catch {
+      /* no procfs — use ps below */
+    }
+    void runCaptured("ps", ["-p", String(pid), "-o", "args="], { timeoutMs: 8_000 }).then((result) => {
+      const line = result.stdout.trim();
+      resolve(result.ok && line.length > 0 ? line : null);
+    });
   });
 }

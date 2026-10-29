@@ -7,14 +7,15 @@
 > **衍生说明** —— 本项目基于
 > [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc) 二次开发，由
 > [Najabom](https://github.com/Najabom) 维护。保留原项目「纯桥接」设计，新增：
-> 对新版 DSH（0.1.7-rc.2+，实测至 0.2.0-rc.2）的完整协议适配、更新中心（启动
-> 检查、接口预检、一键更新与失败回滚）、Windows 沙箱工作区 ACL 自动修复、
-> 跟随 agent 编辑、按工作区的会话管理，以及全面的面板与交互改进。原作品
+> 对新版 DSH（0.1.7-rc.2+，实测至 0.2.2-alpha.2）的完整协议适配、跨平台
+> Node/DSH/pnpm 引导（Windows / macOS / Linux）、更新中心（启动检查、接口预检、
+> 一键更新与失败回滚）、Windows 沙箱工作区 ACL 自动修复、
+> 按工作区的会话管理，以及全面的面板与交互改进。原作品
 > © 2026 zhibailu（MIT）。逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
-![version](https://img.shields.io/badge/version-1.0.1-2ea44f)
+![version](https://img.shields.io/badge/version-1.5.0-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
@@ -38,6 +39,7 @@
 - [命令](#命令)
 - [配置](#配置)
 - [边界与刻意不做的事](#边界与刻意不做的事)
+- [常见问题与故障排查](#常见问题与故障排查)
 - [开发](#开发)
 - [文档](#文档)
 - [参与贡献](#参与贡献)
@@ -49,11 +51,13 @@
 
 上游 `zhibailu/dsh-vsc`（0.2.6）面向 2026-09 时代的 DSH。本 fork 跟进**新版 DSH 协议**，并把面板打磨成可以每天使用的工具：
 
-- **新版 DSH 协议全量适配**（0.1.7-rc.2+ 至 0.2.0-rc.2）：typert RPC 网关、多路复用事件套接字、waterfall 审批与提问、分页历史、按会话投影。
+- **新版 DSH 协议全量适配**（0.1.7-rc.2+ 至 0.2.2-alpha.2）：typert RPC 网关、多路复用事件套接字、waterfall 审批与提问、分页历史、按会话投影。
+- **在任何开发机上都能跑**——Windows、macOS、Linux 一视同仁：Node.js / `@deepseek-ai/dsh` / `pnpm` 按平台探测（PATH、npm 全局前缀、VS Code 自带 Node），可用 `dshVsc.nodePath` / `dshVsc.dshScriptPath` / `dshVsc.pnpmPath` 覆盖。没有 Windows 专用路径，也不假设开发机环境。这三者是**外部依赖，由你自行安装**——扩展只探测并给出确切命令，绝不在你的环境里下载/安装任何东西。
+- **插件安装（装好依赖后）可用**：DSH 插件管理器调用 `pnpm`（11+）；扩展把你已安装的 pnpm 放进 harness 的 `PATH`，缺失或过旧时如实提示安装命令。
+- **第一方伴生插件随包提供**：任务清单注入 + 宿主侧浏览器工具**打包在 VSIX 内**（无需外部下载），扩展通过官方插件管理器把它装进你的 DSH profile 并随扩展版本保持同步。
 - **更新中心**：启动时与每 6 小时检查 DSH 新版本；升级前对目标版本做**接口预检**（官方 Release Notes 扫描 + 新版本包内接口静态核验），发现本扩展依赖的接口有风险时会建议先更新扩展；升级后自动重启并验证通信——自检失败可一键回滚。安装链路已加固：peer 冲突自动改用 `--force` 重试（保留 peer 依赖安装）、镜像未同步时回退官方源、发布不完整的版本经预检后跳过或明确提示。设置页对 DSH 与扩展自身都提供**检测 / 安装**按钮。
 - **工作区集成**：harness 跟随你打开的文件夹运行；会话按工作区分组；工作区条随时告诉你当前在哪；一个按钮切换文件夹。
 - **Windows 沙箱友好**：自动修复 DSH 沙箱所需的目录权限（工作区 ACL），确实无法自动修复时才请求一次管理员操作。
-- **跟随 agent 编辑**：DSH 改文件时，编辑器自动打开该文件并把光标定位到首个改动行——覆盖直接文件工具与 PTC 嵌套调用；任务运行期间经 shell 命令等外部方式写入的文件也会被工作区文件监控捕获并跟随打开。
 - **易用性**：会话彻底删除、归档、「永久允许」审批、计划模式、中文右键菜单、每轮标注所用模型、状态栏备用入口（活动栏图标被隐藏时）、现代化状态行（上下文占用、实时 tok/s、缓存统计）、控件高度统一、opencode 风格输出着色。
 
 ## 功能
@@ -68,7 +72,7 @@
 - **计划模式**——权限按钮右侧的计划开关：**计划（软引导）** 或 **计划 + 强制只读**；进入/退出走会话命令，退出时恢复此前的权限预设。计划评审题会把计划书渲染成格式化卡片，按钮为**批准并退出计划模式** / **继续规划**——回传仍按原文，DSH 自身的审批校验不受影响。
 - **账户余额**——计划开关右侧：已登录 deepseek-account 渠道的钱包，以纯文字只读展示（人民币优先、两位截断、略微加粗；悬停看赠金明细；每轮结束与面板打开时自动更新）。
 - **任务清单记录**——每次 `todo_write` 快照都会在对话里留一张可展开卡片，被打断清空的列表不再丢失。
-- **智能体团队面板**——启用官方 *agent team* 插件包后，头部的**团队**按钮（带人数）会打开实时团队卡：成员（队长在前，运行中 / 空闲 / 启动中 / 失败、所用模型、错误明细）与共享任务（状态标记、负责人、阻塞、写入范围、可展开描述）。点击队友即可在面板内打开它的**可续聊会话**——直接对话、随时停止、一键回到队长。对齐官方网页版团队对话框（任务同样只读）。
+- **智能体团队面板**——启用官方 *agent team* 插件包后，成员与共享任务直接在底部任务栏里按「任务 / 成员 / 共享任务」分组展示，行样式与 TODO 一致：成员（队长在前，运行中 / 空闲 / 启动中 / 失败、所用模型、错误明细）、共享任务（状态标记、负责人、阻塞、写入范围、可展开描述）。点击队友即可在面板内打开它的**可续聊会话**——直接对话、随时停止、一键回到队长。对齐官方网页版团队对话框（任务同样只读）。
 - **后台任务**——持久的 `job/registered` / `job/settled` 事件折叠成输入框上方的一条紧凑状态栏：类型、名称与终态，运行中的任务带停止按钮。
 - **目标（Goal）**——会话目标（`goals/*`）渲染成一条：目标文本、阶段（进行中 / 已暂停 / 受阻 / 已完成）与轮次，支持暂停 / 恢复 / 完成 / 清除；输入栏的 ◎ 按钮可就地创建新目标。
 - **每轮变更与产物**——每个 `workspace/changes` 事件生成一张可折叠的**变更**卡（轮次、文件数、+/− 合计）；展开后逐个文件列出，点击即在编辑器里以统一 diff 打开该轮开始/结束对比。`deliverables/presented` 声明的产物文件也列在同一张卡里，可直接打开。
@@ -79,13 +83,13 @@
 - **子代理树**：子代理会话在选择框里以 ↳ 缩进挂在父会话下，点击直接在面板中打开（continuable 地址），可继续对话。
 - **@ 引用与技能菜单**：输入 @ 列出工作区文件与会话候选（插入会话的正式 mention 文本）；输入 / 列出可用技能（插入 `/名称 ` 触发）。
 - **轮次大纲与上下文分解**：点击轮次分隔行弹出全部轮次的大纲跳转；上下文环的悬停提示会分解系统 / 工具 / 消息 token。
-- **工作区管理与账户卡**：设置页「工作区」标签可新增目录、上移排序、重命名、删除工作区；同页账户卡显示登录状态、昵称/联系方式与用量/充值入口。
+- **工作区管理与 DeepSeek 账户**：设置页「工作区」标签可新增目录、上移排序、重命名、删除工作区；同页账户卡支持**登录 / 退出 DeepSeek 账户**（浏览器授权，可取消、显示阶段与余额，登录后可直接查用量/充值），无需切到 `dsh web`。
 - **高级设置**：由设置 schema 驱动的表单（agent-loop、终端沙箱、子代理、网页搜索、会话日志、思考强度等），支持恢复默认。
 - **面板自愈**——显示器断开等原因让 webview 渲染面失效（面板白屏、直到重开窗口才恢复）时：低频看门狗只在「视图可见且窗口聚焦」时每分钟探测一次（后台完全静默），焦点/可见性恢复时立即探测，失联数秒内自动重建 webview（状态与历史自动重拉）；命令「DSH: 重新加载侧边栏面板」可手动恢复。
 - **诚实的 DSH 版本兼容**——每个可选功能（插件页、作业、定时任务、搜索、分叉、账户、高级设置等）对应一组 RPC；网关返回 not-found / arguments-invalid 时逐项记录并显示在面板顶栏与设置页：当前 DSH 版本过高/过低、哪个接口不兼容、服务端原文。入口不会因版本不匹配被隐藏；超出已验证区间（0.1.7-rc.2 起）的版本会明确标注「未经验证」。完整矩阵见 [docs/compatibility.md](docs/compatibility.md)。
 - **诊断导出**——命令「DSH: 导出诊断报告」打包版本信息、连接阶段、兼容台账、harness 记录、本窗口心跳与日志尾部为 Markdown（不含凭据），便于反馈问题。
 - **输入栏接管**：agent 提问时输入栏锁定，防止误发消息。关闭问题卡会提交一整批**跳过**答案（官方跳过语义），agent 视作已回复继续工作，不会以为问题没送达而重问。
-- **附件**——图片可直接粘贴或拖进输入框（与官方网页一致、内联发送）；文档从系统或资源管理器拖入（或用 📎 选择）即作为耐久文件引用发送。草稿栏显示缩略图与大小（点缩略图看大图），发送后的图片会渲染在对话里。
+- **附件**——图片可直接粘贴或拖进输入框（与官方网页一致、内联发送）；文档从系统或资源管理器拖入（或用 📎 选择）即作为耐久文件引用发送。草稿栏显示缩略图与大小（点缩略图看大图），发送后的图片会渲染在对话里。 排队中的消息行同样显示随消息附带的图片缩略图与文件标签；单条消息文字超过三行后在该行内滚动，不再撑高输入区。
 - **浏览器工具**——伴生插件的 `page_screenshot` 会把页面图片渲染**在对话里**（模型真正看到）并可用 `page_eval` 做渲染断言——不受沙箱限制，见[内置伴生插件](#内置伴生插件)。
 - 记账类消息（运行时上下文、模型切换通知）不再上屏——记录里只保留你和 agent 真正说过的话。
 
@@ -100,7 +104,6 @@
 
 - **选中代码就问**——选中代码 → 右键 → *DSH: 询问选中内容*，带结构化上下文卡片（文件 / 选区 / 工作区 / 分支）；询问在编辑器侧边新列分屏打开该工作区专属的**问题对话窗口**，不会混入编码会话；会话标题恒为「问题对话」（官方 rename 钉住），窗口内可直接发送后续消息、随时 ✕ 停止当前回合。
 - **Review Agent Changes**——每轮改动文件清单 → 一键打开 VS Code 原生 **git diff**。
-- **跟随 agent 编辑**——自动打开 + 光标定位首个改动行（预览标签、不抢焦点）；任务运行期间的外部写入（如 `pwsh`）同样被捕获跟随；可用 `dshVsc.followAgentEdits` 开关。
 - **内嵌工具调用一览**——`run_code` 内部的嵌套调用（`pwsh`、`read`、`write` 等）以缩进的 ↳ 子卡片实时显示参数、结果与运行计时，与父级卡片同组。
 - **轮次结果不说谎**——因错误结束的轮次（余额耗尽、凭据失效、超时、中断）在转录里标为失败并附原始错误消息与 HTTP 状态，不再染绿「完成」。余额类失败附充值入口；失败轮还会弹一次 VS Code 通知（`dshVsc.notifyTurnFailures` 可关闭）。
 
@@ -118,8 +121,9 @@
 - **插件管理**——从 registry 检索安装、启停、卸载；遇到 `incompatible-version` 拒绝可授予**版本豁免**（需显式确认风险）；需要批准的构建（pendingBuilds）也会弹出来等待确认。
 - **官方可选插件包，原生支持**——插件页把官方实验性插件包全部归类（智能体团队、语音输入、自动评审、Inspector、会话搜索 / 标题、终端、ralph、徽章技能、思维链翻译、worktree、插件市场），勾选即从安装副本直接启用——无需重装、无需手改 profile。按需子代理供应商（Codex、Claude Code）按固定版本 spec 安装；已安装包落后时提供**更新**；安装响应丢失可用「检查安装状态」找回；内置模块按 Agent 预设分组展示。
 - **插件市场**（可选）——启用官方 *plugin market* 插件包后，插件页会多出索引管理与市场检索 / 安装 / 更新，同样带兼容性与版本豁免保护。
+- **API Key：一个供应商下拉搞定**——设置页「API」标签对齐官方「模型」页：从一个下拉里选供应商（DSH 账号、内置目录、已注册或自定义），下方显示路由 / 默认端点 / 凭据状态，一个密码框完成设置或清除。为休眠的内置供应商保存 Key 会自动写入路由配置（官方端点 + 协议 + key ref）并发现模型——与官方网页写入路径完全一致；账号托管与只读供应商只展示状态，不提供无效输入框。
+- **自定义供应商**——纯表单（无预设向导）：路由 ID、显示名称、端点 URL、协议（OpenAI Chat Completions / Responses、Anthropic Messages）、API Key 与模型列表（含《发现模型》）；保存后立即加入会话模型目录。
 - **MCP 服务器**在 DSH 自己的 profile（`cordis.yml`）里配置；DSH 没有对应的 RPC，扩展有意不接管。
-- **API 与自定义供应商**——设置页「API」标签：按供应商管理 API Key（环境变量或 DSH 凭据存储，可设置/清除）；列出 DSH 内置的**全部供应商目录**（默认休眠），为任一供应商填写 Key 即自动写入路由配置并发现模型；一键创建自定义供应商（路由、显示名、协议、base URL、模型列表 + 《发现模型》）；保存后立即加入会话模型目录。
 
 **harness 生命周期**
 
@@ -135,10 +139,6 @@
 **会话按工作区分组**——当前工作区的会话排在最前（加粗），其余折叠在「其他工作区（N）」下
 
 <p align="center"><img src="docs/screenshots/session-picker.png" width="260" alt="按工作区分组的会话选择器" /></p>
-
-**跟随 agent 编辑**——DSH 写入的文件自动在编辑器打开，光标落在首个改动行（预览标签、不抢焦点）
-
-<p align="center"><img src="docs/screenshots/follow-edits.png" width="640" alt="跟随 agent 编辑" /></p>
 
 **审批卡片**——允许一次 / **永久允许**（应答本次并把会话权限提升为升级目标）/ 拒绝
 
@@ -159,15 +159,19 @@
 ## 环境要求
 
 - **VS Code `^1.90.0`**——Windows / macOS / Linux。
-- **全局安装 DSH**：`npm i -g @deepseek-ai/dsh`（0.1.7-rc.2 或更新；实测至 0.2.0-rc.2）。扩展会复用正在运行的 `dsh web`，没有时才自启自己的实例——同端口、同历史（`~/.dsh`），一份历史，绝无第二个服务端。DSH 缺失时，「DSH Bridge」输出通道会给出安装提示。
-- **API Key 写入 DSH 凭据库**（在扩展设置页「API」标签管理；环境变量永远优先）。账号登录仍在 DSH 侧（`dsh web` 浏览器登录）。
+- **Node.js ≥ 24.9（DSH 运行时要求）**。DSH 的 npm 包声明 `engines.node >= 24.9.0`；扩展会依次探测 PATH、常见安装位置，最后回退到 VS Code 自带的 Node（版本足够时）。用 nvm/asdf/volta 的话，把 `dshVsc.nodePath` 指过去。
+- **全局安装 DSH**：`npm i -g @deepseek-ai/dsh`（0.1.7-rc.2 或更新；实测至 0.2.2-alpha.2），可用 `dsh --version` 自检。扩展会复用正在运行的 `dsh web`，没有时才自启自己的无窗口实例——同端口、同历史（`~/.dsh`），一份历史，绝无第二个服务端。DSH 缺失时，「DSH Bridge」输出通道会给出确切的安装命令；非全局安装可用 `dshVsc.dshScriptPath` 指向其 `lib/bin.js` 入口。
+- **插件安装需要 pnpm 11+（自行安装）**。DSH 的插件管理器通过 `pnpm` 安装插件，且检索时会调用 `pnpm view ... --config.fetch-retries=0`——pnpm 9/10 的 `view` 会转调 npm 并拒绝该参数，导致检索/安装规划失败（npm `EUNKNOWNCONFIG`）。扩展只负责探测 PATH / PNPM_HOME 上**版本 ≥ 11** 的 pnpm 并如实告诉你缺什么、该跑哪条命令，**不会替你下载或安装任何东西**。请自行 `npm i -g pnpm@11`，或用 `dshVsc.pnpmPath` 指定已有路径。没有 pnpm 时 harness 仍可启动，只是插件/伴生插件安装不可用。设置页「运行环境」卡片会展示 Node/DSH/pnpm 状态与安装命令，并提供「重启 DSH 服务」（命令面板同款）让托管实例用上新环境。
+- **API Key 写入 DSH 凭据库**（在扩展设置页「API」标签管理；环境变量永远优先）。DeepSeek 账户登录也在扩展设置页「工作区」标签内完成（浏览器授权，可退出登录）。
 - **Windows**：workspace-write 沙箱要求工作区目录*可授权*（沙箱需要写入低完整性标签，这要求完全控制权限）。扩展会自动修复（`dshVsc.autoFixWorkspaceAcl`）；确实不行时才请求一次管理员修复。
 
 ## 安装
 
+扩展 ID 为 **`najabom.dsh-vsc`**。（旧版/开发版是 `local.dsh-vsc`——先卸载旧扩展，避免两份同时运行。）
+
 **方式 A —— Release 安装包（推荐）**
 
-1. 从 [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases) 下载最新的 `dsh-vsc-<版本号>.vsix`。
+1. 从 [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases) 下载最新的 `dsh-vsc-<版本号>.vsix`（上架 VS Code Marketplace / Open VSX 后，安装的是同一个扩展 ID）。
 2. 安装（VS Code `Ctrl+Shift+P` → **Install from VSIX**，或命令行）：
 
    ```bash
@@ -176,6 +180,8 @@
 
 3. 重载窗口（`Ctrl+Shift+P` → **Reload Window**），左侧活动栏点 **DSH** 图标即可。
 
+> 每个 Release 同时发布 `SHA256SUMS.txt`；想校验下载文件：`sha256sum -c SHA256SUMS.txt`（macOS/Linux）或 `Get-FileHash dsh-vsc-*.vsix -Algorithm SHA256`（PowerShell）。
+>
 > 默认 harness 地址 `http://127.0.0.1:3080`；可用 `dshVsc.url` 设置或 `DSH_WEB_URL` 环境变量覆盖。
 
 **方式 B —— 源码构建**
@@ -192,8 +198,8 @@ code --install-extension dsh-vsc-<版本号>.vsix --force
 
 1. **重载窗口**——装完必须重载才生效。
 2. 左侧活动栏点 **DSH** 图标打开侧边栏。
-3. 若尚未安装 DSH，先执行一次 `npm i -g @deepseek-ai/dsh`（见[环境要求](#环境要求)）；之后扩展会自启并持有它的无窗口 harness（或复用正在运行的那个）。
-4. 发消息，看 agent 干活。审批/提问会以卡片形式出现在面板里；文件改动可在编辑器里自动打开（跟随 agent 编辑）。
+3. 若尚未安装 DSH，先执行一次 `npm i -g @deepseek-ai/dsh`（见[环境要求](#环境要求)）；之后扩展会自启并持有它的无窗口 harness（或复用正在运行的那个）。缺 Node.js / DSH / pnpm 时，扩展会在「DSH Bridge」输出通道里给出一次带安装命令的明确提示，而不是静默失败。
+4. 发消息，看 agent 干活。审批/提问会以卡片形式出现在面板里。
 
 ## 它怎么工作
 
@@ -233,6 +239,7 @@ VSIX 内置了一个小型 DSH 插件（`dsh-vsc-companion`，源码在 [`compan
 | `DSH: 打开侧边栏` | 聚焦 DSH 侧边栏 |
 | `DSH: 启动 Web Harness` | 显式启动/连接 harness |
 | `DSH: 停止自启的 Harness` | 只停本扩展自拉的实例；共享的绝不杀 |
+| `DSH: 重启 DSH 服务` | 按最新 Node/DSH/pnpm 探测结果重启扩展自启的实例（手动启动的 `dsh web` 不动） |
 | `DSH: 刷新连接状态` | 重新探测 harness |
 | `DSH: 打开 Web 界面（高级）` | 把官方 DSH 网页作为标签页打开——同一个 harness、同一份历史 |
 | `DSH: 询问选中内容` | 询问选中的代码（右键菜单里也有） |
@@ -245,19 +252,49 @@ VSIX 内置了一个小型 DSH 插件（`dsh-vsc-companion`，源码在 [`compan
 | 设置 | 默认 | 说明 |
 |---|---|---|
 | `dshVsc.url` | `http://127.0.0.1:3080` | DSH harness 的地址；也认 `DSH_WEB_URL` |
+| `dshVsc.nodePath` | `""`（自动） | 启动 DSH 所用的 Node.js 可执行文件；留空自动探测。DSH 需要 Node ≥ 24.9 |
+| `dshVsc.dshScriptPath` | `""`（自动） | `@deepseek-ai/dsh` 入口脚本（`lib/bin.js`）；留空自动探测全局安装 / PATH 上的 `dsh` |
+| `dshVsc.pnpmPath` | `""`（自动） | 插件安装所用的 pnpm 可执行文件（DSH 需要 11+，需你自行安装）；留空自动探测 PATH / PNPM_HOME |
 | `dshVsc.autoStart` | `true` | 配置地址无人应答时自动启动 harness |
-| `dshVsc.followAgentEdits` | `true` | agent 改文件时自动在编辑器打开（预览标签、光标定位首个改动行）；覆盖直接文件工具与 PTC 嵌套调用 |
 | `dshVsc.companion` | `true` | 内置 `dsh-vsc-companion` DSH 插件（任务清单实时化 + 宿主侧 `page_screenshot` / `page_eval`）随扩展自动安装并保持更新 |
 | `dshVsc.autoFixWorkspaceAcl` | `true` | 打开/切换工作区时自动授予 Windows 沙箱所需的目录权限；无法自动修复时提供一次性管理员修复 |
 
 ## 边界与刻意不做的事
 
-- 不重写聊天 UI、不截断/白名单事件；账号登录仍在 DSH 侧（API Key 由设置页写入 DSH 凭据服务）。
+- 不重写聊天 UI、不截断/白名单事件；DeepSeek 账户登录/退出可在设置页完成（浏览器授权），API Key 由设置页写入 DSH 凭据服务。
 - 不另起第二个 harness——能复用就复用，只有没有才自拉；从属实例随 VS Code 关闭，手动启动的保持不动。
-- 改动追踪与跟随编辑覆盖文件工具（`write` / `edit` / `apply_patch` / `str_replace_editor`）及其 PTC 嵌套调用；任务运行期间，经 shell 命令等其他方式写入磁盘的文件由工作区文件监控捕获，同样计入改动徽章。
+- 改动追踪覆盖文件工具（`write` / `edit` / `apply_patch` / `str_replace_editor`）及其 PTC 嵌套调用；任务运行期间，经 shell 命令等其他方式写入磁盘的文件由工作区文件监控捕获，同样计入改动徽章。
 - `+N-M` 统计对文件工具精确；外部写入按文件粒度记入（徽章能列出文件，行数统计只有工具元数据才有）。
 - 「选中代码就问」在编辑器侧边新列分屏打开该工作区专属的**问题对话窗口**；此后该工作区的每次询问都复用同一对话。
 - 审批/选择题在你切回一个正等待应答的会话时会重新显示（agent 未获答复前一直阻塞）。
+
+## 常见问题与故障排查
+
+**面板显示 harness 离线 / 自启不起来。**
+
+- 在终端里跑 `dsh --version`：DSH 必须全局安装（`npm i -g @deepseek-ai/dsh`），Node 必须 ≥ 24.9（`node --version`）。
+- 打开「DSH Bridge」输出通道（查看 → 输出 → DSH Bridge）：它会记录解析到的 Node 路径/版本、DSH 入口脚本，以及 harness 是自启还是复用；缺依赖时会输出一次带安装命令的明确提示。
+- 自定义环境（nvm/volta/asdf、非全局 DSH、自定义端口）：设置 `dshVsc.nodePath`、`dshVsc.dshScriptPath` 和/或 `dshVsc.url`。
+- 手动启动的 `dsh web` 会被复用、绝不杀掉。若该类实例要求浏览器鉴权且接入失败，面板会显示「API 拒绝访问」；`dshVsc.nativeWebAuth`（默认开）允许扩展用本机持久会话密钥自签回环 Cookie。
+
+**插件安装失败——`'pnpm' 不是内部或外部命令` / `pnpm: command not found` / “refused”。**
+
+- 原因：DSH 插件管理器用 `pnpm` 安装插件，且需要 **pnpm 11+**（检索时调用 `pnpm view ... --config.fetch-retries=0`，pnpm 9/10 会把它转给 npm 并失败 `EUNKNOWNCONFIG`）；harness 进程的 `PATH` 里没有 pnpm，或只有过旧版本。**扩展故意不替你安装 pnpm**——外部工具属于你的环境（见「环境要求」）。
+- 修法：自行执行 `npm i -g pnpm@11`（或用 `dshVsc.pnpmPath` 指向 pnpm 11+），然后点 **重启 DSH 服务**（命令面板 `DSH: 重启 DSH 服务`），让扩展托管的 harness 用新 `PATH` 启动。手动启动的 `dsh web` 扩展无权重启——请在那条终端里重启。
+- 设置页 *通用设置 → 运行环境* 卡片会显示缺什么/哪个版本过旧，并给出确切安装命令。内置伴生插件同样经插件管理器安装，所以缺 pnpm 也会表现为设置页「插件」标签里「伴生插件未安装」。
+
+**扩展更新检查失败（GitHub API）。**
+
+- GitHub API 对匿名请求约每小时 60 次/IP；被限流时设置卡片会显示重置时间并建议配置 token，而不是假装「已是最新」。设置 `GITHUB_TOKEN` 环境变量后重载 VS Code 可提高限额。
+- 404 表示仓库当前没有已发布的 Release；403 也可能是代理/防火墙拦截了 `api.github.com`。兜底：从 Releases 手动下载 VSIX 安装。
+
+**应用内扩展更新找不到 `code` 命令（macOS/Linux）。**
+
+- CLI 随应用安装：macOS 为 `<App>/Contents/Resources/app/bin/code`，Linux 为 `/usr/bin/code` 或 `/usr/share/code/bin/code`（snap、Homebrew 同理）。若 `code` 不在 `PATH`，在命令面板执行 **Shell Command: Install 'code' command in PATH**，或手动安装 VSIX。
+
+**从旧开发版升级。**
+
+- 扩展 ID 已从 `local.dsh-vsc` 改为 **`najabom.dsh-vsc`**。安装正式发布版之前先在扩展视图里卸载旧版（⋯ → 卸载），然后重载窗口。更新中心按包名（`name: dsh-vsc`）定位当前运行的扩展，因此换 publisher 重新发布的分支也能正常自更新。
 
 ## 开发
 
@@ -266,6 +303,7 @@ npm install
 npm run typecheck   # tsc --noEmit（两套配置）
 npm run build       # esbuild → dist/extension.js + dist/media
 npm run package     # 构建 + 打包 vsix
+npm run install:local  # 构建 + 打包 + 把新 vsix 装进本机 VS Code（先卸载旧开发版 ID）
 ```
 
 F5 调试（[`.vscode/launch.json`](.vscode/launch.json)）→ Extension Development Host。
@@ -278,7 +316,7 @@ node scratch/auto-test.mjs <sessionId> <turnNo>
 
 ## 文档
 
-- [设计与架构说明](docs/design.md)——为什么采用「纯桥接」、新版 DSH 协议的大白话解释、overlay 护栏，以及更新器 / 沙箱 / 跟随编辑这些机制的设计。
+- [设计与架构说明](docs/design.md)——为什么采用「纯桥接」、新版 DSH 协议的大白话解释、overlay 护栏，以及更新器 / 沙箱这些机制的设计。
 - [DSH 兼容矩阵](docs/compatibility.md)——已验证的 DSH 版本、能力 → RPC 映射与版本不匹配的报告方式。
 - [源码地图](src/README.md)——`src/` 里各目录管什么。
 - [`llms.txt`](llms.txt)——给 LLM / AI 抓取器用的机器可读文档索引。

@@ -3,9 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
-import type { AgentTeamProjection, ChangedFileView, ChangesDiffView, ChangesSummaryView, GoalView, JobView, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PresentedFileView, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
+import type { AgentTeamProjection, ChangedFileView, ChangesDiffView, ChangesSummaryView, GoalView, ImageAttachmentRef, JobView, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PresentedFileView, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
+import { ACCOUNT_ATTEMPT_ACTIVE_PHASES, type AccountStateWire } from "../harness/protocol";
 import type { FollowTarget, WaterfallFrame, WorkspaceState } from "../events/eventStream";
-import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
+import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, QueueAttachmentView, QueueItemView, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
 import { countMetaDiff, countToolArgsDiff } from "../editor/diffCount";
 import { INTENT_CHOICES, askPromptText, sendAsk } from "../editor/askSelection";
 import { askSessionIdSet } from "../editor/askSessions";
@@ -14,6 +15,7 @@ import { ensureWorkspaceAcl } from "../harness/workspaceAcl";
 import type { CompanionStatus } from "../harness/companion";
 import type { DshUpdateHooks } from "./protocol";
 import type { CompatibilityReport } from "../harness/capabilities";
+import { diagnoseDeps, invalidateDepsCache } from "../harness/deps";
 
 /** Normalize the settings-page channel picker value (free-form string on the
  *  wire) to a channel the updater understands; unknown → auto. */
@@ -24,6 +26,44 @@ function normalizeUpdateChannel(value: unknown): string {
 /** Composer file attachments ride the prompt as one upload each; cap matches
  *  the panel-side check so the two ends agree. */
 const MAX_ATTACHMENT_FILE_BYTES = 25 * 1024 * 1024;
+
+/** Browser sign-in polling cadence. The platform's attempt timeout defaults to
+ *  10 minutes and the attempt itself carries `expiresAt`; this fallback only
+ *  bounds polling when the harness omits it. */
+const ACCOUNT_POLL_INTERVAL_MS = 1500;
+const ACCOUNT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Settled settings-account profile (account/getProfile ready value). */
+type SettingsAccountProfile = { name?: string; contact?: string; avatarUrl?: string };
+
+/** zh-CN copy for a settled sign-in attempt's `errorCode` (official wording). */
+function accountSignInFailureText(errorCode?: string): string {
+  switch (errorCode) {
+    case "expired":
+      return "登录已过期，请重新登录。";
+    case "no-response":
+      return "登录未完成：未能收到平台响应，请检查网络状况后重试。";
+    case "network":
+      return "登录未完成：网络异常，请检查网络状况后重试。";
+    case "protocol":
+      return "登录未完成：登录协议异常，请重试。";
+    case "storage":
+      return "登录未完成：凭据保存失败，请检查 DSH 数据目录权限后重试。";
+    default:
+      return "登录未完成，请重试。";
+  }
+}
+
+/** Sign-in-specific failure copy. `account: protocol` is DSH's
+ *  PlatformAuthError("protocol"): the one startSignIn failure the user can act
+ *  on, because it means `loginOrigin()` rejected the callback origin. */
+function describeAccountSignInFailure(error: unknown): string {
+  const message = String((error as Error)?.message ?? "");
+  if (message.includes("account: protocol")) {
+    return "发起登录失败：DSH 本体拒绝了登录回调地址（要求回环地址且带显式端口，例如 http://127.0.0.1:3080）。请检查 DSH 服务地址。";
+  }
+  return describeHarnessFailure("发起登录失败", error);
+}
 
 /** Image media type for an attachment file name (only the raster images the
  *  harness admits); everything else becomes a generic durable file. */
@@ -134,6 +174,35 @@ function textOf(content: { type?: string; text?: string }[] | undefined): string
     .join("");
 }
 
+/** One attachment ref as it rides an inbox row's logged content block. */
+interface InboxAttachmentRef {
+  attachmentId?: string;
+  mediaType?: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+}
+
+/** One logged content block of an inbox row (text / image / file receipt). */
+interface InboxBlock {
+  type?: string;
+  text?: string;
+  attachment?: InboxAttachmentRef;
+}
+
+/** Build the full image ref the harness's attachment RPC validates. */
+function inboxImageRef(ref: InboxAttachmentRef & { attachmentId: string }): ImageAttachmentRef {
+  return {
+    attachmentId: ref.attachmentId,
+    mediaType: typeof ref.mediaType === "string" ? ref.mediaType : "image/png",
+    bytes: typeof ref.bytes === "number" ? ref.bytes : 0,
+    width: typeof ref.width === "number" ? ref.width : 0,
+    height: typeof ref.height === "number" ? ref.height : 0,
+    ...(typeof ref.name === "string" ? { name: ref.name } : {}),
+  };
+}
+
 /** Case/trailing-separator-insensitive path compare (Windows-shaped paths). */
 function normalizePath(p: string): string {
   return p.replace(/[\\/]+/g, "\\").replace(/\\+$/, "").toLowerCase();
@@ -234,10 +303,28 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private lastBalance: AccountBalanceView | null = null;
   /** Last balance fetch time — turn/end refreshes are throttled. */
   private lastBalanceAt = 0;
+  /** Latest account/getState snapshot (settings account card + polling). */
+  private lastAccountState: AccountStateWire | null = null;
+  /** Settings-card sign-in polling: setInterval while a browser attempt is in
+   *  flight, generation token so a stopped poll can never post a late result. */
+  private accountPollTimer?: ReturnType<typeof setInterval>;
+  private accountPollToken = 0;
+  /** Epoch ms after which polling gives up (attempt `expiresAt` + slack). */
+  private accountPollDeadline = 0;
+  /** A sign-out confirmation was requested; the confirm message must follow it. */
+  private accountSignOutPrompted = false;
+  /** Serialize start/cancel/sign-out so a double click cannot race them. */
+  private accountActionBusy = false;
   /** mux clientId of the $events stream — required by $events/result. */
   private eventClientId = "";
   /** Pending waterfall requests: eventId → sessionId. */
   private pendingWaterfalls = new Map<string, { sessionId: string; message: HostMessage }>();
+  /** Inline data URLs for queued image refs, keyed `${sessionId}|${attachmentId}`. */
+  private queueImageUrls = new Map<string, string>();
+  /** Attachment reads in flight, so projection replays cannot stampede the RPC. */
+  private queueImageInflight = new Set<string>();
+  /** Refs the harness refused (compacted / foreign) — never retried, logged once. */
+  private queueImageFailed = new Set<string>();
   /** Unfiltered session/list rows (subagents included) — team member rows,
    *  running flags and per-child model lookups read from here. */
   private rawSessions = new Map<string, SessionSummary>();
@@ -979,7 +1066,23 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       event === "credentials/record-updated" ||
       event === "credentials/reference-updated"
     ) {
-      if (this.settingsPanel) void this.postSettingsData();
+      if (this.settingsPanel) {
+        void this.postSettingsData();
+        // The API tab's provider directory joins settings + the provider
+        // registry + credentials; refresh it when any of those changed. For a
+        // plain settings document update only the llm namespaces can affect
+        // the directory, so stay quiet otherwise (the page save path already
+        // re-posts the snapshot itself).
+        const updatedNs = args[0];
+        if (
+          event !== "settings/document-updated" ||
+          updatedNs === "llm-pi-ai" ||
+          updatedNs === "llm-deepseek" ||
+          updatedNs === "llm-deepseek-account"
+        ) {
+          void this.postProviderKeys();
+        }
+      }
       return;
     }
     if (event === "permission-presets/catalog-changed") {
@@ -1103,25 +1206,81 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private postQueue(sessionId: string, inbox: unknown): void {
     type InboxRow = {
       id?: string;
-      content?: { type?: string; text?: string }[];
+      content?: InboxBlock[];
       source?: { kind?: string; summary?: string };
     };
     const v = (inbox ?? {}) as { "next-turn"?: InboxRow[]; "next-step"?: InboxRow[] };
+    const pending: { key: string; ref: ImageAttachmentRef }[] = [];
     // The inbox carries the ORIGINAL message objects, including `source`
-    // (e.g. {kind:"tool-jobs"} completion notices). Pass the kind through so
-    // the panel can label harness notices instead of calling them user input.
-    const mapRow = (row: InboxRow, placement: "queued" | "steering") => ({
-      id: String(row.id ?? ""),
-      placement,
-      text: textOf(row.content),
-      ...(typeof row.source?.kind === "string" ? { source: row.source.kind } : {}),
-      ...(typeof row.source?.summary === "string" ? { summary: row.source.summary } : {}),
-    });
+    // (e.g. {kind:"tool-jobs"} completion notices) and durable attachment refs
+    // for the images/files queued with the message. Pass both through so the
+    // panel can show the same chips it showed in the composer.
+    const mapRow = (row: InboxRow, placement: "queued" | "steering"): QueueItemView => {
+      const attachments: QueueAttachmentView[] = [];
+      for (const block of row.content ?? []) {
+        const ref = block.attachment;
+        if (!ref || typeof ref.attachmentId !== "string") continue;
+        if (block.type === "image") {
+          const key = `${sessionId}|${ref.attachmentId}`;
+          const dataUrl = this.queueImageUrls.get(key);
+          attachments.push({
+            kind: "image",
+            ...(typeof ref.name === "string" ? { name: ref.name } : {}),
+            mediaType: typeof ref.mediaType === "string" ? ref.mediaType : "image/png",
+            ...(typeof ref.bytes === "number" ? { bytes: ref.bytes } : {}),
+            ...(typeof ref.width === "number" ? { width: ref.width } : {}),
+            ...(typeof ref.height === "number" ? { height: ref.height } : {}),
+            ...(dataUrl ? { dataUrl } : {}),
+          });
+          if (!dataUrl) pending.push({ key, ref: inboxImageRef({ ...ref, attachmentId: ref.attachmentId }) });
+        } else if (block.type === "file") {
+          attachments.push({
+            kind: "file",
+            ...(typeof ref.name === "string" ? { name: ref.name } : {}),
+            ...(typeof ref.bytes === "number" ? { bytes: ref.bytes } : {}),
+          });
+        }
+      }
+      return {
+        id: String(row.id ?? ""),
+        placement,
+        text: textOf(row.content),
+        ...(typeof row.source?.kind === "string" ? { source: row.source.kind } : {}),
+        ...(typeof row.source?.summary === "string" ? { summary: row.source.summary } : {}),
+        ...(attachments.length ? { attachments } : {}),
+      };
+    };
     this.post({
       type: "queue",
       sessionId,
       items: [...(v["next-turn"] ?? []).map((row) => mapRow(row, "queued")), ...(v["next-step"] ?? []).map((row) => mapRow(row, "steering"))],
     });
+    for (const item of pending) this.resolveQueueImage(sessionId, item.key, item.ref);
+  }
+
+  /** Read one queued image's bytes, cache the data URL, and re-post the queue. */
+  private resolveQueueImage(sessionId: string, key: string, attachment: ImageAttachmentRef): void {
+    if (!this.client || this.queueImageUrls.has(key) || this.queueImageInflight.has(key) || this.queueImageFailed.has(key)) return;
+    this.queueImageInflight.add(key);
+    void this.client
+      .readAttachment(sessionId, attachment)
+      .then((value) => {
+        const mediaType = value.attachment?.mediaType || attachment.mediaType || "image/png";
+        // Thumbnails are only needed while queued; keep the cache bounded.
+        if (this.queueImageUrls.size > 64) this.queueImageUrls.clear();
+        this.queueImageUrls.set(key, `data:${mediaType};base64,${value.data}`);
+      })
+      .catch((error: unknown) => {
+        this.queueImageFailed.add(key);
+        this.log(`queue image ${attachment.attachmentId.slice(0, 12)} unavailable: ${(error as Error).message}`);
+      })
+      .finally(() => {
+        this.queueImageInflight.delete(key);
+        if (this.activeSessionId === sessionId) {
+          const inbox = this.projections.get(sessionId)?.get("inbox");
+          if (inbox !== undefined) this.postQueue(sessionId, inbox);
+        }
+      });
   }
 
   async refresh(): Promise<void> {
@@ -1573,13 +1732,25 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       }
       case "getAttachment": {
         // Transcript images are stored as refs in the log; bytes come back
-        // through the harness's own session.attachment RPC (which refuses ids
-        // the named session never referenced). Failures degrade to a labeled
-        // placeholder rather than an empty box.
+        // through the harness's own session.attachment RPC. DSH 0.2.x
+        // validates the WHOLE ref (id, media type, byte length, dimensions)
+        // and rejects the bare-id shape with gateway/input-invalid, so prefer
+        // the full ref the panel sent and keep the bare id as a fallback for
+        // older harnesses. Failures degrade to a labeled placeholder.
         const sessionId = message.sessionId || this.activeSessionId;
         try {
           if (!sessionId) throw new Error("没有活动会话");
-          const value = await this.client.sessionAttachment(sessionId, message.attachmentId);
+          const ref = message.attachment;
+          const value = ref
+            ? await this.client.readAttachment(sessionId, {
+                attachmentId: ref.attachmentId,
+                mediaType: ref.mediaType,
+                bytes: ref.bytes ?? 0,
+                width: ref.width ?? 0,
+                height: ref.height ?? 0,
+                ...(ref.name ? { name: ref.name } : {}),
+              })
+            : await this.client.sessionAttachment(sessionId, message.attachmentId);
           this.post({
             type: "attachment",
             requestId: message.requestId,
@@ -2283,16 +2454,23 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     const now = Date.now();
     if (!force && now - this.lastBalanceAt < 10000) return;
     this.lastBalanceAt = now;
+    const view = await this.fetchAccountBalance();
+    if (view === undefined) return;
+    this.lastBalance = view;
+    this.post({ type: "balance", value: view });
+  }
+
+  /** Fetch + map account/getBalance; undefined means the call failed. */
+  private async fetchAccountBalance(): Promise<AccountBalanceView | null | undefined> {
+    if (!this.client) return undefined;
     try {
       const raw = await this.client.getAccountBalance(this.context.extension.packageJSON.version as string, "zh-CN");
-      const view: AccountBalanceView | null =
-        raw && Array.isArray(raw.value)
-          ? { status: raw.status, wallets: raw.value, bonusWallets: raw.bonusWallets ?? [] }
-          : null;
-      this.lastBalance = view;
-      this.post({ type: "balance", value: view });
+      return raw && Array.isArray(raw.value)
+        ? { status: raw.status, wallets: raw.value, bonusWallets: raw.bonusWallets ?? [] }
+        : null;
     } catch (error) {
       this.log(`balance: ${(error as Error).message}`);
+      return undefined;
     }
   }
 
@@ -2769,6 +2947,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     );
     this.settingsPanel = panel;
     panel.onDidDispose(() => {
+      this.stopAccountPolling();
       this.settingsPanel = undefined;
     });
     const settingsPath = vscode.Uri.joinPath(this.context.extensionUri, "dist", "media", "native", "settings.html");
@@ -2782,6 +2961,18 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     // Update-center messages work without a harness connection (the plugin
     // check talks to GitHub); everything else below needs the harness.
     const updateType = String(msg.type ?? "");
+    // Env doctor works without a harness connection: it explains the local
+    // runtime (node / dsh / pnpm) and its external prerequisites. Preparing
+    // external tools is the USER's job (honest requirement in the docs); the
+    // card only diagnoses and restarts the managed harness.
+    if (updateType === "envDoctor") {
+      await this.postEnvDoctor();
+      return;
+    }
+    if (updateType === "restartHarness") {
+      await this.restartHarnessFromSettings();
+      return;
+    }
     if (
       updateType === "pluginUpdateCheck" ||
       updateType === "pluginUpdateInstall" ||
@@ -2823,6 +3014,18 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "accountSignIn":
+        await this.beginAccountSignIn();
+        break;
+      case "accountCancelSignIn":
+        await this.cancelAccountSignIn();
+        break;
+      case "accountRequestSignOut":
+        await this.requestAccountSignOut();
+        break;
+      case "accountConfirmSignOut":
+        await this.confirmAccountSignOut();
+        break;
       case "pluginsReady":
         await this.postPlugins();
         break;
@@ -3208,35 +3411,278 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Settings page extras: workspace registry + the read-only account card. */
+  /** Settings page extras: workspace registry + the account card. */
   private async postSettingsExtras(): Promise<void> {
     this.postWorkspaces();
-    if (!this.client) return;
+    await this.refreshAccountCard();
+  }
+
+  /* ---------- settings account card (sign-in / sign-out) ---------- */
+
+  /** Re-fetch account/getState (+ profile/balance when signed in) and push the
+   *  card. While a browser attempt is in flight this (re)starts polling. */
+  private async refreshAccountCard(): Promise<void> {
+    const client = this.client;
+    if (!client) return;
     try {
-      const state = await this.client.getAccountState();
-      let profile: { name?: string; contact?: string; avatarUrl?: string } | null = null;
-      try {
-        const p = await this.client.getAccountProfile("dsh-vsc", "zh-CN");
-        if (p && p.status === "ready") {
-          profile = {
-            name: p.value.name ?? undefined,
-            contact: p.value.contact ?? undefined,
-            avatarUrl: p.value.avatarUrl ?? undefined,
-          };
+      const state = await client.getAccountState();
+      this.lastAccountState = state;
+      const signedIn = state.status === "credential-stored";
+      const active = this.accountAttemptActive(state);
+      let profile: SettingsAccountProfile | null = null;
+      let balance: AccountBalanceView | null | undefined;
+      if (signedIn) {
+        balance = await this.fetchAccountBalance();
+        try {
+          const p = await client.getAccountProfile(this.accountVersion(), "zh-CN");
+          if (p && p.status === "ready") {
+            profile = {
+              name: p.value.name ?? undefined,
+              contact: p.value.contact ?? undefined,
+              avatarUrl: p.value.avatarUrl ?? undefined,
+            };
+          }
+        } catch {
+          /* profile is best-effort; state alone still renders */
         }
-      } catch {
-        /* profile is best-effort; state alone still renders */
       }
-      this.settingsPanel?.webview.postMessage({
-        type: "settingsAccount",
-        state: state
-          ? { status: state.status, usageUrl: state.links?.usageUrl, topUpUrl: state.links?.topUpUrl }
-          : null,
-        profile,
-      });
+      this.postSettingsAccountCard(state, profile, balance);
+      const settled = this.accountAttemptSettled(state);
+      if (settled) {
+        this.stopAccountPolling();
+        this.postSettingsSaved(settled);
+      } else if (active) {
+        this.startAccountPolling(state);
+      } else {
+        this.stopAccountPolling();
+      }
     } catch (error) {
-      this.settingsPanel?.webview.postMessage({ type: "settingsAccount", state: null, profile: null });
       this.log(`account card failed: ${(error as Error).message}`);
+      // A transient RPC failure must not blank a card we already have — keep
+      // the last known state (and keep watching a live attempt).
+      if (this.lastAccountState) {
+        if (this.accountAttemptActive(this.lastAccountState) && this.settingsPanel) this.startAccountPolling(this.lastAccountState);
+      } else {
+        this.stopAccountPolling();
+        this.postSettingsAccountCard(null, null);
+      }
+      this.postSettingsError(describeHarnessFailure("账户状态读取失败", error));
+    }
+  }
+
+  /** Extension package version — the `version` field of AccountClientMetadata. */
+  private accountVersion(): string {
+    return this.context.extension.packageJSON.version as string;
+  }
+
+  /** Browser-reachable loopback origin of the harness. DSH registers its
+   *  `/oauth/callback` route there, and `loginOrigin()` accepts only http +
+   *  loopback host + explicit port + path "/", so pass the base origin verbatim. */
+  private accountCallbackOrigin(): string {
+    const base = this.client?.base;
+    if (!base) throw new Error("harness 未连接");
+    return new URL(base).origin;
+  }
+
+  private postSettingsAccountCard(
+    state: AccountStateWire | null,
+    profile: SettingsAccountProfile | null,
+    balance?: AccountBalanceView | null
+  ): void {
+    this.settingsPanel?.webview.postMessage({
+      type: "settingsAccount",
+      state,
+      profile,
+      ...(balance !== undefined ? { balance } : {}),
+    });
+  }
+
+  /** True while the harness is still completing a sign-in attempt. */
+  private accountAttemptActive(state: AccountStateWire | null): boolean {
+    const phase = state?.attempt?.phase;
+    return phase !== undefined && ACCOUNT_ATTEMPT_ACTIVE_PHASES.has(phase);
+  }
+
+  /** One-line success/failure text when an attempt settled, else null. */
+  private accountAttemptSettled(state: AccountStateWire): string | null {
+    const phase = state.attempt?.phase;
+    if (phase === "succeeded") {
+      return state.status === "credential-stored" ? "已登录 DeepSeek 账号" : null;
+    }
+    if (phase === "expired") return "登录已过期，请重新登录。";
+    if (phase === "failed") return accountSignInFailureText(state.attempt?.errorCode);
+    if (phase === "cancelled") return "已取消登录";
+    return null;
+  }
+
+  /** Parse + open the platform authorize URL; the webview must never render it. */
+  private async openAccountAuthorizeUrl(state: AccountStateWire): Promise<void> {
+    const authorizeUrl = state.attempt?.authorizeUrl;
+    if (!authorizeUrl) return;
+    try {
+      await vscode.env.openExternal(vscode.Uri.parse(authorizeUrl, true));
+    } catch (error) {
+      this.log(`account: open authorize url failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** 登录: start the browser sign-in (account/startSignIn) and open the platform. */
+  private async beginAccountSignIn(): Promise<void> {
+    const client = this.client;
+    if (!client || this.accountActionBusy) return;
+    this.accountActionBusy = true;
+    try {
+      let callbackOrigin: string;
+      try {
+        callbackOrigin = this.accountCallbackOrigin();
+      } catch {
+        this.postSettingsError("无法确定 DSH 服务地址，登录回调不可用");
+        return;
+      }
+      // 1) Start first: the webview shows the attempt as soon as it exists,
+      //    even if launching the browser then fails (the URL stays available).
+      const state = await client.startAccountSignIn(this.accountVersion(), "zh-CN", callbackOrigin);
+      this.lastAccountState = state;
+      this.postSettingsAccountCard(state, null, undefined);
+      await this.openAccountAuthorizeUrl(state);
+      if (this.accountAttemptActive(state)) this.startAccountPolling(state);
+      else if (state.status === "credential-stored") {
+        await this.refreshAccountCard();
+        void this.refreshBalance(true);
+      }
+    } catch (error) {
+      this.postSettingsError(describeAccountSignInFailure(error));
+    } finally {
+      this.accountActionBusy = false;
+    }
+  }
+
+  /** 取消: cancel the in-flight attempt (account/cancelSignIn with the id string). */
+  private async cancelAccountSignIn(): Promise<void> {
+    const client = this.client;
+    const attemptId = this.lastAccountState?.attempt?.id;
+    if (!client || !attemptId || this.accountActionBusy) return;
+    this.accountActionBusy = true;
+    try {
+      const state = await client.cancelAccountSignIn(attemptId);
+      this.lastAccountState = state;
+      this.stopAccountPolling();
+      await this.refreshAccountCard();
+    } catch (error) {
+      this.postSettingsError(describeHarnessFailure("取消登录失败", error));
+    } finally {
+      this.accountActionBusy = false;
+    }
+  }
+
+  /** 解除登录, step 1: ask the webview to confirm with a running-tasks warning.
+   *  The check itself is advisory; a failure still offers the confirmation. */
+  private async requestAccountSignOut(): Promise<void> {
+    if (!this.client || this.accountActionBusy) return;
+    this.accountActionBusy = true;
+    let running: boolean | null = null;
+    try {
+      running = await this.client.hasRunningAccountTasks();
+    } catch (error) {
+      this.log(`account: task check failed: ${(error as Error).message}`);
+    } finally {
+      this.accountActionBusy = false;
+    }
+    this.accountSignOutPrompted = true;
+    this.settingsPanel?.webview.postMessage({ type: "settingsAccountSignOutPrompt", running });
+  }
+
+  /** 解除登录, step 2: sign out (account/signOut) and refresh profile+balance. */
+  private async confirmAccountSignOut(): Promise<void> {
+    const client = this.client;
+    if (!client || !this.accountSignOutPrompted || this.accountActionBusy) return;
+    this.accountSignOutPrompted = false;
+    this.accountActionBusy = true;
+    try {
+      await client.signOutAccount(this.accountVersion(), "zh-CN");
+      this.stopAccountPolling();
+      await this.refreshAccountCard();
+      void this.refreshBalance(true);
+      this.postSettingsSaved("已退出登录");
+    } catch (error) {
+      this.postSettingsError(describeHarnessFailure("退出登录失败", error));
+    } finally {
+      this.accountActionBusy = false;
+    }
+  }
+
+  /** Poll account/getState while an attempt is in flight; a terminal phase
+   *  (or the credential/status flip) settles it. Generation token so a stopped
+   *  poll can never post a late result; the deadline follows the attempt's own
+   *  `expiresAt` (with a small slack) so the poll always outlives the browser
+   *  round-trip it is waiting for. */
+  private startAccountPolling(state?: AccountStateWire | null): void {
+    this.stopAccountPolling();
+    const token = this.accountPollToken;
+    this.accountPollDeadline = this.accountAttemptDeadline(state);
+    this.accountPollTimer = setInterval(() => {
+      void this.pollAccountState(token);
+    }, ACCOUNT_POLL_INTERVAL_MS);
+  }
+
+  /** When to stop polling: the attempt's `expiresAt` + slack, else a fallback.
+   *  Go by the attempt's own deadline even when it already passed: one final
+   *  getState then settles the card instead of polling a dead attempt. */
+  private accountAttemptDeadline(state?: AccountStateWire | null): number {
+    const expiresAt = state?.attempt?.expiresAt;
+    if (typeof expiresAt === "number") return expiresAt + 30_000;
+    return Date.now() + ACCOUNT_POLL_TIMEOUT_MS;
+  }
+
+  private stopAccountPolling(): void {
+    this.accountPollToken += 1;
+    if (this.accountPollTimer) clearInterval(this.accountPollTimer);
+    this.accountPollTimer = undefined;
+  }
+
+  private async pollAccountState(token: number): Promise<void> {
+    if (token !== this.accountPollToken) return;
+    const client = this.client;
+    if (!client || !this.settingsPanel) {
+      this.stopAccountPolling();
+      return;
+    }
+    try {
+      const state = await client.getAccountState();
+      if (token !== this.accountPollToken) return;
+      this.lastAccountState = state;
+      const active = this.accountAttemptActive(state);
+      if (active) {
+        // The attempt may have been re-issued with a later expiry; extend.
+        const expiresAt = state.attempt?.expiresAt;
+        if (typeof expiresAt === "number" && expiresAt + 30_000 > this.accountPollDeadline) {
+          this.accountPollDeadline = expiresAt + 30_000;
+        }
+        this.postSettingsAccountCard(state, null, undefined);
+        if (Date.now() > this.accountPollDeadline) this.stopAccountPolling();
+        return;
+      }
+      this.stopAccountPolling();
+      const phase = state.attempt?.phase;
+      if (state.status === "credential-stored") {
+        // refreshAccountCard posts the signed-in card + the 已登录 toast.
+        await this.refreshAccountCard();
+        void this.refreshBalance(true);
+      } else if (phase === "failed") {
+        this.postSettingsAccountCard(state, null, undefined);
+        this.postSettingsError(accountSignInFailureText(state.attempt?.errorCode));
+      } else if (phase === "expired") {
+        this.postSettingsAccountCard(state, null, undefined);
+        this.postSettingsError("登录已过期，请重新登录。");
+      } else {
+        // cancelled / no attempt: settle quietly.
+        await this.refreshAccountCard();
+      }
+    } catch (error) {
+      this.log(`account poll: ${(error as Error).message}`);
+      // Network hiccups are expected mid-attempt; keep polling until the
+      // attempt's own expiry deadline.
+      if (Date.now() > this.accountPollDeadline) this.stopAccountPolling();
     }
   }
 
@@ -3557,10 +4003,51 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /* ---------- runtime environment doctor (running-environment card) ---------- */
+
+  /** Local node/dsh/pnpm status for the 运行环境 card. Deliberately works
+   *  without a harness connection — a missing harness is one of the conditions
+   *  the card exists to explain. Never throws into the settings page. */
+  private async postEnvDoctor(): Promise<void> {
+    try {
+      const status = await diagnoseDeps();
+      this.postSettingsMessage({ type: "envDoctorStatus", status });
+    } catch (error) {
+      this.postSettingsMessage({
+        type: "envDoctorStatus",
+        status: null,
+        error: `环境自检不可用：${(error as Error).message}`,
+      });
+    }
+  }
+
+  /** Restart the managed harness so a user-installed toolchain update (or a
+   *  changed dshVsc.* path) reaches its process env; then re-diagnose. A
+   *  manually started `dsh web` is outside our lifecycle — the card copy says
+   *  so. */
+  private async restartHarnessFromSettings(): Promise<void> {
+    try {
+      // Registered by extension.ts (dsh.restart); tolerate its absence in a
+      // partial/older tree instead of failing the card.
+      await vscode.commands.executeCommand("dsh.restart");
+      this.postSettingsMessage({ type: "envRestartResult", value: { ok: true } });
+    } catch (error) {
+      this.postSettingsMessage({
+        type: "envRestartResult",
+        value: { ok: false, message: (error as Error).message },
+      });
+    }
+    setTimeout(() => {
+      invalidateDepsCache();
+      void this.postEnvDoctor();
+    }, 2000);
+  }
+
   /* ---------- provider keys + custom providers (API tab) ---------- */
 
-  /** Full snapshot for the API tab: every provider row with its credential
-   *  state, mirroring the official settings-models directory rules. */
+  /** Full snapshot for the API tab: one row per selectable provider (account →
+   *  official → the configurable-provider directory in declaration order),
+   *  with its credential state, mirroring the official settings-models page. */
   private async postProviderKeys(): Promise<void> {
     if (!this.client) return;
     try {
@@ -3569,20 +4056,24 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         this.client.listConfigurableProviders(),
         this.client.settingsDescribe(),
       ]);
-      const rows = buildProviderKeyRows(providers, configurable, settings);
-      const catalog = buildProviderCatalog(providers, configurable);
+      const rows = buildProviderDirectory(providers, configurable, settings);
       const refs = Array.from(
         new Set(rows.flatMap((r) => [r.ref, r.derivedRef]).filter((x): x is string => typeof x === "string" && x.length > 0))
       );
       const credentials = refs.length ? await this.client.describeCredentials(refs) : {};
       for (const row of rows) {
+        if (row.account) continue;
         const ref = row.ref ?? row.derivedRef;
         const info = ref ? credentials[ref] : undefined;
         row.configured = info?.configured === true;
         row.source = info?.source;
         row.writable = info === undefined || info.writable !== false;
       }
-      this.settingsPanel?.webview.postMessage({ type: "providerKeys", rows, catalog, writable: settings.writable !== false });
+      this.settingsPanel?.webview.postMessage({
+        type: "providerKeys",
+        providers: rows,
+        writable: settings.writable !== false,
+      });
     } catch (error) {
       this.postSettingsError(describeHarnessFailure("读取供应商列表失败", error));
     }
@@ -3660,63 +4151,37 @@ const ACCOUNT_PROVIDER_ID = "deepseek-account";
  *  credential-ref stem; a digit-leading id would fail the credential service). */
 const ROUTE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
-/** One provider row of the API tab (credential state filled after the batch
- *  credentials/describe call). */
+/** One row of the API tab's provider dropdown. `kind` mirrors where the route
+ *  comes from: the DSH account, the built-in official route, an adapter route
+ *  registered from the directory, a user-declared (custom) route, or a dormant
+ *  catalog route that only activates once a key is configured. */
 interface ProviderKeyRow {
   provider: string;
   displayName: string;
-  declared?: boolean;
+  kind: "account" | "official" | "registered" | "declared" | "dormant";
+  /** DSH-login-managed account channel: never gets an API key here. */
   account?: boolean;
+  /** Credential state filled after the batch credentials/describe call. */
+  configured?: boolean;
   /** Recorded credential ref (profile apiKeyEnv); absent when none recorded. */
   ref?: string;
   /** Platform endpoint used when the profile leaves baseURL empty. */
   defaultBaseURL?: string;
   /** Derived <ROUTE>_API_KEY ref (the fallback every provider gets). */
   derivedRef?: string;
-  configured?: boolean;
   source?: string;
   writable?: boolean;
   error?: string;
 }
 
-/** The derived credential ref for a provider without a recorded apiKeyEnv. */
 /** pi-ai protocol guess for a dormant catalog provider (mirrors the official
  *  catalog: Anthropic-style routes speak Messages, everything else OpenAI). */
 function inferProviderApi(id: string): string {
   return /anthropic|claude|minimax|kimi|moonshot|zai|bigmodel|ant-ling/i.test(id) ? "anthropic-messages" : "openai-completions";
 }
 
-/** Dormant catalog: every declared pi-ai route that is not registered yet.
- *  The official models page lists these too; configuring one activates it. */
-function buildProviderCatalog(providers: LlmProviderInfo[], configurable: LlmConfigurableProvider[]): ProviderKeyRow[] {
-  const registered = new Set(providers.map((p) => p.id));
-  const seen = new Set<string>();
-  const catalog: ProviderKeyRow[] = [];
-  for (const entry of configurable) {
-    if (entry.declared === true) continue;
-    if (entry.provider === ACCOUNT_PROVIDER_ID || entry.provider === "deepseek-official") continue;
-    if (registered.has(entry.provider) || seen.has(entry.provider)) continue;
-    seen.add(entry.provider);
-    catalog.push({
-      provider: entry.provider,
-      displayName: entry.displayName || entry.provider,
-      error: entry.error,
-      defaultBaseURL: entry.defaultBaseURL,
-      derivedRef: deriveKeyRef(entry.provider),
-    });
-  }
-  return catalog;
-}
-
 function deriveKeyRef(provider: string): string {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
-}
-
-/** Display rank: account first, the built-in official route second. */
-function rankProvider(id: string): number {
-  if (id === ACCOUNT_PROVIDER_ID) return 0;
-  if (id === "deepseek-official") return 1;
-  return 2;
 }
 
 /** Walk a configurable entry's settingsPath inside the namespace value. */
@@ -3730,55 +4195,59 @@ function profileAtView(settings: SettingsDescribeView, entry: LlmConfigurablePro
   return cur && typeof cur === "object" && !Array.isArray(cur) ? (cur as Record<string, unknown>) : null;
 }
 
-/** Build the API tab rows from the three directory RPCs (the official page's
- *  rows are exactly this union: registered providers sorted account → official
- *  → rest, plus declared-but-unregistered routes). */
-function buildProviderKeyRows(
+/** Build the API tab's provider directory from the three host reads. The order
+ *  is the official settings-models page's: the account route, the official
+ *  route, then `llm/listConfigurableProviders` in declaration order (that one
+ *  list already covers registered, user-declared and dormant routes), with any
+ *  adapter-registered route missing from the directory appended last. Each row
+ *  carries where its key lives and the platform endpoint, when known. */
+function buildProviderDirectory(
   providers: LlmProviderInfo[],
   configurable: LlmConfigurableProvider[],
   settings: SettingsDescribeView
 ): ProviderKeyRow[] {
-  const byId = new Map(configurable.map((c) => [c.provider, c]));
+  const registered = new Set(providers.map((p) => p.id));
+  const nameOf = new Map(providers.map((p) => [p.id, p.name]));
   const rows: ProviderKeyRow[] = [];
   const seen = new Set<string>();
-  const ordered = [...providers].sort((a, b) => rankProvider(a.id) - rankProvider(b.id));
-  for (const p of ordered) {
-    seen.add(p.id);
-    const entry = byId.get(p.id);
+  const push = (provider: string, kind: ProviderKeyRow["kind"], entry?: LlmConfigurableProvider): void => {
+    if (!provider || seen.has(provider)) return;
+    seen.add(provider);
     const row: ProviderKeyRow = {
-      provider: p.id,
-      displayName: entry?.displayName || p.name || p.id,
-      declared: entry?.declared === true,
-      error: entry?.error,
+      provider,
+      displayName: entry?.displayName || nameOf.get(provider) || provider,
+      kind,
     };
-    if (p.id === ACCOUNT_PROVIDER_ID) {
+    if (provider === ACCOUNT_PROVIDER_ID) {
       row.account = true;
       rows.push(row);
-      continue;
+      return;
     }
+    row.derivedRef = deriveKeyRef(provider);
     if (entry) {
+      row.defaultBaseURL = entry.defaultBaseURL;
+      row.error = entry.error;
       const profile = profileAtView(settings, entry);
       if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) row.ref = profile.apiKeyEnv;
     }
-    row.derivedRef = deriveKeyRef(p.id);
-    row.defaultBaseURL = entry?.defaultBaseURL;
     rows.push(row);
+  };
+  const byId = new Map(configurable.map((entry) => [entry.provider, entry]));
+  if (registered.has(ACCOUNT_PROVIDER_ID) || byId.has(ACCOUNT_PROVIDER_ID)) {
+    push(ACCOUNT_PROVIDER_ID, "account", byId.get(ACCOUNT_PROVIDER_ID));
+  }
+  if (registered.has("deepseek-official") || byId.has("deepseek-official")) {
+    push("deepseek-official", "official", byId.get("deepseek-official"));
   }
   for (const entry of configurable) {
-    // Only user-declared providers get a key row: llm-pi-ai ships a large
-    // catalog of routing profiles (declared:false) that would drown the list.
-    if (entry.declared !== true) continue;
-    if (seen.has(entry.provider)) continue;
-    const row: ProviderKeyRow = {
-      provider: entry.provider,
-      displayName: entry.displayName || entry.provider,
-      declared: entry.declared === true,
-      error: entry.error,
-      derivedRef: deriveKeyRef(entry.provider),
-    };
-    const profile = profileAtView(settings, entry);
-    if (profile && typeof profile.apiKeyEnv === "string" && profile.apiKeyEnv) row.ref = profile.apiKeyEnv;
-    rows.push(row);
+    if (entry.provider === ACCOUNT_PROVIDER_ID || entry.provider === "deepseek-official") continue;
+    const kind: ProviderKeyRow["kind"] =
+      entry.declared === true ? "declared" : registered.has(entry.provider) ? "registered" : "dormant";
+    push(entry.provider, kind, entry);
+  }
+  for (const p of providers) {
+    if (p.id === ACCOUNT_PROVIDER_ID || p.id === "deepseek-official") continue;
+    push(p.id, "registered");
   }
   return rows;
 }

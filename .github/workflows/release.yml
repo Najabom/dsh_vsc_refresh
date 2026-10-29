@@ -25,14 +25,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck
+        # tsc --noEmit for the extension + the overlay tsconfig; a release is
+        # never built from a tree that does not compile.
+        run: npm run typecheck
+
       - name: Package vsix
         # 同本地命令：esbuild 构建 + vsce package --no-dependencies
         # 产物名 = dsh-vsc-<version>.vsix（由 package.json version 决定）
         run: npm run package
 
+      - name: Checksums
+        run: sha256sum dsh-vsc-*.vsix > SHA256SUMS.txt && cat SHA256SUMS.txt
+
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: 'dsh-vsc-*.vsix'
+          artifacts: 'dsh-vsc-*.vsix,SHA256SUMS.txt'
           token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true

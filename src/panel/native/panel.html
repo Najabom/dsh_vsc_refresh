@@ -393,10 +393,20 @@ body.ask-mode #fork-session { display: none !important; }
   .q-item.notice { border-style: dashed; }
   .q-item .qtag.notice { color: var(--vscode-descriptionForeground, var(--muted)); }
   .q-item.notice .qtext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .q-item .qtext { flex: 1; white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.55; color: var(--fg); }
+  .q-item .qtext { flex: 1; white-space: pre-wrap; overflow-wrap: break-word; line-height: 1.55; color: var(--fg);
+                    max-height: 4.65em; overflow-y: auto; }
   .q-item .qbtn { flex: none; cursor: pointer; color: var(--muted); padding: 0 3px; border: none; background: none; font-size: 12px; line-height: 1.55; }
   .q-item .qbtn:hover { color: var(--fg); }
   .q-item .qbtn.danger:hover { color: var(--err); }
+  /* Queued attachments: image thumbs + file chips, placed before the text. */
+  .q-item .qat { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: none; max-width: 45%; }
+  .q-item .qat img { width: 30px; height: 30px; object-fit: cover; border-radius: 3px;
+                     border: 1px solid var(--border); background: var(--input-bg); display: block; }
+  .q-item .qat .qfile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+                        padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px;
+                        font-size: 11px; line-height: 1.55; color: var(--muted); }
+  .q-item .qat .qfile b { font-weight: 500; color: var(--fg); max-width: 120px; overflow: hidden;
+                          text-overflow: ellipsis; white-space: nowrap; }
 
   /* Goal strip (goals/* RPCs): lifecycle controls for the session's goal. */
   #goal-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 13px;
@@ -478,7 +488,7 @@ body.ask-mode #fork-session { display: none !important; }
               font-family: inherit; font-size: 13px; resize: vertical; min-height: 60px; }
 
   /* task bar (todos projection) — sits just above the input row */
-  #todo-bar { padding: 2px 8px; background: rgba(128,128,128,.06); }
+  #todo-bar { padding: 2px 8px 8px; background: rgba(128,128,128,.06); }
   #todo-bar[hidden] { display: none; }
   #todo-toggle { cursor: pointer; user-select: none; font-size: 12px; color: var(--fg); background: none;
                  border: none; height: 28px; padding: 0; font-family: inherit; font-weight: 600; display: flex; align-items: center; gap: 6px; }
@@ -486,11 +496,12 @@ body.ask-mode #fork-session { display: none !important; }
   #todo-toggle .tcount { color: var(--muted); font-weight: 400; }
   #todo-toggle .tcount b { color: #e0b94a; font-weight: 600; }
   #todo-toggle .tchevron, #todo-chevron { color: var(--muted); font-size: 10px; }
-  #todo-list { margin: 2px 0 4px; padding: 0; list-style: none; max-height: 120px; overflow-y: auto;
+  #todo-toggle #team-count { color: var(--vscode-charts-blue, #61afef); }
+  #todo-toggle #team-count[hidden] { display: none; }
+  #todo-list { margin: 2px 0 4px; padding: 0; list-style: none; max-height: 34vh; overflow-y: auto;
                border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); }
   #todo-list[hidden] { display: none; }
   .t-item { display: flex; align-items: flex-start; gap: 6px; padding: 3px 8px; font-size: 12px; line-height: 1.45; }
-  .t-item + .t-item { border-top: 1px solid var(--border); }
   .t-item .tmark { flex: none; width: 14px; text-align: center; font-size: 12px; }
   .t-item.pending .tmark { color: var(--muted); }
   .t-item.in_progress .tmark { color: #e0b94a; }
@@ -498,6 +509,37 @@ body.ask-mode #fork-session { display: none !important; }
   .t-item.completed .ttext { color: var(--muted); text-decoration: line-through; }
   .t-item.in_progress .ttext { color: var(--fg); }
   .t-item .ttext { flex: 1; word-wrap: break-word; }
+  /* unified task-bar rows: todos, agent-team members and shared team tasks
+     all use the same t-item row (same mark column, text, hover, status) and
+     are separated by small section headers (任务 / 成员 / 共享任务). */
+  .t-item + .t-item, .t-item + .t-sec { border-top: 1px solid var(--border); }
+  .t-item .tname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-item .tmeta { display: block; font-size: 10px; color: var(--muted);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-item .tdesc { display: none; font-size: 11px; color: var(--muted); white-space: pre-wrap;
+                   padding: 2px 0 0; }
+  .t-item.open .tdesc { display: block; }
+  .t-item .trole { flex: none; font-size: 10px; color: var(--muted); }
+  .t-sec { display: flex; align-items: center; gap: 6px; padding: 5px 8px 2px; font-size: 10px;
+           color: var(--muted); text-transform: uppercase; letter-spacing: .04em; list-style: none; }
+  .t-sec .tsec-meta { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 10px;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* agent-team member row: a t-item whose mark carries the live status */
+  .t-item.member { cursor: pointer; }
+  .t-item.member:hover { background: rgba(255,255,255,.05); }
+  .t-item.member.cur { background: rgba(90,120,180,.18); }
+  .t-item.member.lead { cursor: default; }
+  .t-item.member.running .tmark { color: #3fb950; }
+  .t-item.member.inactive .tmark { color: #6e7681; }
+  .t-item.member.provisioning .tmark { color: #d29922; }
+  .t-item.member.failed .tmark { color: #f85149; }
+  .t-item.member.failed .ttext { color: var(--err); }
+  /* shared team-task row: same row; blocked = pending with blockers; click
+     expands the description (mirrors the old team-card task rows) */
+  .t-item.shared { cursor: pointer; }
+  .t-item.shared .tmark.blocked { color: #6e7681; }
+  .t-item.failure { color: #f85149; cursor: default; }
+  .t-item.failure .tmark { color: #f85149; }
   .todo-empty { color: var(--muted); font-size: 11px; padding: 2px 0; }
   /* transcript task-list card body (todo/write snapshots) */
   .todo-tlist { list-style: none; margin: 0; padding: 2px 6px 4px; }
@@ -688,9 +730,8 @@ body.ask-mode #fork-session { display: none !important; }
   .u-file { display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 4px; line-height: 18px;
             border: 1px solid var(--border); background: var(--input-bg); font-size: 12px; }
 
-  /* ---- agent team (lead `agentTeam` projection) ---- */
-  #team-btn { flex: none; }
-  #team-btn.on { border-color: #5a78b4; color: #9db8e8; }
+  /* ---- teammate subview bar (the agent-team roster itself renders as rows
+     inside the unified task bar at the bottom of the panel) ---- */
   #subview-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
                  border-bottom: 1px solid var(--border);
                  background: rgba(90,120,180,.12); flex: none; font-size: 12px; }
@@ -698,48 +739,10 @@ body.ask-mode #fork-session { display: none !important; }
                   border-radius: 4px; padding: 2px 8px; cursor: pointer; }
   #subview-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #subview-status { color: var(--muted); flex: none; }
-  #team-card { flex: none; max-height: 46vh; overflow-y: auto; border-bottom: 1px solid var(--border);
-               background: rgba(90,120,180,.10); }
-  .team-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
-  .team-title { font-weight: 700; font-size: 12px; }
-  .team-summary { color: var(--muted); font-size: 11px; flex: 1 1 auto; min-width: 0;
-                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #team-close { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
-  .tm-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px;
-            border-top: 1px solid var(--border); cursor: pointer; }
-  .tm-row:hover { background: rgba(255,255,255,.05); }
-  .tm-row.cur { background: rgba(90,120,180,.18); }
-  .tm-row.lead { cursor: default; }
-  .tm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
-  .tm-dot.running { background: #3fb950; }
-  .tm-dot.inactive { background: #6e7681; }
-  .tm-dot.provisioning { background: #d29922; }
-  .tm-dot.failed { background: #f85149; }
-  .tm-main { flex: 1 1 auto; min-width: 0; }
-  .tm-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tm-meta { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tm-role { font-size: 10px; color: var(--muted); flex: none; }
-  .team-sub { padding: 6px 10px 2px; font-size: 10px; color: var(--muted);
-              text-transform: uppercase; letter-spacing: .04em; }
-  .tt-row { padding: 4px 10px; cursor: pointer; }
-  .tt-line { display: flex; gap: 6px; align-items: baseline; }
-  .tt-mark { flex: none; font-size: 11px; }
-  .tt-mark.completed { color: #3fb950; }
-  .tt-mark.in_progress { color: #d29922; }
-  .tt-mark.blocked { color: #6e7681; }
-  .tt-main { flex: 1 1 auto; min-width: 0; }
-  .tt-subject { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tt-subject.done { color: var(--muted); text-decoration: line-through; }
-  .tt-meta { font-size: 10px; color: var(--muted); margin-top: 1px;
-             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tt-desc { font-size: 11px; color: var(--muted); white-space: pre-wrap; display: none;
-             padding: 3px 0 0 17px; }
-  .tt-row.open .tt-desc { display: block; }
-  .team-failure { padding: 6px 10px; color: #f85149; font-size: 11px; }
   body.subview #ws-line, body.subview #session-picker, body.subview #new-session-wrap,
   body.subview #delete-session, body.subview #delete-session-hard, body.subview #perm-btn,
   body.subview #plan-btn, body.subview #model-btn, body.subview #effort-btn,
-  body.subview #attach-btn, body.subview #todo-bar, body.subview #queue-row,
+  body.subview #attach-btn, body.subview #queue-row,
   body.subview #goal-btn, body.subview #goal-row, body.subview #goal-create,
   body.subview #jobs-bar, body.subview #changes-bar, body.subview #schedules-bar,
   body.subview #fork-session { display: none !important; }
@@ -754,7 +757,6 @@ body.ask-mode #fork-session { display: none !important; }
       <button id="session-btn" title="切换会话"></button>
       <div id="session-menu" class="combo-popup" hidden></div>
     </div>
-    <button id="team-btn" hidden title="智能体团队（成员与共享任务）">团队</button>
     <button id="settings-btn" title="设置（配置 harness）">⚙</button>
     <div id="new-session-wrap">
       <button id="new-session" title="新会话（选择模式）">＋</button>
@@ -769,25 +771,11 @@ body.ask-mode #fork-session { display: none !important; }
     <span id="subview-name"></span>
     <span id="subview-status"></span>
   </div>
-  <section id="team-card" hidden>
-    <div class="team-head">
-      <span class="team-title">智能体团队</span>
-      <span class="team-summary" id="team-summary"></span>
-      <button id="team-close" title="收起">✕</button>
-    </div>
-    <div id="team-members"></div>
-    <div id="team-tasks-wrap" hidden>
-      <div class="team-sub">共享任务</div>
-      <div id="team-tasks"></div>
-    </div>
-    <div id="team-failure" class="team-failure" hidden></div>
-  </section>
   <main id="messages"><div id="history-sentinel"></div></main>
   <footer>
     <div id="mention-menu" hidden></div>
-    <div id="attach-row" hidden></div>
     <section id="todo-bar" hidden>
-      <button id="todo-toggle" title="展开/折叠任务">☑ 任务 <span class="tcount" id="todo-count"></span> <span id="todo-chevron">▸</span></button>
+      <button id="todo-toggle" title="展开/折叠任务与智能体团队">☑ 任务 <span class="tcount" id="todo-count"></span> <span class="tcount" id="team-count" hidden></span> <span id="todo-chevron">▸</span></button>
       <ul id="todo-list" hidden></ul>
     </section>
     <section id="ask-card" hidden>
@@ -840,6 +828,7 @@ body.ask-mode #fork-session { display: none !important; }
       </div>
     </section>
     <div id="queue-row" hidden></div>
+    <div id="attach-row" hidden></div>
     <div id="input-row">
       <div class="input-box">
         <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
@@ -877,10 +866,7 @@ body.ask-mode #fork-session { display: none !important; }
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
       permBtnEl = $("perm-btn"), planBtnEl = $("plan-btn"), balanceChipEl = $("balance-chip"),
       modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
-      teamBtnEl = $("team-btn"), teamCardEl = $("team-card"), teamCloseEl = $("team-close"),
-      teamSummaryEl = $("team-summary"), teamMembersEl = $("team-members"),
-      teamTasksWrapEl = $("team-tasks-wrap"), teamTasksEl = $("team-tasks"),
-      teamFailureEl = $("team-failure"), subviewBarEl = $("subview-bar"),
+      subviewBarEl = $("subview-bar"),
       subviewBackEl = $("subview-back"), subviewNameEl = $("subview-name"),
       subviewStatusEl = $("subview-status"),
       permMenuEl = $("perm-menu"), planMenuEl = $("plan-menu"),
@@ -902,7 +888,7 @@ body.ask-mode #fork-session { display: none !important; }
       changesFilesEl = $("changes-files"), deliveriesWrapEl = $("deliveries-wrap"),
       deliveriesListEl = $("deliveries-list"),
       todoBarEl = $("todo-bar"), todoToggleEl = $("todo-toggle"), todoListEl = $("todo-list"),
-      todoCountEl = $("todo-count"), todoChevronEl = $("todo-chevron"),
+      todoCountEl = $("todo-count"), teamCountEl = $("team-count"), todoChevronEl = $("todo-chevron"),
       askCardEl = $("ask-card"), askCtxEl = $("ask-ctx"), askChoicesEl = $("ask-choices"),
       askCloseEl = $("ask-close"), askCustomRowEl = $("ask-custom-row"),
       askCustomInputEl = $("ask-custom-input"), askSendEl = $("ask-send"),
@@ -928,8 +914,7 @@ body.ask-mode #fork-session { display: none !important; }
     balance: null,           // account balance view {status,wallets,bonusWallets} | null
     modes: [],               // agent presets for the ＋ mode picker: [{id,name,description,isDefault}]
     interact: null,          // pending interaction card {rpcId, kind, ...} | null
-    team: null,              // {sessionId, members, tasks, failure} | null (lead agentTeam)
-    teamOpen: false,         // team card expanded?
+    team: null,              // {sessionId, members, tasks, failure} | null (lead agentTeam; rows in the task bar)
     subview: null,           // {parentSessionId, childSessionId} while a teammate chat is open
     viewSessionId: null,     // session whose transcript is on screen
     lastViewId: null,
@@ -961,7 +946,7 @@ body.ask-mode #fork-session { display: none !important; }
     todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
     todoPrevAll: false,      // previous snapshot fully completed (carry reset rule)
     todoCache: null,         // { sessionId, items } — latest todos seen, survives session switches
-    todoOpen: false,         // task-bar expanded?
+    todoOpen: false,         // unified task/team bar expanded?
     hasMore: false,          // older history pages available
     loadingOlder: false,     // a loadOlder request is in flight
     firstTokenTime: 0, turnOutput: 0,
@@ -2105,12 +2090,23 @@ body.ask-mode #fork-session { display: none !important; }
   var imageReqSeq = 1;
 
   /** Ask the host to resolve one ref's bytes (it calls session.attachment). */
-  function requestImage(attachmentId) {
+  function requestImage(ref) {
+    var attachmentId = ref && ref.attachmentId;
     if (!attachmentId || imageCache[attachmentId]) return;
     imageCache[attachmentId] = { pending: true };
     var reqId = imageReqSeq++;
     imageWaiters[reqId] = attachmentId;
-    post({ type: "getAttachment", requestId: reqId, sessionId: state.activeSessionId, attachmentId: attachmentId });
+    // DSH 0.2.x verifies the WHOLE logged ref (id, media type, byte length,
+    // dimensions) and rejects the bare-id shape with gateway/input-invalid;
+    // send the full ref (attachmentId stays as a fallback for older hosts).
+    post({ type: "getAttachment", requestId: reqId, sessionId: state.activeSessionId,
+           attachmentId: attachmentId,
+           attachment: { attachmentId: attachmentId,
+                         mediaType: String(ref.mediaType || "image/png"),
+                         bytes: Number(ref.bytes) || 0,
+                         width: Number(ref.width) || 0,
+                         height: Number(ref.height) || 0,
+                         name: ref.name ? String(ref.name) : undefined } });
   }
 
   /** Chip caption: file name, pixel size and byte size when the log carries them. */
@@ -2144,7 +2140,7 @@ body.ask-mode #fork-session { display: none !important; }
       } else {
         ph.textContent = "🖼 加载中…";
         ph.setAttribute("data-attachment", a.attachmentId);
-        requestImage(a.attachmentId);
+        requestImage(a);
       }
       cell.appendChild(ph);
     }
@@ -2185,7 +2181,10 @@ body.ask-mode #fork-session { display: none !important; }
     files.forEach(function (fl) {
       var chip = document.createElement("span");
       chip.className = "u-file";
-      chip.textContent = "📄 " + (fl.name || "文件") + (fl.size ? " · " + fmtBytes(fl.size) : "");
+      // Durable logged file refs carry `bytes`; the composer's draft shape
+      // carries `size`. Accept both so transcript chips keep their size.
+      var bytes = fl.bytes || fl.size || 0;
+      chip.textContent = "📄 " + (fl.name || "文件") + (bytes ? " · " + fmtBytes(bytes) : "");
       wrap.appendChild(chip);
     });
     return wrap;
@@ -2657,6 +2656,36 @@ body.ask-mode #fork-session { display: none !important; }
   });
 
   /* ---------- pending-send queue rows (session/queue snapshot) ---------- */
+  /** Attachments of one queued message: image thumbnails + file chips. */
+  function queueAttachmentsView(list) {
+    if (!list || !list.length) return null;
+    var wrap = document.createElement("span");
+    wrap.className = "qat";
+    list.forEach(function (a) {
+      if (!a) return;
+      if (a.kind === "image" && a.dataUrl) {
+        var img = document.createElement("img");
+        img.src = a.dataUrl;
+        img.title = (a.name || "图片") + (a.mediaType ? " · " + a.mediaType : "");
+        wrap.appendChild(img);
+        return;
+      }
+      var chip = document.createElement("span");
+      chip.className = "qfile";
+      var name = document.createElement("b");
+      name.textContent = a.name || (a.kind === "image" ? "图片" : "文件");
+      chip.appendChild(name);
+      if (typeof a.bytes === "number" && a.bytes > 0) {
+        chip.appendChild(document.createTextNode(" · " + (a.bytes >= 1048576
+          ? (a.bytes / 1048576).toFixed(1) + " MB"
+          : Math.max(1, Math.round(a.bytes / 1024)) + " KB")));
+      }
+      chip.title = a.name || (a.kind === "image" ? "图片" : "文件");
+      wrap.appendChild(chip);
+    });
+    return wrap;
+  }
+
   function renderQueue() {
     queueEl.innerHTML = "";
     if (!state.queue.length) { queueEl.hidden = true; state.noticeOpen = false; return; }
@@ -2725,12 +2754,16 @@ body.ask-mode #fork-session { display: none !important; }
       var tag = document.createElement("span");
       tag.className = "qtag" + (it.placement === "queued" ? " queued" : "");
       tag.textContent = it.placement === "steering" ? "插入中" : "排队";
-      var txt = document.createElement("span");
-      txt.className = "qtext";
-      txt.textContent = it.text || "(图片)";
-      txt.title = it.text;
       row.appendChild(tag);
-      row.appendChild(txt);
+      var atts = queueAttachmentsView(it.attachments);
+      if (atts) row.appendChild(atts);
+      if (it.text || !atts) {
+        var txt = document.createElement("span");
+        txt.className = "qtext";
+        txt.textContent = it.text || "";
+        txt.title = it.text;
+        row.appendChild(txt);
+      }
       row.appendChild(qbtn("copy", "复制", function () { post({ type: "copyText", text: it.text }); }));
       if (it.placement === "queued") {
         row.appendChild(qbtn("steer", "在下一个 LLM 回复后插入（打断）", function () {
@@ -2746,49 +2779,104 @@ body.ask-mode #fork-session { display: none !important; }
     });
   }
 
-  /* ---------- task bar (todos projection) ---------- */
+  /* ---------- task bar: todos + agent team, one unified list ---------- */
   var TODO_MARK = { pending: "○", in_progress: "●", completed: "✓" };
-  function renderTodos() {
-    var has = state.todos && state.todos.length > 0;
-    todoBarEl.hidden = !has;
-    if (!has) return; // keep the carry: an empty list is the turn-reset, not a new task
-    var activeIdx = [];
-    var done = 0;
-    state.todos.forEach(function (t, i) {
-      if (t.status === "in_progress") activeIdx.push((i + 1) + "#");
-      else if (t.status === "completed") done++;
-    });
-    // x accumulates across "继续": each turn resets the projection, and the
-    // rebuilt list must never read lower than what we already saw. Reset only
-    // for a brand-new task — a fresh list with nothing done arriving right
-    // after the previous list had finished.
-    if (done === 0 && state.todoPrevAll) state.todoDoneCarry = 0;
-    state.todoDoneCarry = Math.max(state.todoDoneCarry || 0, done);
-    state.todoPrevAll = done === state.todos.length;
-    var x = Math.min(state.todoDoneCarry, state.todos.length);
-    todoCountEl.innerHTML = (activeIdx.length ? "<b>" + activeIdx.join(",") + " 进行中</b> · " : "") + x + "/" + state.todos.length;
-    todoListEl.hidden = !state.todoOpen;
-    todoChevronEl.textContent = state.todoOpen ? "▾" : "▸";
-    if (!state.todoOpen) return;
-    todoListEl.innerHTML = "";
-    state.todos.forEach(function (t) {
-      var li = document.createElement("li");
-      li.className = "t-item " + t.status;
-      var mark = document.createElement("span");
-      mark.className = "tmark";
-      mark.textContent = TODO_MARK[t.status] || "○";
-      var txt = document.createElement("span");
-      txt.className = "ttext";
-      txt.textContent = t.content;
-      txt.title = t.content;
-      li.appendChild(mark);
-      li.appendChild(txt);
-      todoListEl.appendChild(li);
-    });
+
+  function taskSection(label, metaText) {
+    var li = document.createElement("li");
+    li.className = "t-sec";
+    var span = document.createElement("span");
+    span.textContent = label;
+    li.appendChild(span);
+    if (metaText) {
+      var meta = document.createElement("span");
+      meta.className = "tsec-meta";
+      meta.textContent = metaText;
+      li.appendChild(meta);
+    }
+    return li;
   }
 
-  /* ---------- agent team card ---------- */
+  function taskMark(glyph, extra) {
+    var span = document.createElement("span");
+    span.className = "tmark" + (extra ? " " + extra : "");
+    span.textContent = glyph;
+    return span;
+  }
+
+  /** Header pass: visibility, todo counter/carry and the team badge. Runs on
+   *  frequent lifecycle updates (state messages re-apply the todo cache and
+   *  re-mark the current teammate) without rebuilding the row list. */
+  function syncTaskBar() {
+    var hasTodos = state.todos && state.todos.length > 0;
+    var showTeam = teamVisible();
+    todoBarEl.hidden = !hasTodos && !showTeam;
+    if (hasTodos) {
+      var activeIdx = [];
+      var done = 0;
+      state.todos.forEach(function (t, i) {
+        if (t.status === "in_progress") activeIdx.push((i + 1) + "#");
+        else if (t.status === "completed") done++;
+      });
+      // x accumulates across "继续": each turn resets the projection, and the
+      // rebuilt list must never read lower than what we already saw. Reset only
+      // for a brand-new task — a fresh list with nothing done arriving right
+      // after the previous list had finished.
+      if (done === 0 && state.todoPrevAll) state.todoDoneCarry = 0;
+      state.todoDoneCarry = Math.max(state.todoDoneCarry || 0, done);
+      state.todoPrevAll = done === state.todos.length;
+      var x = Math.min(state.todoDoneCarry, state.todos.length);
+      todoCountEl.innerHTML = (activeIdx.length ? "<b>" + activeIdx.join(",") + " 进行中</b> · " : "") + x + "/" + state.todos.length;
+    } else {
+      // keep the carry: an empty list is the turn-reset, not a new task
+      todoCountEl.innerHTML = "";
+    }
+    if (showTeam) {
+      var members = state.team.members || [];
+      var tasks = state.team.tasks || [];
+      var running = members.filter(function (m) { return m.status === "running"; }).length;
+      var openTasks = tasks.filter(function (x2) { return x2.status !== "completed"; }).length;
+      teamCountEl.hidden = false;
+      teamCountEl.textContent = "· 团队 " + members.length;
+      teamCountEl.title = members.length + " 名成员 · " + running + " 运行中 · " + openTasks + " 项未完成";
+    } else {
+      teamCountEl.hidden = true;
+      teamCountEl.textContent = "";
+      teamCountEl.title = "";
+    }
+    todoListEl.hidden = !state.todoOpen || (!hasTodos && !showTeam);
+    todoChevronEl.textContent = state.todoOpen ? "▾" : "▸";
+  }
+
+  /** One collapsible list: task rows first, then the agent-team roster. Both
+   *  use the identical t-item row (mark column, text, hover, status colors),
+   *  separated by small section headers (任务 / 成员 / 共享任务). */
+  function renderTaskBar() {
+    syncTaskBar();
+    if (!state.todoOpen) { todoListEl.innerHTML = ""; return; }
+    todoListEl.innerHTML = "";
+    var hasTodos = state.todos && state.todos.length > 0;
+    var showTeam = teamVisible();
+    if (hasTodos) {
+      if (showTeam) todoListEl.appendChild(taskSection("任务", ""));
+      state.todos.forEach(function (t) {
+        var li = document.createElement("li");
+        li.className = "t-item " + t.status;
+        li.appendChild(taskMark(TODO_MARK[t.status] || "○"));
+        var txt = document.createElement("span");
+        txt.className = "ttext";
+        txt.textContent = t.content;
+        txt.title = t.content;
+        li.appendChild(txt);
+        todoListEl.appendChild(li);
+      });
+    }
+    if (showTeam) renderTeamRows();
+  }
+
+  /* ---------- agent-team rows inside the task bar ---------- */
   var TEAM_STATUS_TEXT = { running: "运行中", inactive: "空闲", provisioning: "启动中", failed: "失败" };
+  var TEAM_MARK = { running: "●", inactive: "○", provisioning: "◌", failed: "✕" };
 
   function teamMemberById(id) {
     var t = state.team;
@@ -2799,58 +2887,50 @@ body.ask-mode #fork-session { display: none !important; }
     return null;
   }
 
-  function renderTeamButton() {
+  /** The roster shares the task bar, but only while it is useful: a lead-only
+   *  session has nothing to list and ask-mode keeps the panel minimal (same
+   *  rules the old team button/card used). */
+  function teamVisible() {
     var t = state.team;
-    var n = t && t.members ? t.members.length : 0;
-    var show = n > 1 && state.mode !== "ask";
-    teamBtnEl.hidden = !show;
-    if (show) {
-      teamBtnEl.textContent = "团队 " + n;
-      teamBtnEl.classList.toggle("on", state.teamOpen);
-    } else {
-      state.teamOpen = false;
-      teamCardEl.hidden = true;
-    }
+    return !!(t && t.members && t.members.length > 1 && state.mode !== "ask");
   }
 
-  function renderTeamCard() {
+  /** Member + shared-task rows. Same t-item presentation as todos (a member's
+   *  mark carries the live status, a shared task's mark the completion state);
+   *  clicking a member opens their conversation, clicking a task expands its
+   *  description — the click actions the old team card had. */
+  function renderTeamRows() {
     var t = state.team;
-    if (!t) { teamCardEl.hidden = true; return; }
-    teamCardEl.hidden = !state.teamOpen;
-    if (!state.teamOpen) return;
+    if (!t) return;
     var members = t.members || [];
     var tasks = t.tasks || [];
     var running = members.filter(function (m) { return m.status === "running"; }).length;
-    var openTasks = tasks.filter(function (x) { return x.status !== "completed"; }).length;
-    teamSummaryEl.textContent = members.length + " 名成员 · " + running + " 运行中 · " + openTasks + " 项未完成";
-    teamMembersEl.innerHTML = "";
+    todoListEl.appendChild(taskSection("成员", members.length + " 名 · " + running + " 运行中"));
     members.forEach(function (m) {
       var isLead = m.role === "lead";
       var cur = state.subview && state.subview.childSessionId === m.id;
-      var row = document.createElement("div");
-      row.className = "tm-row" + (isLead ? " lead" : "") + (cur ? " cur" : "");
-      var dot = document.createElement("span");
-      dot.className = "tm-dot " + (m.status || "");
-      row.appendChild(dot);
-      var main = document.createElement("div");
-      main.className = "tm-main";
-      var nm = document.createElement("div");
-      nm.className = "tm-name";
+      var row = document.createElement("li");
+      row.className = "t-item member " + (m.status || "") + (isLead ? " lead" : "") + (cur ? " cur" : "");
+      row.appendChild(taskMark(TEAM_MARK[m.status] || "○"));
+      var txt = document.createElement("span");
+      txt.className = "ttext";
+      var nm = document.createElement("span");
+      nm.className = "tname";
       nm.textContent = m.name || shortId(m.id);
-      main.appendChild(nm);
+      txt.appendChild(nm);
       var metaBits = [];
       if (m.model) metaBits.push(m.model);
       if (m.status === "failed" && m.error) metaBits.push(m.error);
       if (metaBits.length) {
-        var meta = document.createElement("div");
-        meta.className = "tm-meta";
+        var meta = document.createElement("span");
+        meta.className = "tmeta";
         meta.textContent = metaBits.join(" · ");
         meta.title = metaBits.join("\n");
-        main.appendChild(meta);
+        txt.appendChild(meta);
       }
-      row.appendChild(main);
+      row.appendChild(txt);
       var role = document.createElement("span");
-      role.className = "tm-role";
+      role.className = "trole";
       role.textContent = isLead ? "主" : (TEAM_STATUS_TEXT[m.status] || m.status || "");
       row.appendChild(role);
       if (!isLead) {
@@ -2864,51 +2944,55 @@ body.ask-mode #fork-session { display: none !important; }
         row.title = "返回主会话";
         row.addEventListener("click", function () { post({ type: "teamBack" }); });
       }
-      teamMembersEl.appendChild(row);
+      todoListEl.appendChild(row);
     });
-    teamTasksWrapEl.hidden = tasks.length === 0;
-    teamTasksEl.innerHTML = "";
+    var doneTasks = tasks.filter(function (x) { return x.status === "completed"; }).length;
+    todoListEl.appendChild(taskSection("共享任务", tasks.length ? (doneTasks + "/" + tasks.length + " 已完成") : "无"));
     tasks.forEach(function (task) {
       var blocked = task.status === "pending" && task.blockedBy && task.blockedBy.length > 0;
-      var row = document.createElement("div");
-      row.className = "tt-row";
-      var line = document.createElement("div");
-      line.className = "tt-line";
-      var mark = document.createElement("span");
-      mark.className = "tt-mark " + (task.status === "completed" ? "completed" : task.status === "in_progress" ? "in_progress" : blocked ? "blocked" : "");
-      mark.textContent = task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : blocked ? "⛔" : "○";
-      line.appendChild(mark);
-      var main = document.createElement("div");
-      main.className = "tt-main";
-      var subj = document.createElement("div");
-      subj.className = "tt-subject" + (task.status === "completed" ? " done" : "");
+      var markCls = task.status === "completed" ? "completed" : task.status === "in_progress" ? "in_progress" : blocked ? "blocked" : "";
+      var glyph = markCls === "completed" ? "✓" : markCls === "in_progress" ? "◐" : markCls === "blocked" ? "⛔" : "○";
+      var row = document.createElement("li");
+      row.className = "t-item shared " + (task.status || "");
+      row.appendChild(taskMark(glyph, markCls));
+      var txt = document.createElement("span");
+      txt.className = "ttext";
+      var subj = document.createElement("span");
+      subj.className = "tname" + (task.status === "completed" ? " done" : "");
       subj.textContent = (task.id ? "#" + task.id + " " : "") + (task.subject || "");
-      main.appendChild(subj);
+      txt.appendChild(subj);
       var bits = [];
       if (task.ownerName) bits.push("负责: " + task.ownerName);
       if (blocked) bits.push("等待: " + task.blockedBy.join(", "));
       if (task.writeScopes && task.writeScopes.length) bits.push("写入: " + task.writeScopes.join(", "));
       if (bits.length) {
-        var meta = document.createElement("div");
-        meta.className = "tt-meta";
+        var meta = document.createElement("span");
+        meta.className = "tmeta";
         meta.textContent = bits.join(" · ");
         meta.title = bits.join("\n");
-        main.appendChild(meta);
+        txt.appendChild(meta);
       }
       var descText = [task.description, (task.writeScopeWarnings || []).join("\n")].filter(Boolean).join("\n\n");
       if (descText) {
-        var desc = document.createElement("div");
-        desc.className = "tt-desc";
+        var desc = document.createElement("span");
+        desc.className = "tdesc";
         desc.textContent = descText;
-        main.appendChild(desc);
+        txt.appendChild(desc);
         row.addEventListener("click", function () { row.classList.toggle("open"); });
       }
-      line.appendChild(main);
-      row.appendChild(line);
-      teamTasksEl.appendChild(row);
+      row.appendChild(txt);
+      todoListEl.appendChild(row);
     });
-    teamFailureEl.hidden = !t.failure;
-    teamFailureEl.textContent = t.failure ? ("团队异常：" + t.failure) : "";
+    if (t.failure) {
+      var fail = document.createElement("li");
+      fail.className = "t-item failure";
+      fail.appendChild(taskMark("⚠"));
+      var ftxt = document.createElement("span");
+      ftxt.className = "ttext";
+      ftxt.textContent = "团队异常：" + t.failure;
+      fail.appendChild(ftxt);
+      todoListEl.appendChild(fail);
+    }
   }
 
   /* ---------- background jobs bar ---------- */
@@ -3171,9 +3255,12 @@ body.ask-mode #fork-session { display: none !important; }
   }
 
   /* Subview chrome: hide the lead-only controls while a teammate chat is on
-     screen; the back bar carries the member name + live status. */
+     screen; the back bar carries the member name + live status. The unified
+     task bar stays visible so the roster can still switch conversations. */
+  var lastSubviewId; // undefined = never applied; null = lead transcript
   function applySubview() {
     var sub = !!state.subview;
+    var subId = sub ? state.subview.childSessionId : null;
     document.body.classList.toggle("subview", sub);
     subviewBarEl.hidden = !sub;
     if (sub) {
@@ -3182,7 +3269,12 @@ body.ask-mode #fork-session { display: none !important; }
       subviewStatusEl.textContent = m ? (TEAM_STATUS_TEXT[m.status] || m.status || "") : "";
       subviewStatusEl.title = m && m.error ? m.error : "";
     }
-    renderTeamButton();
+    if (subId !== lastSubviewId) {
+      lastSubviewId = subId;
+      renderTaskBar(); // re-marks the current teammate row (cur) in the unified list
+    } else {
+      syncTaskBar();
+    }
   }
 
   /* ---------- protocol from host ---------- */
@@ -3254,7 +3346,8 @@ body.ask-mode #fork-session { display: none !important; }
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; state.noticeOpen = false; renderQueue();
           state.todos = []; state.todoDoneCarry = 0; state.todoPrevAll = false;
-          renderTodos();   // host re-pushes via todos message
+          state.team = null; // the roster belongs to the lead session; host re-pushes
+          renderTaskBar();   // host re-pushes via todos/team messages
           state.diffByCall = {}; state.activeRound = null;
           // Clear EVERY live-timing field: leaving any of them behind made the
           // bottom bar blend this session's clock with the previous session's.
@@ -3293,7 +3386,7 @@ body.ask-mode #fork-session { display: none !important; }
         // have sent the todos message before this state update landed).
         if (state.todoCache && state.todoCache.sessionId === state.activeSessionId) {
           state.todos = state.todoCache.items;
-          renderTodos();
+          renderTaskBar();
         }
         updateHeader();
         scheduleRender();
@@ -3370,8 +3463,7 @@ body.ask-mode #fork-session { display: none !important; }
           tasks: msg.tasks || [],
           failure: msg.failure
         };
-        renderTeamButton();
-        if (state.teamOpen) renderTeamCard();
+        renderTaskBar();
         if (state.subview) applySubview();
         break;
       }
@@ -3505,7 +3597,7 @@ body.ask-mode #fork-session { display: none !important; }
         state.todoCache = { sessionId: msg.sessionId, items: msg.items || [] };
         if (msg.sessionId !== state.activeSessionId) return;
         state.todos = msg.items || [];
-        renderTodos();
+        renderTaskBar();
         break;
       }
       case "jobs": {
@@ -3955,7 +4047,7 @@ body.ask-mode #fork-session { display: none !important; }
     sendBtn.disabled = !state.connected;
     updateWorkspaceLine();
     updateStatusLine();
-    renderTeamButton();
+    syncTaskBar(); // header counts only; the row list is rebuilt by data updates
   }
 
   /* Workspace strip above the header: mirrors state.workspace (the VS Code folder
@@ -4439,8 +4531,8 @@ body.ask-mode #fork-session { display: none !important; }
       planBtnEl.classList.remove("on", "pend");
       return;
     }
-    var label = "计划";
-    if (pm.active) label = pm.variant === "hard" ? "计划·只读" : "计划·引导";
+    var label = "计划模式";
+    if (pm.active) label = pm.variant === "hard" ? "计划模式·只读" : "计划模式·引导";
     planBtnEl.textContent = label;
     planBtnEl.classList.toggle("on", !!pm.active);
     planBtnEl.classList.toggle("pend", !!pm.pending);
@@ -5159,21 +5251,9 @@ body.ask-mode #fork-session { display: none !important; }
   });
   settingsBtnEl.addEventListener("click", function () { post({ type: "openSettings" }); });
 
-  /* Agent-team card: header toggle, close, and the subview back bar. */
-  teamBtnEl.addEventListener("click", function (ev) {
-    ev.stopPropagation();
-    var t = state.team;
-    if (!t || !t.members || t.members.length < 2) return;
-    state.teamOpen = !state.teamOpen;
-    renderTeamButton();
-    renderTeamCard();
-  });
-  teamCloseEl.addEventListener("click", function (ev) {
-    ev.stopPropagation();
-    state.teamOpen = false;
-    renderTeamButton();
-    teamCardEl.hidden = true;
-  });
+  /* Unified task bar: the bottom toggle owns the whole list, and the subview
+     back bar returns from a teammate transcript (the roster rows themselves
+     live in the task bar). */
   subviewBackEl.addEventListener("click", function () { post({ type: "teamBack" }); });
 
   /* Goal strip: create + lifecycle controls. */
@@ -5627,7 +5707,7 @@ body.ask-mode #fork-session { display: none !important; }
   cancelBtn.addEventListener("click", function () { post({ type: "cancel" }); });
   if (todoToggleEl) todoToggleEl.addEventListener("click", function () {
     state.todoOpen = !state.todoOpen;
-    renderTodos(); // rebuilds the list + chevron in the new state
+    renderTaskBar(); // rebuilds the unified list + chevron in the new state
   });
   selBtnEl.addEventListener("click", function (ev) {
     ev.stopPropagation();

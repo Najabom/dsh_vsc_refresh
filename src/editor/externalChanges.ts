@@ -12,8 +12,8 @@ const SKIPPED_SEGMENTS = new Set([".git", "node_modules", ".pio"]);
  * files (`pwsh Set-Content`, `git checkout`, build steps, …) carry no
  * structured path. While an agent turn is running we listen to the workspace
  * filesystem; at turn/end the changed set is filtered (inside a workspace
- * folder, regular files, size cap) and handed to the ChangeTracker batch and
- * the FollowEdits revealer, so statistics and follow-edits cover them too.
+ * folder, regular files, size cap) and handed to the ChangeTracker batch, so
+ * the change statistics cover them too.
  */
 export class ExternalChanges implements vscode.Disposable {
   private readonly watcher: vscode.FileSystemWatcher;

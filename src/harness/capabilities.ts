@@ -16,8 +16,13 @@
  */
 
 export const TESTED_DSH_MIN = "0.1.7-rc.2";
-/** Exclusive: 0.2.2 and newer are "untested" until this table is bumped. */
-export const TESTED_DSH_MAX = "0.2.2";
+/**
+ * Exclusive: newer versions are reported as "untested" until the loop below
+ * has been re-verified. 0.2.2-alpha.2 passed `scripts/contract-check.mjs`
+ * (all 79 interface identifiers present) on 2026-10-29, covering the whole
+ * 0.2.2 line; bump only after that check is green again.
+ */
+export const TESTED_DSH_MAX = "0.2.3";
 
 export interface CapabilityFeature {
   id: string;

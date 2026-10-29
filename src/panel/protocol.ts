@@ -4,6 +4,7 @@
  */
 
 import type { CompatibilityReport } from "../harness/capabilities";
+import type { AccountStateWire } from "../harness/protocol";
 
 /** A raw session event forwarded to the panel (wire passthrough). */
 export interface PanelEvent {
@@ -29,6 +30,30 @@ export interface ToolLineDiff {
 export interface TodoItem {
   content: string;
   status: "pending" | "in_progress" | "completed";
+}
+
+/** One durable attachment carried by a pending-send (inbox) row. */
+export interface QueueAttachmentView {
+  kind: "image" | "file";
+  name?: string;
+  mediaType?: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
+  /** Inline image bytes as a data URL; omitted while the host is still reading
+   *  the ref (the panel then shows a compact placeholder chip instead). */
+  dataUrl?: string;
+}
+
+/** One pending-send row of the inbox projection (queue strip above the input). */
+export interface QueueItemView {
+  id: string;
+  placement: "queued" | "steering";
+  /** Flattened text blocks ("" when the row carries attachments only). */
+  text: string;
+  source?: string;
+  summary?: string;
+  attachments?: QueueAttachmentView[];
 }
 
 /** One account wallet (currency + decimal-string amount). */
@@ -108,7 +133,7 @@ export type HostMessage =
       current?: { provider: string; model: string; reasoningEffort?: string };
       groups: { id: string; name: string; models: { id: string; name: string; reasoning?: { efforts: { id: string; name: string }[]; defaultEffort?: string } }[] }[];
     }
-  | { type: "queue"; sessionId: string; items: { id: string; placement: string; text: string; source?: string; summary?: string }[] }
+  | { type: "queue"; sessionId: string; items: QueueItemView[] }
   | { type: "commands"; items: { name: string; description?: string; input?: { hint?: string; images?: boolean } }[] }
   | { type: "cmdResult"; text: string; ok: boolean }
   | { type: "todos"; sessionId: string; items: TodoItem[] }
@@ -213,10 +238,19 @@ export type HostMessage =
       pinnedSessionIds: string[];
     }
   | {
-      /** Settings page: read-only account card. */
+      /** Settings page: account card (sign-in / sign-out + balance). */
       type: "settingsAccount";
-      state: { status: string; usageUrl?: string; topUpUrl?: string } | null;
+      /** Latest account/getState snapshot (null when the harness call failed). */
+      state: AccountStateWire | null;
       profile: { name?: string; contact?: string; avatarUrl?: string } | null;
+      /** account/getBalance view, only meaningful while signed in. */
+      balance?: AccountBalanceView | null;
+    }
+  | {
+      /** Settings page: "are tasks running on this account?" answer before
+       *  the sign-out confirmation (null = the check itself failed). */
+      type: "settingsAccountSignOutPrompt";
+      running: boolean | null;
     }
   | { type: "toolDiff"; sessionId: string; callId: string; added: number; deleted: number; path?: string }
   | {
@@ -389,6 +423,16 @@ export type WebviewMessage =
       requestId: number;
       sessionId: string;
       attachmentId: string;
+      /** Full logged image ref: DSH 0.2.x validates every field of the ref
+       *  and rejects the bare-id shape; older hosts ignore it and use the id. */
+      attachment?: {
+        attachmentId: string;
+        mediaType: string;
+        bytes?: number;
+        width?: number;
+        height?: number;
+        name?: string;
+      };
     }
   | {
       /** Explorer drag-and-drop: the webview only knows the dropped file://

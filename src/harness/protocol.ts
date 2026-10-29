@@ -89,6 +89,10 @@ export const METHODS = {
   accountGetBalance: "account/getBalance",
   accountGetState: "account/getState",
   accountGetProfile: "account/getProfile",
+  accountStartSignIn: "account/startSignIn",
+  accountCancelSignIn: "account/cancelSignIn",
+  accountSignOut: "account/signOut",
+  accountHasRunningAccountTasks: "account/hasRunningAccountTasks",
   workspaceCreate: "workspace/create",
   workspaceRename: "workspace/rename",
   workspaceDelete: "workspace/delete",
@@ -178,12 +182,52 @@ export interface AccountBalanceWire {
   bonusWallets?: AccountWalletWire[];
 }
 
-/** account/getState snapshot. */
-export interface AccountStateWire {
-  status: string;
-  links?: { usageUrl?: string; topUpUrl?: string };
-  attempt?: unknown;
+/** Request identity the official account client sends with account RPCs:
+ *  the app version, locale and offset from UTC in seconds (positive east). */
+export interface AccountClientMetadataWire {
+  version: string;
+  locale: string;
+  timezoneOffsetSeconds: number;
 }
+
+/** One in-flight browser sign-in attempt (account/startSignIn / getState). */
+export type AccountAttemptPhaseWire =
+  | "initializing"
+  | "waiting-browser"
+  | "exchanging"
+  | "committing"
+  | "succeeded"
+  | "cancelled"
+  | "expired"
+  | "failed";
+
+/** Why a settled sign-in attempt ended, when the platform knows. */
+export type AccountAttemptErrorCodeWire = "expired" | "no-response" | "network" | "protocol" | "storage";
+
+export interface AccountAttemptWire {
+  id: string;
+  phase: AccountAttemptPhaseWire;
+  /** Platform authorize URL to open in the external browser. */
+  authorizeUrl?: string;
+  /** Epoch ms after which the attempt is expired. */
+  expiresAt?: number;
+  errorCode?: AccountAttemptErrorCodeWire;
+}
+
+/** account/getState snapshot (the raw AccountView the official UI consumes). */
+export interface AccountStateWire {
+  status: "signed-out" | "credential-stored";
+  links: { usageUrl: string; topUpUrl: string };
+  attempt: AccountAttemptWire | null;
+}
+
+/** Phases in which a sign-in attempt is still progressing (poll getState). */
+export const ACCOUNT_ATTEMPT_ACTIVE_PHASES: ReadonlySet<string> = new Set([
+  "initializing",
+  "waiting-browser",
+  "exchanging",
+  "committing",
+]);
 
 /** account/getProfile result (read-only account card). */
 export type AccountProfileWire =

@@ -9,7 +9,24 @@ import { DshStatusBar } from "./status";
 import { HarnessClient } from "./harness/client";
 import { syncCompanion, type CompanionStatus } from "./harness/companion";
 import { configuredBase, discover, portOf } from "./harness/discover";
-import { startHarness, stopHarness, isRunning as harnessRunning, readPidRecord } from "./harness/launcher";
+import {
+  startHarness,
+  stopHarness,
+  isRunning as harnessRunning,
+  readPidRecord,
+  invalidateHarnessDeps,
+  readDepsConfig,
+  resolveHarnessDeps,
+} from "./harness/launcher";
+import {
+  MIN_NODE_VERSION,
+  depsActionableMessage,
+  depsSummaryLines,
+  describePnpm,
+  invalidateDepsCache,
+  missingHarnessDeps,
+  type DepsResolutions,
+} from "./harness/deps";
 import { isLocalBase, liveOtherClients, pruneStale, removeHeartbeat, writeHeartbeat } from "./harness/clientRegistry";
 import { CapabilityLedger } from "./harness/capabilities";
 import { setNativeWebAuthEnabled } from "./harness/nativeAuth";
@@ -33,7 +50,6 @@ import {
 import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
 import { HarnessEventStream } from "./events/eventStream";
 import { ChangeTracker } from "./editor/changeTracker";
-import { FollowEdits } from "./editor/followEdits";
 import { ExternalChanges } from "./editor/externalChanges";
 import { AskSessions } from "./editor/askSessions";
 import { buildSelectionContext } from "./editor/askSelection";
@@ -84,6 +100,14 @@ export function activate(context: vscode.ExtensionContext): void {
   shuttingDown = false;
   const log = vscode.window.createOutputChannel("DSH Bridge");
   const status = new DshStatusBar();
+  // Cross-platform bootstrap state (Node.js / @deepseek-ai/dsh / pnpm):
+  // resolved lazily only when a spawn is actually attempted, cached for a
+  // minute, invalidated on settings changes and before every real spawn.
+  let depsDiagnostic: DepsResolutions | null = null;
+  let depsDiagnosticAt = 0;
+  let depsLogged = false;
+  let depsNoticeShown = false;
+  const DEPS_CACHE_MS = 60_000;
   // Fallback entry when the activity-bar icon gets hidden (right-click → hide
   // is per-window UI state that the extension cannot detect or undo).
   const statusEntry = vscode.window.createStatusBarItem("dsh.sidebar", vscode.StatusBarAlignment.Right, 100);
@@ -112,6 +136,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dshVsc.statusBarEntry")) syncStatusEntry();
       if (e.affectsConfiguration("dshVsc.nativeWebAuth")) syncNativeWebAuth();
+      // Bootstrap path overrides changed: re-probe Node/DSH/pnpm on the next
+      // spawn (a fixed path must not keep failing against a stale diagnostic).
+      if (
+        e.affectsConfiguration("dshVsc.nodePath") ||
+        e.affectsConfiguration("dshVsc.dshScriptPath") ||
+        e.affectsConfiguration("dshVsc.pnpmPath")
+      ) {
+        invalidateHarnessDeps();
+        depsDiagnostic = null;
+        depsDiagnosticAt = 0;
+        depsLogged = false;
+        depsNoticeShown = false;
+        pnpmStatusLogged = false;
+        makeLog("bootstrap: 运行环境设置已变更，下次启动 DSH 时重新探测（Node/DSH/pnpm）");
+      }
     })
   );
   const makeLog = (message: string): void => {
@@ -122,11 +161,69 @@ export function activate(context: vscode.ExtensionContext): void {
     LOG_RING.push(`${new Date().toISOString()} ${message}`);
     if (LOG_RING.length > 500) LOG_RING.splice(0, LOG_RING.length - 500);
   };
+
+  // --- Cross-platform bootstrap: Node.js / @deepseek-ai/dsh / pnpm --------
+  // Resolved lazily: a window that connects to an already-running harness must
+  // never touch npm/pnpm. Only a real spawn forces the probes (see
+  // ensureRunning / restartAndVerify). The launcher re-resolves them itself
+  // right before spawning; this layer only gates, prepares pnpm and explains
+  // failures to the user.
+  const currentDeps = async (force = false): Promise<DepsResolutions> => {
+    const stale = !depsDiagnostic || Date.now() - depsDiagnosticAt >= DEPS_CACHE_MS;
+    if (force || stale) {
+      depsDiagnostic = await resolveHarnessDeps(true);
+      depsDiagnosticAt = Date.now();
+    }
+    return depsDiagnostic as DepsResolutions;
+  };
+  /** Resolve + log the bootstrap dependencies; `spawnable:false` = missing runtime. */
+  const checkBootstrapDeps = async (
+    force = false
+  ): Promise<{ deps: DepsResolutions; spawnable: boolean }> => {
+    const deps = await currentDeps(force);
+    if (!depsLogged) {
+      depsLogged = true;
+      makeLog(`运行环境: ${depsSummaryLines(deps).join(" | ")}`);
+    }
+    return { deps, spawnable: !missingHarnessDeps(deps) };
+  };
+  /** Missing runtime: OutputChannel (full guidance) + one status-bar/notice
+   *  warning per session — repeated spawn attempts must not spam dialogs. */
+  const reportMissingDependencies = (deps: DepsResolutions): void => {
+    status.setOffline();
+    if (depsNoticeShown) return;
+    depsNoticeShown = true;
+    makeLog(depsActionableMessage(deps));
+    void vscode.window
+      .showWarningMessage(
+        `DSH Bridge：缺少可用的 Node.js（≥ ${MIN_NODE_VERSION}）或 @deepseek-ai/dsh，已跳过自动启动。安装指引见 “DSH Bridge” 输出日志。`,
+        "查看日志"
+      )
+      .then((choice) => {
+        if (choice === "查看日志") log.show();
+      });
+  };
+  let pnpmStatusLogged = false;
+  /** Explain pnpm availability once: plugin installs (including the VSIX-shipped
+   *  companion bundle) use a pnpm the USER installs (11+); we only detect and
+   *  report — never download or install anything. Missing pnpm does not block
+   *  the harness itself. */
+  const reportPnpmStatus = (deps: DepsResolutions): void => {
+    if (pnpmStatusLogged) return;
+    pnpmStatusLogged = true;
+    const pnpm = deps.pnpm;
+    if (pnpm.found && pnpm.ok) {
+      makeLog(`pnpm 可用: ${describePnpm(pnpm)}`);
+      return;
+    }
+    makeLog(
+      `${describePnpm(pnpm)} — 插件与伴生插件的安装/更新需要 pnpm 11+，请自行执行 npm i -g pnpm@11（或设置 dshVsc.pnpmPath）；` +
+        "harness 仍会正常启动，仅插件安装相关功能不可用"
+    );
+  };
   const tracker = new ChangeTracker();
-  const followEdits = new FollowEdits(makeLog);
   const externalChanges = new ExternalChanges(makeLog, (sessionId, turn, files) => {
-    const added = tracker.addExternalFiles(sessionId, turn, files);
-    for (const file of added) followEdits.revealExternal(file);
+    tracker.addExternalFiles(sessionId, turn, files);
   });
   const panelListeners = new Set<(sessionId: string, event: PanelEvent) => void>();
   let client: HarnessClient | null = null;
@@ -307,7 +404,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     status,
     tracker,
-    followEdits,
     externalChanges,
     vscode.commands.registerCommand("dsh.openSidebar", () => {
       void vscode.commands.executeCommand(`${RIGHT_VIEW}.focus`);
@@ -346,6 +442,11 @@ export function activate(context: vscode.ExtensionContext): void {
       userStopped = false;
       autoRetryDisabled = false;
       consecutiveSpawnFailures = 0;
+      // The user may have just installed Node/DSH/pnpm — never retry against a
+      // stale diagnostic.
+      invalidateHarnessDeps();
+      depsDiagnostic = null;
+      pnpmStatusLogged = false;
       void ensureRunning();
     }),
     vscode.commands.registerCommand("dsh.stop", () => {
@@ -360,6 +461,10 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
     }),
+    // `dsh.restart` (settings page button + command palette): stop the instance
+    // WE started, then start it again through the normal bootstrap path. A
+    // manually started `dsh web` is never killed — the user restarts that one.
+    vscode.commands.registerCommand("dsh.restart", () => restartHarness()),
     vscode.commands.registerCommand("dsh.refreshStatus", () => {
   void refresh();
 
@@ -479,6 +584,48 @@ export function activate(context: vscode.ExtensionContext): void {
     }, 4000);
   }
 
+  /**
+   * `dsh.restart` — restart the harness this extension owns.
+   *
+   * Only an owned instance (live child handle or pid record from a previous
+   * extension session) is stopped; a manually started `dsh web` is never
+   * killed (the §2.2 "no second server" rule: a shared harness is the user's).
+   * After the stop the normal ensureRunning() path re-runs the Node/DSH/pnpm
+   * probe and spawns a fresh instance — which is exactly how a harness started
+   * before a user-installed pnpm upgrade gets the new PATH (we never install
+   * external tools ourselves; the docs state the requirements).
+   */
+  async function restartHarness(): Promise<void> {
+    if (!harnessRunning()) {
+      void vscode.window.showInformationMessage(
+        "DSH Bridge：当前服务不是本扩展启动的（可能是你手动运行的 dsh web）。扩展无权重启它；请在那条终端里自行重启，或先停止它，让扩展自动拉起受管实例。"
+      );
+      return;
+    }
+    makeLog("dsh.restart: stopping the owned harness for a restart…");
+    status.setStarting(portOf(configuredBase()));
+    const result = await stopHarness();
+    makeLog(`dsh.restart: stopHarness -> ${JSON.stringify(result)}`);
+    // A fresh spawn must re-probe everything (an updated DSH / changed path
+    // setting / a just-installed pnpm is the whole point of restarting).
+    invalidateHarnessDeps();
+    invalidateDepsCache();
+    depsDiagnostic = null;
+    depsDiagnosticAt = 0;
+    depsLogged = false;
+    depsNoticeShown = false;
+    pnpmStatusLogged = false;
+    userStopped = false;
+    autoRetryDisabled = false;
+    consecutiveSpawnFailures = 0;
+    const started = await ensureRunning();
+    if (started) {
+      void vscode.window.showInformationMessage("DSH 服务已重启。");
+    } else {
+      void vscode.window.showWarningMessage("DSH 服务重启未完成：详见 “DSH Bridge” 输出日志。");
+    }
+  }
+
   async function ensureRunning(): Promise<boolean> {
     if (shuttingDown || connecting || updatingDsh) return false;
     // Idempotent start: if something already answers, just (re)connect.
@@ -493,12 +640,27 @@ export function activate(context: vscode.ExtensionContext): void {
       status.setOffline();
       return false;
     }
+    // Cross-platform bootstrap gate: without a usable Node.js (>= 24.9) or the
+    // @deepseek-ai/dsh entry script the spawn cannot work. Resolve diagnostics
+    // first, surface the actionable guidance once, and return WITHOUT counting
+    // an auto-spawn failure — retrying three times would only spam the log.
+    const bootstrap = await checkBootstrapDeps();
+    if (!bootstrap.spawnable) {
+      reportMissingDependencies(bootstrap.deps);
+      // Keep probing (60s diagnostic TTL): the user may install Node/DSH while
+      // the window is open, or start a harness manually (which we reuse).
+      scheduleHarnessCheck(OFFLINE_RECHECK_MS);
+      return false;
+    }
     connecting = true;
     try {
       const base = configuredBase();
       const port = portOf(base);
       status.setStarting(port);
       panel.setPhase("starting");
+      // The official plugin manager runs a user-installed `pnpm` from PATH;
+      // report its status honestly (never install it for the user).
+      reportPnpmStatus(bootstrap.deps);
       // Same data root as the web GUI (~/.dsh): "one runs, the other watches"
       // means ONE history. Port ownership is the natural exclusivity — the
       // extension's own instance takes the same port the web GUI would use,
@@ -688,7 +850,6 @@ export function activate(context: vscode.ExtensionContext): void {
     stream.onSessionEvent = (sessionId, event) => {
       beatNow();
       tracker.handleEvent(sessionId, event);
-      followEdits.handleEvent(sessionId, event);
       externalChanges.handleEvent(sessionId, event);
       if (event.type === "turn/start") busySessions.add(sessionId);
       else if (event.type === "turn/end") {
@@ -819,6 +980,14 @@ export function activate(context: vscode.ExtensionContext): void {
    *  version boots cold (npm replaced the whole tree), so this waits far
    *  longer than the normal startup path before declaring failure. */
   async function restartAndVerify(): Promise<{ ok: boolean; detail: string }> {
+    // A DSH update just replaced the global tree: force a fresh Node/DSH/pnpm
+    // probe before spawning (the installed version / resolved paths changed).
+    const bootstrap = await checkBootstrapDeps(true);
+    if (!bootstrap.spawnable) {
+      reportMissingDependencies(bootstrap.deps);
+      return { ok: false, detail: "缺少 Node.js / DSH 运行依赖（详见 “DSH Bridge” 输出日志）" };
+    }
+    reportPnpmStatus(bootstrap.deps);
     const base = configuredBase();
     const port = portOf(base);
     const eventsWaiter = waitForStreamOpen(RESTART_BOOT_TIMEOUT_MS); // arm before the spawn

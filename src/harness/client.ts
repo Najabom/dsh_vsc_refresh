@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { nativeAuthHeaders } from "./nativeAuth";
-import { METHODS, type AccountBalanceWire, type AccountProfileWire, type AccountStateWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileReferenceWire, type FileUploadValue, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type ScheduleCatalogEntryWire, type ScheduleTimingChangeWire, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionReferenceCandidateWire, type SessionSearchView, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SkillWire, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView, type WorkspaceViewWire } from "./protocol";
+import { METHODS, type AccountBalanceWire, type AccountClientMetadataWire, type AccountProfileWire, type AccountStateWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileReferenceWire, type FileUploadValue, type ImageAttachmentRef, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type ScheduleCatalogEntryWire, type ScheduleTimingChangeWire, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionReferenceCandidateWire, type SessionSearchView, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SkillWire, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView, type WorkspaceViewWire } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -8,6 +8,12 @@ export class RpcErrorResult extends Error {
     super(`${rpcError.code}: ${rpcError.message}`);
     this.name = "RpcErrorResult";
   }
+}
+
+/** Request identity for account RPCs — same shape and derivation as the
+ *  official web client (offset in seconds, positive east of Greenwich). */
+function accountClientMetadata(version: string, locale: string): AccountClientMetadataWire {
+  return { version, locale, timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 };
 }
 
 /**
@@ -165,11 +171,19 @@ export class HarnessClient {
    * Resolve one logged image ref into its bytes (base64). The harness only
    * serves attachments the named session's log actually references, so a
    * foreign or stale id fails with `attachment-error` instead of leaking
-   * another session's image.
+   * another session's image. The harness verifies the COMPLETE ref (id, media
+   * type, byte length, dimensions), so callers must pass the ref as logged.
    */
   sessionAttachment(sessionId: string, attachmentId: string): Promise<SessionAttachmentValue> {
     return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, {
       request: { sessionId, attachmentId },
+    });
+  }
+
+  /** Resolve a full durable image ref into bytes (queue/file refs carry all fields). */
+  readAttachment(sessionId: string, attachment: ImageAttachmentRef): Promise<SessionAttachmentValue> {
+    return this.call<SessionAttachmentValue>(METHODS.sessionAttachment, {
+      request: { sessionId, attachment },
     });
   }
 
@@ -266,7 +280,7 @@ export class HarnessClient {
    */
   getAccountBalance(version: string, locale: string): Promise<AccountBalanceWire | null> {
     return this.call<AccountBalanceWire | null>(METHODS.accountGetBalance, {
-      client: { version, locale, timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 },
+      client: accountClientMetadata(version, locale),
     });
   }
 
@@ -570,7 +584,7 @@ export class HarnessClient {
     );
   }
 
-  /* ---------- account (read-only) ---------- */
+  /* ---------- account ---------- */
 
   getAccountState(): Promise<AccountStateWire> {
     return this.call<AccountStateWire>(METHODS.accountGetState, {});
@@ -578,8 +592,49 @@ export class HarnessClient {
 
   getAccountProfile(version: string, locale: string): Promise<AccountProfileWire> {
     return this.call<AccountProfileWire>(METHODS.accountGetProfile, {
-      client: { version, locale, timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 },
+      client: accountClientMetadata(version, locale),
     });
+  }
+
+  /**
+   * Begin the DeepSeek-account browser sign-in (account/startSignIn).
+   * `callbackOrigin` must be the browser-reachable loopback origin of the
+   * harness itself (`http://127.0.0.1:<port>`): DSH registers
+   * `${callbackOrigin}/oauth/callback` on its own web server and rejects
+   * non-loopback / default-port / path-ful origins with a protocol error.
+   * The result's `attempt.authorizeUrl` is the platform URL to open externally;
+   * poll getAccountState until `attempt.phase` settles.
+   *
+   * `loginSource: "web"` is deliberate: the extension finishes the flow in a
+   * normal external browser, exactly like the official web client (DSH then
+   * renders its browser-facing failure page and the platform shows browser
+   * copy; "desktop" belongs to DSH's own desktop shell).
+   */
+  startAccountSignIn(version: string, locale: string, callbackOrigin: string): Promise<AccountStateWire> {
+    return this.call<AccountStateWire>(METHODS.accountStartSignIn, {
+      client: accountClientMetadata(version, locale),
+      callbackOrigin,
+      loginSource: "web",
+    });
+  }
+
+  /** Cancel one in-flight sign-in attempt (account/cancelSignIn). */
+  cancelAccountSignIn(attemptId: string): Promise<AccountStateWire> {
+    return this.call<AccountStateWire>(METHODS.accountCancelSignIn, { attemptId });
+  }
+
+  /** Remove the stored local grant (account/signOut); Platform revocation is
+   *  asynchronous on the harness side and API-key credentials are untouched. */
+  signOutAccount(version: string, locale: string): Promise<AccountStateWire> {
+    return this.call<AccountStateWire>(METHODS.accountSignOut, {
+      client: accountClientMetadata(version, locale),
+    });
+  }
+
+  /** Whether running agent work uses the account route
+   *  (account/hasRunningAccountTasks; no arguments). */
+  hasRunningAccountTasks(): Promise<boolean> {
+    return this.call<boolean>(METHODS.accountHasRunningAccountTasks, {});
   }
 
   /* ---------- schedules ---------- */

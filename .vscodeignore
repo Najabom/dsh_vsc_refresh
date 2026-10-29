@@ -3,6 +3,7 @@ src/**
 scripts/**
 scratch/**
 node_modules/**
+.npm-cache/**
 esbuild.js
 tsconfig.json
 *.vsix
@@ -15,3 +16,5 @@ docs/**
 # CI-built and locally-built vsix identical)
 dsh-0.1.7-compat.patch
 .github/**
+AGENTS.md
+tsconfig.overlay.json

@@ -4,9 +4,86 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-10-29
 
-- _(nothing yet)_
+首个面向公众的版本：从公开的 GitHub Release 安装即可用，不再依赖维护者机器。
+
+### 发行、运行环境与供应商设置
+
+- **运行环境自检卡片**：设置页「通用设置」新增「运行环境」卡片，逐项显示
+  Node.js（≥24.9）/ `@deepseek-ai/dsh` / pnpm（≥11）的探测结果与**确切的安装命令**，
+  并在托管实例上提供「重启 DSH 服务」（等价命令 `DSH: 重启 DSH 服务`，只重启扩展
+  自启的实例；手动启动的 `dsh web` 明确提示由用户自行重启）。**外部依赖一律由用户
+  自行安装**：扩展只探测、只如实说明缺什么，绝不下载/代装任何工具。
+- **发行身份**：`package.json` 的 publisher 从 `local` 改为 `najabom`，扩展 ID 变为
+  `najabom.dsh-vsc`（旧开发版 `local.dsh-vsc` 需先卸载）；README 安装章节已写明。
+- **跨平台启动引导**：Node / `@deepseek-ai/dsh` / pnpm 的探测重写为按平台进行
+  （PATH、npm 全局前缀、VS Code 自带 Node、macOS/Linux 常见布局），不再写死
+  `where.exe`、`C:\Program Files\nodejs`、cmd 脚本等 Windows 专用假设，也不再要求
+  注册表里的 `GITHUB_TOKEN`；macOS / Linux 也能自启 harness。新增配置
+  `dshVsc.nodePath`、`dshVsc.dshScriptPath`、`dshVsc.pnpmPath`，
+  缺依赖时输出通道给出一次可操作的安装指引。
+- **pnpm 11+ 是显式环境要求（不代装）**：DSH 插件管理器安装插件需要 pnpm，且检索时调用
+  `pnpm view ... --config.fetch-retries=0`——pnpm 9/10 的 `view` 会转调 npm 并拒绝该参数
+  （npm `EUNKNOWNCONFIG`），导致检索/安装规划失败。扩展探测 PATH / PNPM_HOME 上
+  **版本 ≥ 11** 的 pnpm，缺失或过旧时只给安装指引（`npm i -g pnpm@11` /
+  `dshVsc.pnpmPath`），并把用户已装好的 pnpm 注入 harness PATH。实测 pnpm 11.28.9 下
+  DSH 插件检索与 `installBundle` 全流程成功；「运行环境」卡片会显示 pnpm 版本并提示
+  过旧版本。删除了上一轮设计中的「扩展在自身存储里准备私有 pnpm」行为——外部环境
+  诚实写进需求、由用户自己装。
+- **第一方伴生插件随包提供**：`dsh-vsc-companion` 始终打包在 VSIX 内（无需外部下载），
+  由扩展通过官方插件管理器安装/同步进用户的 DSH profile。
+- **扩展自更新加固**：按 `name: dsh-vsc` 动态定位当前运行的扩展（换 publisher 也能用），
+  `code` CLI 探测覆盖 Windows / macOS / Linux 及 PATH；GitHub 检查把 403（限流，
+  显示重置时间）、404（无 Release）、401（token 失效）与网络错误分开提示，并支持
+  可选的 `GITHUB_TOKEN` 提高限额。
+- **供应商设置改版**：API 页改为官方「模型」页式的**一个供应商下拉 + 一个 API Key
+  输入 + 状态行**（含凭证引用、默认端点与「由 DSH 登录管理 / 已配置 / 未配置 / 只读」
+  状态），上方保留已配置供应商摘要；内置目录合并进下拉分组。新建供应商改为
+  无预设向导的纯表单（仅「协议」是下拉，路由 ID 即设置项、Key 存 `<ROUTE>_API_KEY`）。
+  设置页各标签页渲染加固：单个渲染器异常只显示一行错误，不再整页空白。
+- **兼容性**：`TESTED_DSH_MAX` 提升至 `0.2.3`——`0.2.2-alpha.2` 合同检查全绿
+  （79 个接口标识全部存在于官方包），维持 `TESTED_DSH_MIN = 0.1.7-rc.2`；
+  `docs/compatibility.md` 补充验证区间维护规则、当前 npm dist-tags 与前置条件速查。
+- **overlay 完整性表**：按已安装的 `0.2.2-alpha.2` 重新记录
+  （`dsh-client-connection/lib/index.js` 的 SHA256 与 `0.2.1-rc.4` 相同，行为无变化），
+  `PRISTINE_HOST_VERSION` 与 `scripts/restore-dsh-pristine.ps1` 同步更新。
+- **维护脚本跨平台**：`record-pristine` 支持 Windows/POSIX 与 `$DSH_VSC_DSH_ROOT`
+  覆盖，并在 `--write` 时**生成**只读的 `restore-dsh-pristine.ps1`（版本与哈希永远
+  一致，保留 `-VerifyOnly` 语义）；`verify-sandbox.mjs` 动态解析 node / dsh 安装根 /
+  工作区，非 Windows 或 DSH 未带 `dsh-sandbox-windows-acl` 时打印 skipped 并以 0 退出；
+  `lifecycle-test.ps1` 参数化（`-RepoRoot` / `-CodeCmd` / `-Vsix` / `-Port` /
+  `-TestRoot`，默认从脚本位置推导）并修正「杀掉 harness 后同一窗口自动重生」的过时预期
+  （当前契约：重载窗口或 `DSH: 启动 Web Harness` 才恢复）。
+- **文档**：README 双语更新环境要求（VS Code ≥1.90、Node ≥24.9、全局 DSH、
+  **pnpm 11+（自行安装）**）与安装章节（GitHub Releases / VSIX + SHA256SUMS 校验、
+  扩展 ID 变更），新增「常见问题与故障排查」小节；明确外部依赖只探测不代装、
+  第一方伴生插件随 VSIX 提供。
+- **本地开发自动安装**：新增 `npm run install:local`（构建 + 打包 + 卸载旧开发版 ID +
+  `code --install-extension --force`），每次改完代码可一条命令把新构建装进本机 VS Code。
+- **CI**：合同矩阵加入 `0.2.2-alpha.2`（当前 alpha 通道）；发布流水线在打包前执行
+  `npm run typecheck`，并随 Release 发布 `SHA256SUMS.txt`。
+
+### 账户、团队与工作区
+
+- **DeepSeek 账户登录/退出就在扩展内**：设置页「工作区」标签的账户卡不再只读：未登录时给出「登录 DeepSeek 账户」，点按后通过 `account/startSignIn` 打开浏览器完成授权（回调走 DSH 自身注册的 `/oauth/callback`，扩展不额外起服务），期间显示阶段（等待浏览器 / 交换凭据 / 完成）、可「打开浏览器」重开授权页或「取消」；登录成功后显示昵称、联系方式与账户余额，并提供「退出登录」确认（有正在运行的账户任务时会先提示）。状态来自 `account/getState` / `getProfile` / `getBalance`，登录尝试期间按 1.5s 轮询 `getState`，到期或面板销毁即停。
+- **智能体团队并入任务栏**：头部的「团队」按钮与独立团队卡已移除；底部任务栏改用与 TODO 相同的行样式，按「任务 / 成员 / 共享任务」分组——成员行（队长在前，运行中 / 空闲 / 启动中 / 失败、模型、错误明细）、共享任务行（状态标记、负责人、阻塞、写入范围、可展开描述）点击即打开对应会话。未启用 agent team 包时只显示任务，行为与旧版一致。
+- **工作区路径输入框恢复主题底色**：设置页「工作区」的绝对路径输入框此前缺少 `type="text"`，未命中主题化输入框样式而显示浏览器默认白底；现已补上，白底问题消失。
+- **文档与兼容性**：账户接口纳入既有能力映射与版本告警（`account/*` 失败时照常显示不兼容信息）；README 中英文 / design.md / compatibility.md 同步本版行为。
+
+### 输入区
+
+- **任务栏与输入框间距对称**：折叠态「▸ 任务 N」下边缘到输入框的间距与上边缘对齐——`#todo-bar` 底部内边距由 2px 改为 8px，与「footer 上内边距 6px + 任务栏上内边距 2px」一致。
+- **待发送附件贴近输入框**：草稿图片/文件缩略图栏（AttachmentRail）从任务栏之上移到队列行与输入框之间，附件紧贴输入框显示，不再压住任务栏。
+- **「计划」按钮改为「计划模式」**：底部按钮文案与菜单、title 一致（激活态显示「计划模式·引导 / 计划模式·只读」）。
+- **跟随编辑功能已彻底移除**：上一版把「正在修改的文件」提前到修改开始（`tool/call`）时打开；实际使用中它会在交互时抢开预览标签、打断编辑，反馈后已整体移除——`dshVsc.followAgentEdits` 配置、跟随打开与光标定位、工作区文件监控的跟随逻辑、相关文档与截图一并删除；改动追踪（changes 徽章 / Review Agent Changes）保留。
+- **对话区图片读取修复**：DSH 0.2.x 的 `session/attachment` 要求**完整的**附件引用（id、媒体类型、字节数、尺寸全部校验），此前面板只回传 `attachmentId`，导致对话里的图片——用户随消息发送的、工具结果里的、伴生插件截图的——一律显示「🖼 图片读取失败」；现在面板把日志里的完整引用交给宿主、宿主用 `readAttachment` 取字节，旧版宿主仍回退到 id 形式，错误占位仅在真正失败时出现。
+
+### 排队消息
+
+- **排队消息显示附件**：待发送队列行（输入框上方）除文本外，现在渲染随消息附带的图片缩略图与文件标签（名称 + 大小）——与草稿栏、官方网页队列一致；纯附件消息不再显示「(图片)」占位。宿主按 `session/attachment` 用完整 `ImageAttachmentRef` 取回图片字节并转 data URL（有上限缓存、失败只降级不报错），`NativePanelProvider.postQueue` 识别 inbox 内容块的 `attachment` 引用并把附件透传给面板。
+- **排队行限高三行**：`.q-item .qtext` 最大高度 4.65em（13px × 1.55 行高 × 3 行），超出在该行内滚动；队列行与队列容器本身不设高度上限，整体布局不变。
+- **测试**：新增 `scratch/queue-jsdom.mjs`（18 项断言：缩略图 src/title、文件标签、附件先于文本、纯附件行、三行钳制、CSP data: 图片）；设置页 jsdom 211/211、队列 18/18 均通过。
 
 ## [1.4.1] - 2026-10-27
 
