@@ -248,7 +248,7 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 插件的**开关语义完全交还官方**：实验性插件包（智能体团队、语音输入、自动评审、Inspector、会话搜索/标题、终端、ralph、徽章技能、思维链翻译、worktree、插件市场）在插件页单独成组，勾选即调用 `pluginManager/setBundleEnabled` ——官方管理器会从安装副本直接启用，扩展不重装、不改 profile；按需包（Codex / Claude Code 子代理）按其固定 spec 走 `installBundle`；已安装落后的包提供更新；`waitForInstall` 兜住响应丢失；`pluginInventory/list` 以只读清单呈现内置模块（按 Agent 预设分组）。**插件市场**同理：只有官方 market 包启用后才出现索引与检索 UI，扩展绝不自己维护市场源。
 
-智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。团队数据渲染进底部任务栏的「任务 / 成员 / 共享任务」分组（复用 TODO 行样式）；不启用该包时只显示任务，旧 harness 无感。
+智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。团队数据渲染进底栏独立的「团队」可展开条目（与「命令」「计划」「变更」同一套折叠卡片样式，复用 TODO 行样式）；有团队时才出现、无团队时自动隐藏，旧 harness 无感。
 
 ### 5.7 作业、目标与每轮变更：只搬数据面，不搬页面
 

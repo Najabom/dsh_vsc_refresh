@@ -60,6 +60,7 @@ body.ask-mode #goal-btn,
 body.ask-mode #goal-row,
 body.ask-mode #goal-create,
 body.ask-mode #jobs-bar,
+body.ask-mode #team-bar,
 body.ask-mode #schedules-bar,
 body.ask-mode #fork-session { display: none !important; }
   body.ask-mode #input-foot { display: none; }
@@ -496,11 +497,17 @@ body.ask-mode #fork-session { display: none !important; }
   #todo-toggle .tcount { color: var(--muted); font-weight: 400; }
   #todo-toggle .tcount b { color: #e0b94a; font-weight: 600; }
   #todo-toggle .tchevron, #todo-chevron { color: var(--muted); font-size: 10px; }
-  #todo-toggle #team-count { color: var(--vscode-charts-blue, #61afef); }
-  #todo-toggle #team-count[hidden] { display: none; }
   #todo-list { margin: 2px 0 4px; padding: 0; list-style: none; max-height: 34vh; overflow-y: auto;
                border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); }
   #todo-list[hidden] { display: none; }
+  /* agent-team bar — the same collapsed-card pattern as 命令/计划/变更, shown
+     only while the viewed session actually has a team (auto-hides otherwise). */
+  #team-bar { padding: 0 8px 6px; font-size: 13px; }
+  #team-bar[hidden] { display: none; }
+  #team-toggle b { color: var(--vscode-charts-blue, #61afef); font-weight: 600; }
+  #team-list { margin: 2px 0 4px; padding: 0; list-style: none; max-height: 34vh; overflow-y: auto;
+               border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); }
+  #team-list[hidden] { display: none; }
   .t-item { display: flex; align-items: flex-start; gap: 6px; padding: 3px 8px; font-size: 12px; line-height: 1.45; }
   .t-item .tmark { flex: none; width: 14px; text-align: center; font-size: 12px; }
   .t-item.pending .tmark { color: var(--muted); }
@@ -509,9 +516,9 @@ body.ask-mode #fork-session { display: none !important; }
   .t-item.completed .ttext { color: var(--muted); text-decoration: line-through; }
   .t-item.in_progress .ttext { color: var(--fg); }
   .t-item .ttext { flex: 1; word-wrap: break-word; }
-  /* unified task-bar rows: todos, agent-team members and shared team tasks
-     all use the same t-item row (same mark column, text, hover, status) and
-     are separated by small section headers (任务 / 成员 / 共享任务). */
+  /* task-bar rows: the todo list and the agent-team roster share the same
+     t-item row (same mark column, text, hover, status); the roster separates
+     members and shared tasks with small section headers (成员 / 共享任务). */
   .t-item + .t-item, .t-item + .t-sec { border-top: 1px solid var(--border); }
   .t-item .tname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .t-item .tmeta { display: block; font-size: 10px; color: var(--muted);
@@ -775,8 +782,12 @@ body.ask-mode #fork-session { display: none !important; }
   <footer>
     <div id="mention-menu" hidden></div>
     <section id="todo-bar" hidden>
-      <button id="todo-toggle" title="展开/折叠任务与智能体团队">☑ 任务 <span class="tcount" id="todo-count"></span> <span class="tcount" id="team-count" hidden></span> <span id="todo-chevron">▸</span></button>
+      <button id="todo-toggle" title="展开/折叠任务">☑ 任务 <span class="tcount" id="todo-count"></span> <span id="todo-chevron">▸</span></button>
       <ul id="todo-list" hidden></ul>
+    </section>
+    <section id="team-bar" hidden>
+      <button id="team-toggle" class="card-head" title="展开/折叠智能体团队"><span id="team-chevron" class="chevron">▸</span> 团队 <span id="team-summary"></span></button>
+      <ul id="team-list" hidden></ul>
     </section>
     <section id="ask-card" hidden>
       <div class="ask-head">✎ 询问 DSH <button class="ask-close" id="ask-close" title="关闭">✕</button></div>
@@ -888,7 +899,9 @@ body.ask-mode #fork-session { display: none !important; }
       changesFilesEl = $("changes-files"), deliveriesWrapEl = $("deliveries-wrap"),
       deliveriesListEl = $("deliveries-list"),
       todoBarEl = $("todo-bar"), todoToggleEl = $("todo-toggle"), todoListEl = $("todo-list"),
-      todoCountEl = $("todo-count"), teamCountEl = $("team-count"), todoChevronEl = $("todo-chevron"),
+      todoCountEl = $("todo-count"), todoChevronEl = $("todo-chevron"),
+      teamBarEl = $("team-bar"), teamToggleEl = $("team-toggle"), teamSummaryEl = $("team-summary"),
+      teamChevronEl = $("team-chevron"), teamListEl = $("team-list"),
       askCardEl = $("ask-card"), askCtxEl = $("ask-ctx"), askChoicesEl = $("ask-choices"),
       askCloseEl = $("ask-close"), askCustomRowEl = $("ask-custom-row"),
       askCustomInputEl = $("ask-custom-input"), askSendEl = $("ask-send"),
@@ -946,7 +959,8 @@ body.ask-mode #fork-session { display: none !important; }
     todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
     todoPrevAll: false,      // previous snapshot fully completed (carry reset rule)
     todoCache: null,         // { sessionId, items } — latest todos seen, survives session switches
-    todoOpen: false,         // unified task/team bar expanded?
+    todoOpen: false,         // todo bar expanded?
+    teamOpen: false,         // agent-team bar expanded?
     hasMore: false,          // older history pages available
     loadingOlder: false,     // a loadOlder request is in flight
     firstTokenTime: 0, turnOutput: 0,
@@ -2803,15 +2817,13 @@ body.ask-mode #fork-session { display: none !important; }
     return span;
   }
 
-  /** Header pass: visibility, todo counter/carry and the team badge. Runs on
-   *  frequent lifecycle updates (state messages re-apply the todo cache and
-   *  re-mark the current teammate) without rebuilding the row list. */
+  /** Header pass: visibility and todo counter/carry. Runs on frequent
+   *  lifecycle updates (state messages re-apply the todo cache) without
+   *  rebuilding the row list. The bar auto-hides when the session has no
+   *  todos — the same visibility rule as 命令/计划/变更. */
   function syncTaskBar() {
     var hasTodos = state.todos && state.todos.length > 0;
-    var showTeam = teamVisible();
-    // round 12: the bar is a permanent fixture of the composer; only the
-    // minimal ask surface may hide it (when it has nothing to show).
-    todoBarEl.hidden = state.mode === "ask" && !hasTodos && !showTeam;
+    todoBarEl.hidden = !hasTodos;
     if (hasTodos) {
       var activeIdx = [];
       var done = 0;
@@ -2832,57 +2844,26 @@ body.ask-mode #fork-session { display: none !important; }
       // keep the carry: an empty list is the turn-reset, not a new task
       todoCountEl.innerHTML = "";
     }
-    if (showTeam) {
-      var members = state.team.members || [];
-      var tasks = state.team.tasks || [];
-      var running = members.filter(function (m) { return m.status === "running"; }).length;
-      var openTasks = tasks.filter(function (x2) { return x2.status !== "completed"; }).length;
-      teamCountEl.hidden = false;
-      teamCountEl.textContent = "· 团队 " + members.length;
-      teamCountEl.title = members.length + " 名成员 · " + running + " 运行中 · " + openTasks + " 项未完成";
-    } else {
-      teamCountEl.hidden = true;
-      teamCountEl.textContent = "";
-      teamCountEl.title = "";
-    }
     todoListEl.hidden = !state.todoOpen;
     todoChevronEl.textContent = state.todoOpen ? "▾" : "▸";
   }
 
-  /** One collapsible list: task rows first, then the agent-team roster. Both
-   *  use the identical t-item row (mark column, text, hover, status colors),
-   *  separated by small section headers (任务 / 成员 / 共享任务). */
+  /** Todo bar body: the current task checklist (auto-hides when empty). */
   function renderTaskBar() {
     syncTaskBar();
     if (!state.todoOpen) { todoListEl.innerHTML = ""; return; }
     todoListEl.innerHTML = "";
-    var hasTodos = state.todos && state.todos.length > 0;
-    var showTeam = teamVisible();
-    if (hasTodos) {
-      if (showTeam) todoListEl.appendChild(taskSection("任务", ""));
-      state.todos.forEach(function (t) {
-        var li = document.createElement("li");
-        li.className = "t-item " + t.status;
-        li.appendChild(taskMark(TODO_MARK[t.status] || "○"));
-        var txt = document.createElement("span");
-        txt.className = "ttext";
-        txt.textContent = t.content;
-        txt.title = t.content;
-        li.appendChild(txt);
-        todoListEl.appendChild(li);
-      });
-    }
-    if (showTeam) renderTeamRows();
-    if (!hasTodos && !showTeam) {
-      var emptyRow = document.createElement("li");
-      emptyRow.className = "t-item empty";
-      emptyRow.appendChild(taskMark("○"));
-      var emptyText = document.createElement("span");
-      emptyText.className = "ttext";
-      emptyText.textContent = "暂无任务与团队";
-      emptyRow.appendChild(emptyText);
-      todoListEl.appendChild(emptyRow);
-    }
+    (state.todos || []).forEach(function (t) {
+      var li = document.createElement("li");
+      li.className = "t-item " + t.status;
+      li.appendChild(taskMark(TODO_MARK[t.status] || "○"));
+      var txt = document.createElement("span");
+      txt.className = "ttext";
+      txt.textContent = t.content;
+      txt.title = t.content;
+      li.appendChild(txt);
+      todoListEl.appendChild(li);
+    });
   }
 
   /* ---------- agent-team rows inside the task bar ---------- */
@@ -2898,25 +2879,50 @@ body.ask-mode #fork-session { display: none !important; }
     return null;
   }
 
-  /** The roster shares the task bar, but only while it is useful: a lead-only
-   *  session has nothing to list and ask-mode keeps the panel minimal (same
-   *  rules the old team button/card used). */
-  function teamVisible() {
+  /** The agent-team bar follows the same auto-hide rule as 命令/计划/变更: a
+   *  lead-only session has no roster to list and ask-mode keeps the panel
+   *  minimal; otherwise the bar exists exactly while a team is present. */
+  function teamBarVisible() {
     var t = state.team;
     return !!(t && t.members && t.members.length > 1 && state.mode !== "ask");
+  }
+
+  /** Team card: header line (▸ 团队 · N 名成员 · M 运行中 · K 项未完成) plus
+   *  the member/shared-task rows in the shared t-item presentation. */
+  function renderTeamBar() {
+    var t = state.team;
+    var members = t && Array.isArray(t.members) ? t.members : [];
+    var tasks = t && Array.isArray(t.tasks) ? t.tasks : [];
+    var visible = teamBarVisible();
+    teamBarEl.hidden = !visible;
+    if (!visible) { teamListEl.innerHTML = ""; return; }
+    var running = members.filter(function (m) { return m.status === "running"; }).length;
+    var openTasks = tasks.filter(function (x) { return x.status !== "completed"; }).length;
+    teamSummaryEl.textContent = members.length + " 名成员";
+    if (running) {
+      var rb = document.createElement("b");
+      rb.textContent = " · " + running + " 运行中";
+      teamSummaryEl.appendChild(rb);
+    }
+    if (tasks.length) teamSummaryEl.appendChild(document.createTextNode(" · " + openTasks + " 项未完成"));
+    teamSummaryEl.title = members.length + " 名成员 · " + running + " 运行中 · " + openTasks + " 项未完成";
+    teamChevronEl.textContent = state.teamOpen ? "▾" : "▸";
+    teamListEl.hidden = !state.teamOpen;
+    teamListEl.innerHTML = "";
+    if (state.teamOpen) renderTeamRows(teamListEl);
   }
 
   /** Member + shared-task rows. Same t-item presentation as todos (a member's
    *  mark carries the live status, a shared task's mark the completion state);
    *  clicking a member opens their conversation, clicking a task expands its
    *  description — the click actions the old team card had. */
-  function renderTeamRows() {
+  function renderTeamRows(container) {
     var t = state.team;
     if (!t) return;
     var members = t.members || [];
     var tasks = t.tasks || [];
     var running = members.filter(function (m) { return m.status === "running"; }).length;
-    todoListEl.appendChild(taskSection("成员", members.length + " 名 · " + running + " 运行中"));
+    container.appendChild(taskSection("成员", members.length + " 名 · " + running + " 运行中"));
     members.forEach(function (m) {
       var isLead = m.role === "lead";
       var cur = state.subview && state.subview.childSessionId === m.id;
@@ -2955,10 +2961,10 @@ body.ask-mode #fork-session { display: none !important; }
         row.title = "返回主会话";
         row.addEventListener("click", function () { post({ type: "teamBack" }); });
       }
-      todoListEl.appendChild(row);
+      container.appendChild(row);
     });
     var doneTasks = tasks.filter(function (x) { return x.status === "completed"; }).length;
-    todoListEl.appendChild(taskSection("共享任务", tasks.length ? (doneTasks + "/" + tasks.length + " 已完成") : "无"));
+    container.appendChild(taskSection("共享任务", tasks.length ? (doneTasks + "/" + tasks.length + " 已完成") : "无"));
     tasks.forEach(function (task) {
       var blocked = task.status === "pending" && task.blockedBy && task.blockedBy.length > 0;
       var markCls = task.status === "completed" ? "completed" : task.status === "in_progress" ? "in_progress" : blocked ? "blocked" : "";
@@ -2992,7 +2998,7 @@ body.ask-mode #fork-session { display: none !important; }
         row.addEventListener("click", function () { row.classList.toggle("open"); });
       }
       row.appendChild(txt);
-      todoListEl.appendChild(row);
+      container.appendChild(row);
     });
     if (t.failure) {
       var fail = document.createElement("li");
@@ -3002,7 +3008,7 @@ body.ask-mode #fork-session { display: none !important; }
       ftxt.className = "ttext";
       ftxt.textContent = "团队异常：" + t.failure;
       fail.appendChild(ftxt);
-      todoListEl.appendChild(fail);
+      container.appendChild(fail);
     }
   }
 
@@ -3266,8 +3272,8 @@ body.ask-mode #fork-session { display: none !important; }
   }
 
   /* Subview chrome: hide the lead-only controls while a teammate chat is on
-     screen; the back bar carries the member name + live status. The unified
-     task bar stays visible so the roster can still switch conversations. */
+     screen; the back bar carries the member name + live status. The todo and
+     team bars stay visible so the roster can still switch conversations. */
   var lastSubviewId; // undefined = never applied; null = lead transcript
   function applySubview() {
     var sub = !!state.subview;
@@ -3282,7 +3288,7 @@ body.ask-mode #fork-session { display: none !important; }
     }
     if (subId !== lastSubviewId) {
       lastSubviewId = subId;
-      renderTaskBar(); // re-marks the current teammate row (cur) in the unified list
+      renderTeamBar(); // re-marks the current teammate row (cur) in the roster
     } else {
       syncTaskBar();
     }
@@ -3328,6 +3334,7 @@ body.ask-mode #fork-session { display: none !important; }
         if (msg.mode && msg.mode !== state.mode) {
           state.mode = msg.mode;
           applyAskMode();
+          renderTeamBar(); // ask-mode hides the team card
         }
         // Transient errors (e.g. "harness 未连接" fired while booting) should
         // vanish once connectivity comes back.
@@ -3358,7 +3365,7 @@ body.ask-mode #fork-session { display: none !important; }
           state.queue = []; state.noticeOpen = false; renderQueue();
           state.todos = []; state.todoDoneCarry = 0; state.todoPrevAll = false;
           state.team = null; // the roster belongs to the lead session; host re-pushes
-          renderTaskBar();   // host re-pushes via todos/team messages
+          renderTaskBar(); renderTeamBar(); // host re-pushes via todos/team messages
           state.diffByCall = {}; state.activeRound = null;
           // Clear EVERY live-timing field: leaving any of them behind made the
           // bottom bar blend this session's clock with the previous session's.
@@ -3474,7 +3481,7 @@ body.ask-mode #fork-session { display: none !important; }
           tasks: msg.tasks || [],
           failure: msg.failure
         };
-        renderTaskBar();
+        renderTeamBar();
         if (state.subview) applySubview();
         break;
       }
@@ -5718,7 +5725,11 @@ body.ask-mode #fork-session { display: none !important; }
   cancelBtn.addEventListener("click", function () { post({ type: "cancel" }); });
   if (todoToggleEl) todoToggleEl.addEventListener("click", function () {
     state.todoOpen = !state.todoOpen;
-    renderTaskBar(); // rebuilds the unified list + chevron in the new state
+    renderTaskBar(); // rebuilds the list + chevron in the new state
+  });
+  if (teamToggleEl) teamToggleEl.addEventListener("click", function () {
+    state.teamOpen = !state.teamOpen;
+    renderTeamBar(); // rebuilds the roster + chevron in the new state
   });
   selBtnEl.addEventListener("click", function (ev) {
     ev.stopPropagation();

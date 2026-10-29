@@ -4,6 +4,14 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-10-29
+
+### 底栏：任务条恢复自动隐藏 + 独立团队条目
+
+- 任务条不再常显：当前会话没有待办时自动隐藏（与「命令」「计划」「变更」一致），不再占用输入框上方的空间。
+- 智能体团队从任务条中拆出，改为底栏独立的「**团队**」可展开条目：有团队时显示（队长 + 至少一名成员），没有团队或处于 ask 精简界面时自动隐藏；成员与共享任务仍复用 TODO 的 `t-item` 行样式，点击成员仍可直接进入其会话。
+- 底栏任务条标题不再附带「· 团队 N」计数。
+
 ## [1.5.3] - 2026-10-29
 
 ### 底栏常显与余额预警
