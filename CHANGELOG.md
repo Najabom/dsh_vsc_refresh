@@ -4,6 +4,20 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-10-29
+
+### 底栏措辞与排队条
+
+- 底栏「后台任务」条改名为「**命令**」（`▸ 命令 N`）：它显示的是 AI 执行中的后台
+  shell 命令，与「☑ 任务」（待办清单与智能体团队）不再同名；对应通知文案改为
+  「命令通知」/「后台命令通知」，运行中命令的停止按钮提示同步更新。
+- 修复调整工作区后排队条误显示「插入中」：DSH 在切换工作目录时会注入一条
+  「工作目录已变更」的系统用户消息（例如 `d:\...` 规范化成 `D:\...`），此前被
+  当成真正的用户插入消息显示。现在排队条只显示真正的用户消息
+  （`source.kind === "user"`，与官方网页一致），系统注入通知不再出现；
+  `tool-jobs` 完成通知仍按「命令通知」展示。
+- 补充回归用例：注入的系统通知不会进入排队条。
+
 ## [1.5.1] - 2026-10-29
 
 ### 底栏间距修复

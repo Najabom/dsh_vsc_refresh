@@ -33,7 +33,7 @@ export interface CapabilityFeature {
 
 export const CAPABILITY_FEATURES: CapabilityFeature[] = [
   { id: "plugins", label: "插件管理", methods: ["pluginManager/*"] },
-  { id: "jobs", label: "后台任务", methods: ["job/*"] },
+  { id: "jobs", label: "后台命令", methods: ["job/*"] },
   { id: "schedules", label: "定时任务", methods: ["schedule/*"] },
   { id: "goals", label: "目标", methods: ["goals/*"] },
   { id: "changes", label: "每轮变更", methods: ["workspace/follow"] },

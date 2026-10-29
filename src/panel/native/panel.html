@@ -805,7 +805,7 @@ body.ask-mode #fork-session { display: none !important; }
       <button id="goal-clear" class="mini" title="清除目标">✕</button>
     </div>
     <section id="jobs-bar" hidden>
-      <button id="jobs-toggle" class="card-head" title="展开/折叠后台任务"><span id="jobs-chevron" class="chevron">▸</span> 任务 <span id="jobs-summary"></span></button>
+      <button id="jobs-toggle" class="card-head" title="展开/折叠后台命令"><span id="jobs-chevron" class="chevron">▸</span> 命令 <span id="jobs-summary"></span></button>
       <div id="jobs-list" hidden></div>
     </section>
     <section id="schedules-bar" hidden>
@@ -940,7 +940,7 @@ body.ask-mode #fork-session { display: none !important; }
     pinned: {},              // sessionId -> true (registry pin set)
     breakdown: null,         // contextBreakdown {systemTokens,toolsTokens,messageTokens}
     goalCreating: false,     // inline goal composer open?
-  noticeOpen: false,       // "后台任务通知" group expanded?
+  noticeOpen: false,       // "后台命令通知" group expanded?
     commands: [],            // slash-command catalog (commands/list)
     todos: [],               // todos projection for the active session
     todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
@@ -2705,7 +2705,7 @@ body.ask-mode #fork-session { display: none !important; }
       row.className = "q-item notice";
       var tag = document.createElement("span");
       tag.className = "qtag notice";
-      tag.textContent = "任务通知";
+      tag.textContent = "命令通知";
       var txt = document.createElement("span");
       txt.className = "qtext";
       txt.textContent = it.summary || it.text || "";
@@ -2720,13 +2720,13 @@ body.ask-mode #fork-session { display: none !important; }
       row.className = "q-item notice";
       var tag = document.createElement("span");
       tag.className = "qtag notice";
-      tag.textContent = "任务通知";
+      tag.textContent = "命令通知";
       var txt = document.createElement("span");
       txt.className = "qtext";
-      txt.textContent = "后台任务通知 ×" + count + (expanded ? "" : "（点击展开）");
+      txt.textContent = "后台命令通知 ×" + count + (expanded ? "" : "（点击展开）");
       row.appendChild(tag);
       row.appendChild(txt);
-      row.appendChild(qbtn(expanded ? "收起" : "展开", expanded ? "折叠后台任务通知" : "展开后台任务通知", function () {
+      row.appendChild(qbtn(expanded ? "收起" : "展开", expanded ? "折叠后台命令通知" : "展开后台命令通知", function () {
         state.noticeOpen = !expanded;
         renderQueue();
       }));
@@ -2744,6 +2744,7 @@ body.ask-mode #fork-session { display: none !important; }
     if (notices.length >= 3) queueEl.appendChild(noticeGroup(notices.length, !collapsed));
     state.queue.forEach(function (it) {
       var isNotice = it.source === "tool-jobs";
+      if (!isNotice && typeof it.source === "string" && it.source !== "user") return;
       if (isNotice) {
         if (collapsed) return;
         queueEl.appendChild(noticeRow(it));
@@ -3020,7 +3021,7 @@ body.ask-mode #fork-session { display: none !important; }
     var running = 0, failed = 0;
     jobs.forEach(function (j) { if (j.status === "running" || j.status === "stopping") running++; else if (j.status === "failed") failed++; });
     jobsSummaryEl.textContent = String(jobs.length);
-    jobsSummaryEl.title = jobs.length + " 个后台任务" + (running ? "（" + running + " 运行中）" : "");
+    jobsSummaryEl.title = jobs.length + " 个后台命令" + (running ? "（" + running + " 运行中）" : "");
     if (running) {
       var rb = document.createElement("b");
       rb.textContent = " · " + running + " 运行中";
@@ -3054,7 +3055,7 @@ body.ask-mode #fork-session { display: none !important; }
         var kill = document.createElement("button");
         kill.className = "jkill";
         kill.textContent = "✕";
-        kill.title = "停止该后台任务";
+        kill.title = "停止该后台命令";
         kill.addEventListener("click", function () { post({ type: "jobKill", jobId: job.id }); });
         row.appendChild(kill);
       }
