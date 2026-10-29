@@ -4,6 +4,15 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-29
+
+### 底栏间距修复
+
+- 修复「后台任务（▸ 任务 N）/ 计划 / 变更」卡片贴住输入框：此前只有待办任务条
+  （☑ 任务）加了对称内边距，后台任务条的下内边距仍是 0；现在三种底栏卡片统一
+  上下对称间距（footer 上内边距 6px，卡片下内边距 6px），无论哪张卡片最后可见，
+  任务文字与输入框的上下间距都一致。
+
 ## [1.5.0] - 2026-10-29
 
 首个面向公众的版本：从公开的 GitHub Release 安装即可用，不再依赖维护者机器。
