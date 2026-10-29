@@ -19,7 +19,7 @@
     "protocol-client",
     "harness"
   ],
-  "version": "1.5.2",
+  "version": "1.5.3",
   "publisher": "najabom",
   "license": "MIT",
   "author": "zhibailu (original project); Najabom (fork maintainer)",
@@ -206,6 +206,12 @@
           "type": "boolean",
           "default": true,
           "description": "%dsh.config.notifyTurnFailures%"
+        },
+        "dshVsc.balanceWarningThreshold": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "%dsh.config.balanceWarningThreshold%"
         }
       }
     }

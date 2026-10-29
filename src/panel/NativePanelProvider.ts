@@ -305,6 +305,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private lastBalanceAt = 0;
   /** Latest account/getState snapshot (settings account card + polling). */
   private lastAccountState: AccountStateWire | null = null;
+  /** Balance-warning latch: one toast per drop below `balanceWarningThreshold`. */
+  private balanceAlertArmed = true;
   /** Settings-card sign-in polling: setInterval while a browser attempt is in
    *  flight, generation token so a stopped poll can never post a late result. */
   private accountPollTimer?: ReturnType<typeof setInterval>;
@@ -2457,6 +2459,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     const view = await this.fetchAccountBalance();
     if (view === undefined) return;
     this.lastBalance = view;
+    this.maybeWarnBalance(view);
     this.post({ type: "balance", value: view });
   }
 
@@ -2472,6 +2475,33 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.log(`balance: ${(error as Error).message}`);
       return undefined;
     }
+  }
+
+  /** `dshVsc.balanceWarningThreshold`: DSH exposes no warning line of its own,
+   *  so the threshold is extension-side. While signed in, warn once when the
+   *  CNY wallet drops to/below the line (toast with a direct top-up button);
+   *  the latch re-arms after the balance recovers above it. */
+  private maybeWarnBalance(view: AccountBalanceView | null): void {
+    const threshold = vscode.workspace.getConfiguration("dshVsc").get<number>("balanceWarningThreshold", 0);
+    if (!view || view.status !== "ready" || !(threshold > 0)) return;
+    const wallet = view.wallets.find((w) => w.currency === "CNY") ?? view.wallets[0];
+    const balance = wallet ? Number.parseFloat(wallet.balance) : Number.NaN;
+    if (!Number.isFinite(balance)) return;
+    if (balance > threshold) {
+      this.balanceAlertArmed = true;
+      return;
+    }
+    if (!this.balanceAlertArmed) return;
+    this.balanceAlertArmed = false;
+    const topUp = this.lastAccountState?.links?.topUpUrl ?? "https://platform.deepseek.com/top_up";
+    void vscode.window
+      .showWarningMessage(
+        `DeepSeek 账户余额不足：¥${balance.toFixed(2)}（预警线 ¥${threshold}）`,
+        "去充值",
+      )
+      .then((pick) => {
+        if (pick === "去充值") void vscode.env.openExternal(vscode.Uri.parse(topUp));
+      });
   }
 
   /** Seed panel state from the control-plane projection cache of a session. */
@@ -3433,6 +3463,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       let balance: AccountBalanceView | null | undefined;
       if (signedIn) {
         balance = await this.fetchAccountBalance();
+        this.maybeWarnBalance(balance ?? null);
         try {
           const p = await client.getAccountProfile(this.accountVersion(), "zh-CN");
           if (p && p.status === "ready") {

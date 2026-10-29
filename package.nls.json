@@ -24,4 +24,5 @@
   "dsh.config.dshUpdateChannel.next": "The next dist-tag release line (0.2.1-rc.x today).",
   "dsh.config.dshUpdateChannel.alpha": "The alpha dist-tag release line (0.2.1-alpha.x today).",
   "dsh.config.notifyTurnFailures": "Show a VS Code notification when a turn ends with an error (quota exhaustion, auth failure, timeout, ...). The transcript already marks failed turns; the toast matters when you are looking at another tab. Quota failures offer a top-up link."
+  "dsh.config.balanceWarningThreshold": "Warn once (VS Code toast with a top-up button) when the DeepSeek account's CNY balance drops to or below this value. 0 disables the warning. DSH exposes no warning line of its own, so the threshold is an extension-side setting.",
 }

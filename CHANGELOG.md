@@ -4,6 +4,14 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-10-29
+
+### 底栏常显与余额预警
+
+- 底栏任务条改为常显：没有待办与团队时也显示「☑ 任务」，展开后给出空状态提示，不再因当前会话没有任务/团队而整条消失。
+- 新增余额预警设置 `dshVsc.balanceWarningThreshold`（默认 0 = 关闭）：登录 DeepSeek 账户后，人民币余额降到预警线及以下时弹一次 VS Code 通知，附「去充值」按钮直达充值页；余额恢复后重新武装，不会重复弹。DSH 本身不提供余额预警线，该阈值由扩展侧配置。
+- 排队条移除 copy 按钮：排队消息与命令通知都不再显示复制按钮。
+
 ## [1.5.2] - 2026-10-29
 
 ### 底栏措辞与排队条

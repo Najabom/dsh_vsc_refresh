@@ -24,4 +24,5 @@
   "dsh.config.dshUpdateChannel.next": "next 标签发布线（当前 0.2.1-rc.x）。",
   "dsh.config.dshUpdateChannel.alpha": "alpha 标签发布线（当前 0.2.1-alpha.x）。",
   "dsh.config.notifyTurnFailures": "轮次以错误结束时弹出 VS Code 通知（余额耗尽、凭据失效、超时等）。转录里本来就会标出失败；当你在其他标签页时才需要这个通知。余额类失败会附「打开充值页」链接。"
+  "dsh.config.balanceWarningThreshold": "DeepSeek 账户人民币余额降到该值及以下时弹一次通知（附「去充值」按钮）。0 表示关闭。DSH 自身不提供余额预警线，因此这是扩展侧设置。",
 }
