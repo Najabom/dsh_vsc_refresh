@@ -89,6 +89,13 @@ if (!result.ok) {
   }
 }
 
+if (result.optionalMissing.length > 0) {
+  // Capability-gated endpoints (e.g. session/state on 0.2.2+) may not exist on
+  // older lines; the runtime ledger reports the feature as unsupported instead
+  // of the bridge breaking, so this is a degradation, not a contract failure.
+  log(`capability-gated identifiers absent (feature degrades, not a break): ${result.optionalMissing.join(", ")}`);
+}
+
 const known = new Set(INTERFACE_IDS);
 const covered = (pattern) => {
   if (known.has(pattern)) return true;
@@ -112,4 +119,8 @@ if (compareVersions(version, TESTED_DSH_MIN) < 0) {
 
 await rm(dir, { recursive: true, force: true });
 if (failed) process.exit(1);
-log("OK — every identifier this extension uses exists in this release");
+log(
+  result.optionalMissing.length > 0
+    ? "OK — every required identifier exists in this release (capability-gated ones degrade gracefully)"
+    : "OK — every identifier this extension uses exists in this release"
+);

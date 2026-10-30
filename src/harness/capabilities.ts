@@ -37,6 +37,9 @@ export const CAPABILITY_FEATURES: CapabilityFeature[] = [
   { id: "schedules", label: "定时任务", methods: ["schedule/*"] },
   { id: "goals", label: "目标", methods: ["goals/*"] },
   { id: "changes", label: "每轮变更", methods: ["workspace/follow"] },
+  // session/state 是「只发排队」的读接口；0.2.1 及更早的行没有它。
+  // 缺失时只降级该按钮（gateway/not-found 记入本表），不阻塞其余功能。
+  { id: "queue", label: "排队消息", methods: ["session/state"] },
   { id: "search", label: "会话搜索", methods: ["session/search"] },
   { id: "fork", label: "会话分叉", methods: ["session/fork"] },
   { id: "references", label: "文件/会话引用", methods: ["fileReferences/*", "sessionReferenceResolver/*"] },

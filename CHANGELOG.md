@@ -4,6 +4,14 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7-v2] - 2026-10-31
+
+### 契约 CI 修复 · 旧 DSH 行优雅降级
+
+- **契约检查区分必选/可选接口**：静态接口检查现在只把非 capability 接口的缺失判为失败；能力组（本次新增「排队消息」`session/state`）缺失只记录降级，`scripts/contract-check.mjs` 输出警告而非失败。修复 v1.5.7 在 DSH `0.1.7-rc.2` / `0.2.1-rc.4` 上的 Contract CI 红。
+- **「只发排队」在旧版本上优雅降级**：`session/state` 不可用时直接提示改用「一起发送」或升级 DSH，不再先把 `⏳` 标记行排进队列。
+- **更新预检**：升级提示会把「该版本不含可选接口（相关功能会降级）」写进风险说明，而不是误报接口断裂。
+
 ## [1.5.7] - 2026-10-31
 
 ### 计划评审可批准 · 保持计划保留输出 · 排队消息合并发送

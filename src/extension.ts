@@ -1070,11 +1070,18 @@ export function activate(context: vscode.ExtensionContext): void {
       log.appendLine(`new-feature probe: DSH v${latest} ships package(s) this extension has not adapted yet: ${newFeatures.join(", ")}`);
     }
     const staticFailed = staticResult.verified && !staticResult.ok;
+    const optionalMissing = staticResult.verified ? staticResult.optionalMissing : [];
+    if (optionalMissing.length > 0) {
+      log.appendLine(
+        `optional interfaces absent in dsh ${latest}: ${optionalMissing.join(", ")} — capability-gated, feature degrades`
+      );
+    }
     const noteHits = alerts?.hits ?? [];
     const newFeatureLabels = newFeatures.map((name) => name.replace("@deepseek-ai/dsh-", ""));
-    if (staticFailed || noteHits.length > 0 || newFeatureLabels.length > 0) {
+    if (staticFailed || noteHits.length > 0 || newFeatureLabels.length > 0 || optionalMissing.length > 0) {
       const parts: string[] = [];
       if (staticFailed) parts.push(`新版本包中缺少接口：${staticResult.missing.join("、")}`);
+      if (optionalMissing.length > 0) parts.push(`该版本不含可选接口：${optionalMissing.join("、")}（相关功能会降级）`);
       if (noteHits.length > 0) {
         parts.push(`官方通告提及：${noteHits.map((h) => `${h.id}（v${h.versions.join(", ")}）`).join("、")}`);
       }

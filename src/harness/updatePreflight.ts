@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { gunzipSync } from "node:zlib";
+import { featureForMethod } from "./capabilities";
 import { METHODS } from "./protocol";
 import { compareVersions } from "./updater";
 import { FEATURE_BASELINE_VERSION, KNOWN_FEATURE_PACKAGES } from "./featureBaseline";
@@ -192,7 +193,7 @@ export function scanInterfaceAlerts(notes: { version: string; text: string }[]):
 }
 
 export type StaticCheckResult =
-  | { verified: true; ok: boolean; missing: string[] }
+  | { verified: true; ok: boolean; missing: string[]; optionalMissing: string[] }
   | { verified: false; error: string };
 
 function tarballUrl(pkg: string, version: string): string {
@@ -217,15 +218,27 @@ export async function staticInterfaceCheck(latest: string, log: (message: string
     const blobs: Buffer[] = [];
     for (const pkg of CHECK_PACKAGES) blobs.push(await fetchTarballText(pkg, latest));
     const haystack = Buffer.concat(blobs);
-    const missing = INTERFACE_IDS.filter((id) => !haystack.includes(id));
+    const absent = INTERFACE_IDS.filter((id) => !haystack.includes(id));
+    // Capability-gated surfaces may legitimately predate a release line (e.g.
+    // `session/state` only exists on 0.2.2+): their absence degrades one
+    // feature (recorded by the runtime compatibility ledger) instead of
+    // breaking the bridge, so only the rest is a hard contract failure.
+    const optionalMissing = absent.filter((id) => featureForMethod(id) !== undefined);
+    const missing = absent.filter((id) => featureForMethod(id) === undefined);
     if (missing.length > 0) {
-      log(`static interface check: ${missing.length} identifier(s) missing in ${latest}: ${missing.join(", ")}`);
-      return { verified: true, ok: false, missing };
+      log(`static interface check: ${missing.length} required identifier(s) missing in ${latest}: ${missing.join(", ")}`);
+      if (optionalMissing.length > 0) {
+        log(`static interface check: ${optionalMissing.length} capability-gated identifier(s) absent in ${latest}: ${optionalMissing.join(", ")}`);
+      }
+      return { verified: true, ok: false, missing, optionalMissing };
+    }
+    if (optionalMissing.length > 0) {
+      log(`static interface check: ${optionalMissing.length} capability-gated identifier(s) absent in ${latest}: ${optionalMissing.join(", ")}`);
     }
     log(
-      `static interface check: all ${INTERFACE_IDS.length} identifiers present in ${latest} (${CHECK_PACKAGES.length} packages)`
+      `static interface check: all ${INTERFACE_IDS.length - optionalMissing.length} required identifiers present in ${latest} (${CHECK_PACKAGES.length} packages)`
     );
-    return { verified: true, ok: true, missing: [] };
+    return { verified: true, ok: true, missing: [], optionalMissing };
   } catch (error) {
     const message = (error as Error).message;
     log(`static interface check unavailable: ${message}`);

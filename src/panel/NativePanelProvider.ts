@@ -1225,6 +1225,21 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     try {
       const client = this.client;
       if (!client) return;
+      // session/state is what exposes queued-row ids; it only exists on newer
+      // DSH lines. Probe before prompting so an unsupported harness never gets
+      // a throwaway marker row queued behind the user's real messages.
+      try {
+        await client.sessionState(sessionId);
+      } catch (error) {
+        if (error instanceof RpcErrorResult || /not[-_ ]?found|unknown method|404/i.test(String((error as Error).message))) {
+          this.post({
+            type: "error",
+            message: "当前 DSH 版本不支持「只发排队」（缺少 session/state 接口）：请改用「一起发送」，或将 DSH 升级到 0.2.2 及以上。",
+          });
+          return;
+        }
+        throw error;
+      }
       const sent = await client.promptWithRequestId(sessionId, [{ type: "text", text: "⏳" }], "queue");
       for (let i = 0; i < 20; i++) {
         await new Promise((resolve) => setTimeout(resolve, 50));
