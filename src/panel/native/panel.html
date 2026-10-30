@@ -4853,19 +4853,28 @@ body.ask-mode #fork-session { display: none !important; }
       // (callers can freely move back/forward). There is no "next" primary button:
       // single-select auto-advances, multi-select/custom advance via the next
       // arrow, and a plain "提交" button appears ONLY on the last question.
+      // Plan review (DSH's exit_plan_mode) keeps ONE action: 保持计划模式.
+      // The approve/exit option is removed entirely; keeping the plan means
+      // dismissing the review WITHOUT leaving plan mode and WITHOUT asking the
+      // model to revise it (the host settles it by cancelling the blocked
+      // turn, which DSH's exit_plan_mode treats as a dismissal).
+      var planReview = isReview && msg.questions.length === 1 &&
+        !!(msg.questions[0].intent && msg.questions[0].intent.kind === "plan-review");
       inner = '<div class="in-card"><div class="in-head">' + tag + ' agent 向你提问</div>' +
         '<div id="in-questions"></div>' +
         '<div class="in-actions">' +
-        '<button class="in-btn primary" id="in-submit" disabled>提交</button>' +
-        '<span class="in-spacer"></span>' +
-        '<button class="in-btn" id="in-cancel">取消</button>' +
+        (planReview
+          ? '<button class="in-btn primary" id="in-btn-keep">保持计划模式</button>'
+          : '<button class="in-btn primary" id="in-submit" disabled>提交</button>' +
+            '<span class="in-spacer"></span>' +
+            '<button class="in-btn" id="in-cancel">取消</button>') +
         '</div></div>';
     }
     interactEl.innerHTML = inner;
     interactEl.hidden = false;
     interactState = {
       kind: msg.kind, rpcId: msg.rpcId, sessionId: msg.sessionId,
-      approvalId: msg.approvalId || null,
+      approvalId: msg.approvalId || null, planReview: !!planReview,
       selections: {}, custom: {}, skipped: {}, page: 0
     };
     lockMainInput(); // composer takeover while the question is pending
@@ -4885,6 +4894,8 @@ body.ask-mode #fork-session { display: none !important; }
       // "提交" only shows on the last question; it ALWAYS submits.
       answerInteraction({ submit: true });
     });
+    var keepBtn = $("in-btn-keep");
+    if (keepBtn) keepBtn.addEventListener("click", function () { dismissPlanReview(); });
     var cancelBtn2 = $("in-cancel");
     if (cancelBtn2) cancelBtn2.addEventListener("click", function () {
       // Dismissal = a COMPLETED batch of skipped answers (empty selected), the
@@ -4926,21 +4937,19 @@ body.ask-mode #fork-session { display: none !important; }
     for (var qi = start; qi < end; qi++) {
       var q = qs[qi];
       var skipped = !!interactState.skipped[qi];
+      var planReview = !!(q.intent && q.intent.kind === "plan-review");
+      var headSkip = planReview ? "" :
+        '<button class="in-skip" data-qi="' + qi + '" title="跳过此题">' + (skipped ? "取消跳过" : "跳过") + '</button>';
       html += '<div class="in-q' + (skipped ? " skipped" : "") + '" data-qi="' + qi + '">' +
         '<div class="in-qhead"><div class="in-qtext">' + (pages > 1 ? '[' + (qi + 1) + '] ' : '') + esc(q.question) + '</div>' +
-        '<button class="in-skip" data-qi="' + qi + '" title="跳过此题">' + (skipped ? "取消跳过" : "跳过") + '</button></div>' +
+        headSkip + '</div>' +
         (q.header ? '<div class="in-qheader">' + esc(q.header) + '</div>' : "") +
         (q.detail ? (q.intent && q.intent.kind === "plan-review"
           ? '<div class="in-qdetail in-plan">' + renderMd(q.detail) + '</div>'
           : '<div class="in-qdetail">' + esc(q.detail) + '</div>') : "") +
-        '<div class="in-opts">' +
+        (planReview ? "" : '<div class="in-opts">' +
         (q.options || []).map(function (o, oi) {
           var disp = parseRecommendedLabel(o.label);
-          if (q.intent && q.intent.kind === "plan-review") {
-            // Localized display only; submit still sends the original label
-            // (the harness compares against the exact "Approve" string).
-            disp = { label: o.label === q.intent.approve ? "批准并退出计划模式" : "继续规划", recommended: disp.recommended };
-          }
           var chip = q.multiSelect ? '<span class="in-check">✓</span>' : '<span class="in-num">' + (oi + 1) + '</span>';
           return '<button class="in-opt' + (interactState.selections[qi] && interactState.selections[qi].has(oi) ? " sel" : "") + '" data-qi="' + qi + '" data-oi="' + oi + '">' + chip +
             '<span class="in-ocopy"><span class="in-oline">' +
@@ -4950,11 +4959,11 @@ body.ask-mode #fork-session { display: none !important; }
             (o.description ? '<span class="in-odesc">' + esc(o.description) + '</span>' : "") +
             '</span></button>';
         }).join("") +
-        '</div>' +
-        '<div class="in-custom-row">' +
+        '</div>') +
+        (planReview ? "" : '<div class="in-custom-row">' +
         '<span class="in-custom-icon">✎</span>' +
         '<textarea class="in-custom-input" data-qi="' + qi + '" rows="1" placeholder="自定义回答…（可选，Shift+Enter 换行）">' + esc(interactState.custom[qi] || "") + '</textarea>' +
-        '</div>' +
+        '</div>') +
         '</div>';
     }
     box.innerHTML = html;
@@ -5054,6 +5063,7 @@ body.ask-mode #fork-session { display: none !important; }
   function answerInteraction(ans) {
     var st = interactState;
     if (!st) return;
+    if (st.planReview) { dismissPlanReview(); return; }
     if (ans.outcome) {
       var approvalPayload = { type: "respondApproval", rpcId: st.rpcId, sessionId: st.sessionId, approvalId: st.approvalId, outcome: ans.outcome };
       if (ans.remember) approvalPayload.remember = ans.remember;
@@ -5087,6 +5097,22 @@ body.ask-mode #fork-session { display: none !important; }
     interactEl.hidden = true;
     interactState = null;
     unlockMainInput(); // composer released
+  }
+
+  // Plan review 保持计划模式: dismiss the pending review WITHOUT approving
+  // (that would leave plan mode) and WITHOUT the keep-planning answer (that
+  // would make the model revise and present the plan again). The host rejects
+  // the forwarded waterfall with ASK_CANCELLED (the official web client's
+  // dismissal); DSH's exit_plan_mode calls concludeTurn() and keeps plan mode
+  // active, so the model asks only once and the current plan output remains.
+  function dismissPlanReview() {
+    var st = interactState;
+    if (!st) return;
+    post({ type: "dismissPlanReview", rpcId: st.rpcId, sessionId: st.sessionId });
+    state.interact = null;
+    interactEl.hidden = true;
+    interactState = null;
+    unlockMainInput();
   }
 
   /* ---------- metrics line under the input (mirrors the DSH web StatsLine) ---------- */

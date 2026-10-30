@@ -411,6 +411,16 @@ export type WebviewMessage =
        *  model as a failed tool call and it would ask the question again. */
       answers?: { id: string; selected: string[]; custom?: string }[];
     }
+  | {
+      /** 保持计划模式: dismiss a plan-review question without approving it
+       *  (approving exits plan mode) and without a keep-planning answer (which
+       *  makes the model revise). The host rejects the forwarded waterfall with
+       *  UserQuestionError/ASK_CANCELLED — the official web client's dismissal —
+       *  and DSH's exit_plan_mode maps that to concludeTurn(). */
+      type: "dismissPlanReview";
+      rpcId: string;
+      sessionId: string;
+    }
   | { type: "getPermissions" }
   | { type: "selectPermission"; permission: string }
   | { type: "planMode"; action: "soft" | "hard" | "off" }

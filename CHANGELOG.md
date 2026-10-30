@@ -4,6 +4,13 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-10-30
+
+### 计划评审卡：只保留「保持计划模式」
+
+- 计划评审题（`exit_plan_mode`）现在只提供一个按钮「**保持计划模式**」：保留当前计划输出、**不退出计划模式**，也不会要求模型重新规划——模型只问一次；点击后按官方网页的「关闭评审」语义拒绝这次提问（`UserQuestionError / ASK_CANCELLED`），当前回合直接结束，计划模式保持激活。
+- 移除「批准并退出计划模式」按钮：要退出计划模式，请用底栏计划开关或 `/plan off`，避免从评审卡误退出。
+
 ## [1.5.5] - 2026-10-29
 
 ### 团队条目自动隐藏修复 · 更新预检 · 设置页可靠性

@@ -2037,6 +2037,42 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "dismissPlanReview": {
+        if (!this.client) {
+          this.post({ type: "error", message: "harness 未连接" });
+          break;
+        }
+        try {
+          // 保持计划模式: keep the plan output, stay in plan mode and do NOT
+          // make the model revise the plan. Approving would leave plan mode;
+          // sending the keep-planning answer would ask for a revision. Reject
+          // the forwarded waterfall exactly like the official web client
+          // (waterfall.reject("ASK_CANCELLED")): DSH's exit_plan_mode catches
+          // UserQuestionError/ASK_CANCELLED, calls concludeTurn() and keeps
+          // plan mode active, so the model asks only once.
+          await this.client.answerEvent(this.eventClientId, message.rpcId, {
+            kind: "rejected",
+            error: {
+              name: "UserQuestionError",
+              message: "the user cancelled ask_user_question",
+              code: "ASK_CANCELLED",
+            },
+          });
+          this.pendingWaterfalls.delete(message.rpcId);
+          this.post({ type: "interactionSettled", sessionId: message.sessionId, rpcId: message.rpcId });
+        } catch (error) {
+          // Fall back to cancelling the blocked turn — DSH also treats that as
+          // the user dismissing the review (concludeTurn + plan mode stays).
+          try {
+            await this.client.cancel(message.sessionId);
+          } catch {
+            /* the review already settled or the harness is gone */
+          }
+          this.pendingWaterfalls.delete(message.rpcId);
+          this.post({ type: "interactionSettled", sessionId: message.sessionId, rpcId: message.rpcId });
+        }
+        break;
+      }
       case "getPermissions":
         this.postPermissions();
         break;
