@@ -378,6 +378,10 @@ export type WebviewMessage =
   | { type: "deletePermanently"; sessionId: string }
   | { type: "pickWorkspace" }
   | { type: "send"; text: string; mode?: "queue" | "steer"; attachments?: { kind?: "image" | "file"; mediaType?: string; data: string; name?: string }[] }
+  /** Idle + queued messages: wake the queue. With text/attachments the green
+   *  "一起发送" toggle joins the draft to the queued turn (host prompts with
+   *  mode "steer"); without them only the queue is sent. */
+  | { type: "sendQueue"; text?: string; attachments?: { kind?: "image" | "file"; mediaType?: string; data: string; name?: string }[] }
   | { type: "loadOlder"; beforeSeq: number }
   | { type: "cancel" }
   | { type: "refresh" }

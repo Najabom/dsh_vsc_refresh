@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { nativeAuthHeaders } from "./nativeAuth";
-import { METHODS, type AccountBalanceWire, type AccountClientMetadataWire, type AccountProfileWire, type AccountStateWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileReferenceWire, type FileUploadValue, type ImageAttachmentRef, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type ScheduleCatalogEntryWire, type ScheduleTimingChangeWire, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionReferenceCandidateWire, type SessionSearchView, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SkillWire, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView, type WorkspaceViewWire } from "./protocol";
+import { METHODS, type AccountBalanceWire, type AccountClientMetadataWire, type AccountProfileWire, type AccountStateWire, type ClientRequest, type ServerResponse, type RpcError, type AgentPresetRoster, type BundleView, type CredentialInfo, type FileReferenceWire, type FileUploadValue, type ImageAttachmentRef, type LlmConfigurableProvider, type LlmDiscoveredModel, type LlmProviderInfo, type MarketIndexSummary, type MarketQuery, type MarketSearchResult, type ModelCatalog, type ModelSelection, type PermissionCatalog, type PluginChangeResult, type PluginEntryView, type PluginExemptionsView, type PluginInspection, type PluginInventoryView, type PluginRegistriesView, type PromptContentPart, type QueueAction, type ScheduleCatalogEntryWire, type ScheduleTimingChangeWire, type SessionAddress, type SessionAttachmentValue, type SessionPageValue, type SessionReferenceCandidateWire, type SessionSearchView, type SessionStateValue, type SessionSummary, type SettingsDescribeView, type SettingsNamespaceView, type SettingsPathOp, type SkillWire, type SubagentPromptValue, type GoalView, type GoalRef, type ChangesSummaryView, type ChangesDiffView, type WorkspaceViewWire } from "./protocol";
 
 /** A business-level RPC failure (result.ok === false). */
 export class RpcErrorResult extends Error {
@@ -165,6 +165,25 @@ export class HarnessClient {
 
   cancel(sessionId: string): Promise<{ accepted: true }> {
     return this.call<{ accepted: true }>(METHODS.sessionCancel, { request: { sessionId } });
+  }
+
+  /** session/prompt that also surfaces the requestId it was admitted with;
+   *  the pending row carries it as rpcId, which is how a just-enqueued marker
+   *  prompt is retired once the queue has been woken. */
+  promptWithRequestId(
+    sessionId: string,
+    content: PromptContentPart[],
+    mode: "queue" | "steer" = "queue",
+  ): Promise<{ accepted: true; requestId: string }> {
+    const requestId = randomUUID();
+    return this.call<{ accepted: true }>(METHODS.sessionPrompt, {
+      request: { requestId, sessionId, mode, content },
+    }).then((value) => ({ ...value, requestId }));
+  }
+
+  /** Passive session/state read: pending queue rows + the running flag. */
+  sessionState(sessionId: string): Promise<SessionStateValue> {
+    return this.call<SessionStateValue>(METHODS.sessionState, { request: { sessionId } });
   }
 
   /**

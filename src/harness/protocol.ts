@@ -48,6 +48,7 @@ export const METHODS = {
   sessionRename: "session/rename",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
+  sessionState: "session/state",
   sessionModelCatalog: "session/modelCatalog",
   sessionSelectModel: "session/selectModel",
   sessionUpdateQueue: "session/updateQueue",
@@ -164,6 +165,24 @@ export type QueueAction =
   | { kind: "remove" }
   | { kind: "steer" }
   | { kind: "edit"; content: { type: string; text?: string }[] };
+
+/** One pending prompt message from session/state.queue. */
+export interface SessionQueuedItem {
+  id: string;
+  placement: "queued" | "steering" | "context";
+  /** session/prompt requestId the message was admitted with. */
+  rpcId?: string;
+  content: readonly Record<string, unknown>[];
+}
+
+/** session/state value: a passive read of the running flag + pending input. */
+export interface SessionStateValue {
+  cursor: number;
+  active: boolean;
+  running: boolean;
+  queue: SessionQueuedItem[] | null;
+  pendingInput: string[];
+}
 
 /* ---------- account ---------- */
 

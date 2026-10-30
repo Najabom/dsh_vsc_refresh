@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HarnessClient, RpcErrorResult } from "../harness/client";
-import type { AgentTeamProjection, ChangedFileView, ChangesDiffView, ChangesSummaryView, GoalView, ImageAttachmentRef, JobView, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PresentedFileView, PromptContentPart, QueueAction, SessionAddress, SessionSummary, SettingsDescribeView } from "../harness/protocol";
+import type { AgentTeamProjection, ChangedFileView, ChangesDiffView, ChangesSummaryView, GoalView, ImageAttachmentRef, JobView, LlmConfigurableProvider, LlmProviderInfo, ModelSelection, ModelSelectionProjection, PresentedFileView, PromptContentPart, QueueAction, SessionAddress, SessionStateValue, SessionSummary, SettingsDescribeView } from "../harness/protocol";
 import { ACCOUNT_ATTEMPT_ACTIVE_PHASES, type AccountStateWire } from "../harness/protocol";
 import type { FollowTarget, WaterfallFrame, WorkspaceState } from "../events/eventStream";
 import type { AccountBalanceView, HostMessage, PanelEvent, PanelSession, QueueAttachmentView, QueueItemView, TodoItem, ToolLineDiff, UpdateCenterHooks, WebviewMessage } from "./protocol";
@@ -1217,6 +1217,40 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Wake the pending queue WITHOUT adding any user-visible content: prompt a
+   *  throwaway marker (mode "queue"), then retire that marker row once it
+   *  shows up in session/state.queue. The new turn claims the ORIGINAL first
+   *  queued item, so the composer draft never enters the queue. */
+  private async sendOnlyQueued(sessionId: string): Promise<void> {
+    try {
+      const client = this.client;
+      if (!client) return;
+      const sent = await client.promptWithRequestId(sessionId, [{ type: "text", text: "⏳" }], "queue");
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        let state: SessionStateValue;
+        try {
+          state = await client.sessionState(sessionId);
+        } catch {
+          return; // the harness may already be running the claimed turn
+        }
+        const row = (state.queue ?? []).find((item) => item.rpcId === sent.requestId);
+        if (row) {
+          try {
+            await client.updateQueue(sessionId, row.id, { kind: "remove" });
+          } catch {
+            // The turn may have claimed the marker; nothing left to retire.
+          }
+          return;
+        }
+        if (state.running) return; // claimed before it became visible
+      }
+      this.log("sendOnlyQueued: marker row never appeared; leaving it to the turn");
+    } catch (error) {
+      this.post({ type: "error", message: describeHarnessFailure("发送排队消息失败", error) });
+    }
+  }
+
   /** Cache an unanswered waterfall's card (so re-selecting the session can
    *  re-show it); post it only while its session is the one on screen —
    *  sibling surfaces (the ask window) run their own instance. */
@@ -2271,6 +2305,43 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           await this.refresh();
         } catch (error) {
           this.post({ type: "error", message: describeHarnessFailure("发送失败", error) });
+        }
+        break;
+      }
+      case "sendQueue": {
+        const sessionId = this.activeSessionId;
+        if (!sessionId) return;
+        if (this.teamView) {
+          this.post({ type: "error", message: "团队视图中不能发送排队消息。" });
+          break;
+        }
+        const text = (message.text ?? "").trim();
+        const attachments = message.attachments ?? [];
+        if (!text && attachments.length === 0) {
+          await this.sendOnlyQueued(sessionId);
+          break;
+        }
+        // Green "一起发送": the draft joins the queued first turn. mode "steer"
+        // appends to next-step, which the inbox claims together with one
+        // queued next-turn item (next-step first, then next-turn).
+        try {
+          const content: PromptContentPart[] = [];
+          for (const a of attachments) {
+            if (a.kind === "file") {
+              const up = await this.client.uploadFile(sessionId, a.data, a.name);
+              content.push({ type: "file", receiptId: up.receiptId });
+            } else {
+              content.push({ type: "image", mediaType: a.mediaType ?? "image/png", data: a.data, name: a.name });
+            }
+          }
+          if (text) content.push({ type: "text", text });
+          if (content.length) {
+            await this.client.prompt(sessionId, content, "steer");
+            this.post({ type: "running", sessionId, running: true });
+            await this.refresh();
+          }
+        } catch (error) {
+          this.post({ type: "error", message: describeHarnessFailure("发送排队消息失败", error) });
         }
         break;
       }

@@ -690,6 +690,22 @@ body.ask-mode #fork-session { display: none !important; }
   /* Input foot row: the last non-editable line INSIDE the input area (above
      the button row); the left side hosts the balance readout. */
   #input-foot { display: flex; align-items: center; min-height: 18px; padding: 0 8px 4px; }
+  /* Queue-join toggle (right end of the input foot): visible only while a
+     draft AND queued messages coexist. Green = send both; red = send only
+     the queue and keep the draft untouched. */
+  #qjoin-btn { flex: none; margin-left: auto; font-size: 11px; line-height: 1;
+               padding: 2px 7px; border: 1px solid; border-radius: 3px;
+               background: transparent; cursor: pointer; white-space: nowrap; }
+  #qjoin-btn[hidden] { display: none; }
+  #qjoin-btn.qjoin-on { color: var(--ok); border-color: var(--ok); }
+  #qjoin-btn.qjoin-off { color: var(--err); border-color: var(--err); }
+  /* Kept plan output, pinned into the transcript after 保持计划模式. */
+  .plan-note { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border);
+               border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+               border-radius: 6px; background: rgba(128, 128, 128, .07); }
+  .plan-note .pn-head { font-size: 12px; font-weight: 600; margin-bottom: 4px;
+                        color: var(--vscode-textLink-foreground, #3794ff); }
+  .plan-note .pn-body { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
   /* Plan-mode toggle (right of the permission chip). Active = blue like the
      permission chip; pend = a queued switch, landing on the next step. */
   #plan-btn.on { color: var(--vscode-textLink-foreground, #3794ff); }
@@ -843,7 +859,7 @@ body.ask-mode #fork-session { display: none !important; }
     <div id="input-row">
       <div class="input-box">
         <textarea id="input" rows="5" placeholder="发消息…（Enter 发送，运行中自动排队；Shift+Enter 换行；可粘贴图片、拖入文件）"></textarea>
-        <div id="input-foot"><span id="balance-chip" title="账户余额" hidden></span></div>
+        <div id="input-foot"><span id="balance-chip" title="账户余额" hidden></span><button type="button" id="qjoin-btn" hidden></button></div>
       </div>
       <div id="composer-btns">
         <button id="perm-btn" title="权限预设" hidden></button>
@@ -876,6 +892,7 @@ body.ask-mode #fork-session { display: none !important; }
       attachEl = $("attach-row"), queueEl = $("queue-row"),
       inputEl = $("input"), sendBtn = $("send"), cancelBtn = $("cancel"), statusEl = $("input-status"),
       permBtnEl = $("perm-btn"), planBtnEl = $("plan-btn"), balanceChipEl = $("balance-chip"),
+      qjoinBtnEl = $("qjoin-btn"),
       modelBtnEl = $("model-btn"), effortBtnEl = $("effort-btn"), settingsBtnEl = $("settings-btn"),
       subviewBarEl = $("subview-bar"),
       subviewBackEl = $("subview-back"), subviewNameEl = $("subview-name"),
@@ -961,6 +978,7 @@ body.ask-mode #fork-session { display: none !important; }
     todoCache: null,         // { sessionId, items } — latest todos seen, survives session switches
     todoOpen: false,         // todo bar expanded?
     teamOpen: false,         // agent-team bar expanded?
+    qjoinDraft: false,       // queue-join toggle: true = send draft + queue together
     hasMore: false,          // older history pages available
     loadingOlder: false,     // a loadOlder request is in flight
     firstTokenTime: 0, turnOutput: 0,
@@ -2557,6 +2575,18 @@ body.ask-mode #fork-session { display: none !important; }
         el.appendChild(tdet);
         break;
       }
+      case "plan-note": {
+        el.className = "plan-note";
+        var pnHead = document.createElement("div");
+        pnHead.className = "pn-head";
+        pnHead.textContent = "📋 计划（已保留，未执行）";
+        var pnBody = document.createElement("div");
+        pnBody.className = "pn-body";
+        pnBody.innerHTML = renderMd(item.markdown || "");
+        el.appendChild(pnHead);
+        el.appendChild(pnBody);
+        break;
+      }
       case "cmd": {
         el.className = item.err ? "sys-err" : "cmd-note";
         el.textContent = item.text;
@@ -2702,7 +2732,7 @@ body.ask-mode #fork-session { display: none !important; }
 
   function renderQueue() {
     queueEl.innerHTML = "";
-    if (!state.queue.length) { queueEl.hidden = true; state.noticeOpen = false; return; }
+    if (!state.queue.length) { queueEl.hidden = true; state.noticeOpen = false; renderQJoin(); return; }
     queueEl.hidden = false;
     var notices = state.queue.filter(function (it) { return it.source === "tool-jobs"; });
     var collapsed = notices.length >= 3 && !state.noticeOpen;
@@ -2790,7 +2820,33 @@ body.ask-mode #fork-session { display: none !important; }
       }
       queueEl.appendChild(row);
     });
+    renderQJoin();
   }
+
+  /* ---------- queue-join toggle (draft + queued messages coexist) ---------- */
+  function queuedCount() {
+    return state.queue.filter(function (it) { return it.placement === "queued"; }).length;
+  }
+  function draftHasContent() {
+    return inputEl.value.trim() !== "" || attachments.length > 0;
+  }
+  /** Small right-end toggle: hidden unless a draft and queued messages
+   *  coexist; red "只发排队" (green "一起发送") picks what 发送 does. */
+  function renderQJoin() {
+    if (!qjoinBtnEl) return;
+    var show = queuedCount() > 0 && draftHasContent();
+    qjoinBtnEl.hidden = !show;
+    if (!show) return;
+    qjoinBtnEl.textContent = state.qjoinDraft ? "一起发送" : "只发排队";
+    qjoinBtnEl.className = state.qjoinDraft ? "qjoin-on" : "qjoin-off";
+    qjoinBtnEl.title = state.qjoinDraft
+      ? "发送：排队消息 + 输入框里的文字/附件一起发出"
+      : "只发送排队消息，输入框内容保留不动";
+  }
+  if (qjoinBtnEl) qjoinBtnEl.addEventListener("click", function () {
+    state.qjoinDraft = !state.qjoinDraft;
+    renderQJoin();
+  });
 
   /* ---------- task bar: todos + agent team, one unified list ---------- */
   var TODO_MARK = { pending: "○", in_progress: "●", completed: "✓" };
@@ -4599,7 +4655,6 @@ body.ask-mode #fork-session { display: none !important; }
     }
     addRow("计划模式（软引导）", "先规划 · 无硬限制", pm.active && pm.variant !== "hard", "soft");
     addRow("计划模式 + 强制只读", "权限锁为仅可查看", pm.active && pm.variant === "hard", "hard");
-    if (pm.active) addRow(pm.pending ? "退出计划模式（切换中…）" : "退出计划模式", "恢复默认执行", false, "off");
   }
 
   /* ---------- account balance chip (right of the plan button) ---------- */
@@ -4853,18 +4908,20 @@ body.ask-mode #fork-session { display: none !important; }
       // (callers can freely move back/forward). There is no "next" primary button:
       // single-select auto-advances, multi-select/custom advance via the next
       // arrow, and a plain "提交" button appears ONLY on the last question.
-      // Plan review (DSH's exit_plan_mode) keeps ONE action: 保持计划模式.
-      // The approve/exit option is removed entirely; keeping the plan means
-      // dismissing the review WITHOUT leaving plan mode and WITHOUT asking the
-      // model to revise it (the host settles it by cancelling the blocked
-      // turn, which DSH's exit_plan_mode treats as a dismissal).
+      // Plan review (DSH's exit_plan_mode) keeps TWO actions: 批准并开始执行
+      // (the approve answer — leaves plan mode and the plan is carried out from
+      // the next step) and 保持计划模式 (dismiss WITHOUT approving: plan mode
+      // stays, the model is NOT asked to revise, and the plan text is kept in
+      // the transcript as a local plan-note card).
       var planReview = isReview && msg.questions.length === 1 &&
         !!(msg.questions[0].intent && msg.questions[0].intent.kind === "plan-review");
       inner = '<div class="in-card"><div class="in-head">' + tag + ' agent 向你提问</div>' +
         '<div id="in-questions"></div>' +
         '<div class="in-actions">' +
         (planReview
-          ? '<button class="in-btn primary" id="in-btn-keep">保持计划模式</button>'
+          ? '<button class="in-btn primary" id="in-btn-approve">批准并开始执行</button>' +
+            '<span class="in-spacer"></span>' +
+            '<button class="in-btn" id="in-btn-keep">保持计划模式</button>'
           : '<button class="in-btn primary" id="in-submit" disabled>提交</button>' +
             '<span class="in-spacer"></span>' +
             '<button class="in-btn" id="in-cancel">取消</button>') +
@@ -4894,8 +4951,10 @@ body.ask-mode #fork-session { display: none !important; }
       // "提交" only shows on the last question; it ALWAYS submits.
       answerInteraction({ submit: true });
     });
+    var approveBtn = $("in-btn-approve");
+    if (approveBtn) approveBtn.addEventListener("click", function () { approvePlanReview(); });
     var keepBtn = $("in-btn-keep");
-    if (keepBtn) keepBtn.addEventListener("click", function () { dismissPlanReview(); });
+    if (keepBtn) keepBtn.addEventListener("click", function () { keepPlanReview(); });
     var cancelBtn2 = $("in-cancel");
     if (cancelBtn2) cancelBtn2.addEventListener("click", function () {
       // Dismissal = a COMPLETED batch of skipped answers (empty selected), the
@@ -5063,7 +5122,7 @@ body.ask-mode #fork-session { display: none !important; }
   function answerInteraction(ans) {
     var st = interactState;
     if (!st) return;
-    if (st.planReview) { dismissPlanReview(); return; }
+    if (st.planReview) { keepPlanReview(); return; }
     if (ans.outcome) {
       var approvalPayload = { type: "respondApproval", rpcId: st.rpcId, sessionId: st.sessionId, approvalId: st.approvalId, outcome: ans.outcome };
       if (ans.remember) approvalPayload.remember = ans.remember;
@@ -5099,20 +5158,53 @@ body.ask-mode #fork-session { display: none !important; }
     unlockMainInput(); // composer released
   }
 
-  // Plan review 保持计划模式: dismiss the pending review WITHOUT approving
-  // (that would leave plan mode) and WITHOUT the keep-planning answer (that
-  // would make the model revise and present the plan again). The host rejects
-  // the forwarded waterfall with ASK_CANCELLED (the official web client's
-  // dismissal); DSH's exit_plan_mode calls concludeTurn() and keeps plan mode
-  // active, so the model asks only once and the current plan output remains.
-  function dismissPlanReview() {
-    var st = interactState;
-    if (!st) return;
-    post({ type: "dismissPlanReview", rpcId: st.rpcId, sessionId: st.sessionId });
+  // Plan review (DSH exit_plan_mode):
+  //   批准并开始执行 — the approve answer: leaves plan mode; the plan is carried
+  //     out from the next step (the host flips plan mode optimistically).
+  //   保持计划模式 — dismiss WITHOUT approving AND WITHOUT the keep-planning
+  //     answer (that one would make the model revise and present again). The
+  //     host rejects the forwarded waterfall with ASK_CANCELLED (the official
+  //     web client's dismissal); DSH's exit_plan_mode calls concludeTurn() and
+  //     keeps plan mode active. The plan text is pinned to the transcript.
+  function interactionReviewQuestion() {
+    var it = state.interact;
+    if (!it || !it.questions) return null;
+    for (var i = 0; i < it.questions.length; i++) {
+      var q = it.questions[i];
+      if (q.intent && q.intent.kind === "plan-review") return q;
+    }
+    return null;
+  }
+  function closePlanReview() {
     state.interact = null;
     interactEl.hidden = true;
     interactState = null;
     unlockMainInput();
+  }
+  function approvePlanReview() {
+    var q = interactionReviewQuestion();
+    var st = interactState;
+    if (!q || !st) return;
+    var label = (q.intent && q.intent.approve) || (q.options && q.options.length ? q.options[0].label : "");
+    if (!label) return;
+    post({ type: "respondQuestion", rpcId: st.rpcId, sessionId: st.sessionId,
+           answers: [{ id: q.id, selected: [label] }] });
+    closePlanReview();
+  }
+  function keepPlanReview() {
+    var q = interactionReviewQuestion();
+    var st = interactState;
+    if (!q || !st) return;
+    if (q.detail) appendPlanNote(q.detail);
+    post({ type: "dismissPlanReview", rpcId: st.rpcId, sessionId: st.sessionId });
+    closePlanReview();
+  }
+  /** Pin the kept plan into the transcript (local card, never replayed from
+   *  history) so the plan output survives the dismissed review dialog. */
+  function appendPlanNote(markdown) {
+    state.items.push({ id: state.nextItemId++, kind: "plan-note", markdown: markdown });
+    forceBottom = true;
+    scheduleRender();
   }
 
   /* ---------- metrics line under the input (mirrors the DSH web StatsLine) ---------- */
@@ -5217,7 +5309,7 @@ body.ask-mode #fork-session { display: none !important; }
     // keep it pinned so the newest content (incl. turn summaries) stays visible.
     if (nearBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
-  inputEl.addEventListener("input", function () { autoGrow(); maybeTriggerMention(); });
+  inputEl.addEventListener("input", function () { autoGrow(); maybeTriggerMention(); renderQJoin(); });
   inputEl.addEventListener("keydown", function (e) {
     if (menuActive) {
       if (e.key === "ArrowDown") { e.preventDefault(); menuIndex = Math.min(menuIndex + 1, menuItems.length - 1); drawMenu(); return; }
@@ -5454,6 +5546,7 @@ body.ask-mode #fork-session { display: none !important; }
       item.appendChild(x);
       attachEl.appendChild(item);
     });
+    renderQJoin();
   }
 
   /* ---------- full-size preview (official ImageLightbox) ---------- */
@@ -5731,13 +5824,29 @@ body.ask-mode #fork-session { display: none !important; }
 
   function send() {
     var text = inputEl.value.trim();
-    if (!text && attachments.length === 0) return;
+    var hasDraft = text !== "" || attachments.length > 0;
+    var queued = queuedCount();
+    // Idle + queued messages: 发送/Enter only wakes the queue. Red (default)
+    // sends ONLY the queue and keeps the composer exactly as typed; green
+    // joins the draft (text + attachments) to the queued turn.
+    if (queued > 0 && !state.running) {
+      hideMenu();
+      if (hasDraft && state.qjoinDraft) {
+        post({ type: "sendQueue", text: text, attachments: attachments.slice() });
+        clearComposerHistory(text);
+      } else {
+        post({ type: "sendQueue" });
+        if (hasDraft) statusEl.textContent = "已发送排队消息，输入内容保留";
+      }
+      renderQJoin();
+      return;
+    }
+    if (!hasDraft) return;
     // While the agent is running, Enter queues the message (harness queue);
     // cap the pending queue at 4. Slash commands never queue — they execute
     // immediately via commands/execute, so they skip the cap (and must, so a
     // typed "/compact" can't be blocked by the queue).
     if (text && state.running && !(text.startsWith("/") && attachments.length === 0)) {
-      var queued = state.queue.filter(function (it) { return it.placement === "queued"; }).length;
       if (queued >= 4) {
         statusEl.textContent = "队列已满（最多 4 条）";
         return;
@@ -5750,6 +5859,9 @@ body.ask-mode #fork-session { display: none !important; }
     // queue strip above the input is the only pending view; the bubble enters
     // the transcript when the harness delivers the message for real.
     post({ type: "send", text: text, attachments: attachments.slice(), mode: "queue" });
+    clearComposerHistory(text);
+  }
+  function clearComposerHistory(text) {
     var fileCount = attachments.filter(function (a) { return a.kind === "file"; }).length;
     history.push(text || (fileCount ? ("📎 " + fileCount + " 个附件") : ("📷 " + attachments.length + " 张图片")));
     if (history.length > 200) history.shift();
