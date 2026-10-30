@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { gunzipSync } from "node:zlib";
 import { METHODS } from "./protocol";
 import { compareVersions } from "./updater";
+import { FEATURE_BASELINE_VERSION, KNOWN_FEATURE_PACKAGES } from "./featureBaseline";
 
 /**
  * Update preflight: before offering (or recommending) a DSH update, measure
@@ -228,6 +229,68 @@ export async function staticInterfaceCheck(latest: string, log: (message: string
   } catch (error) {
     const message = (error as Error).message;
     log(`static interface check unavailable: ${message}`);
+    return { verified: false, error: message };
+  }
+}
+
+/** Read one text entry out of an npm tarball (uncompressed .tar bytes).
+ *  npm tarballs are plain USTAR headers + 512-byte padding; we only need
+ *  the main package manifest, so no external tar dependency is required. */
+function tarEntryText(tar: Buffer, wanted: string): string | null {
+  let offset = 0;
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) return null;
+    const rawName = header.subarray(0, 100).toString("utf8");
+    const nul = rawName.indexOf("\0");
+    const name = nul >= 0 ? rawName.slice(0, nul) : rawName;
+    const sizeField = header.subarray(124, 136).toString("ascii").replace(/\0.*$/, "").trim();
+    const size = Number.parseInt(sizeField, 8);
+    const dataStart = offset + 512;
+    if (!Number.isFinite(size) || size < 0) return null;
+    if (name === wanted) {
+      if (dataStart + size > tar.length) return null;
+      return tar.subarray(dataStart, dataStart + size).toString("utf8");
+    }
+    offset = dataStart + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}
+
+export type FeatureProbeResult =
+  | { verified: true; unknown: string[] }
+  | { verified: false; error: string };
+
+const KNOWN_FEATURE_SET = new Set(KNOWN_FEATURE_PACKAGES);
+
+/** Compare the candidate DSH release's runtime bundle list with the
+ *  feature packages this extension was built and verified against
+ *  (harness/featureBaseline.ts). Packages added after the baseline are
+ *  features the bridge has never seen: their entry points cannot be
+ *  surfaced in the VS Code panel until the extension adapts, so the update
+ *  prompt warns instead of pretending the release is fully compatible. */
+export async function probeNewFeaturePackages(
+  latest: string,
+  log: (message: string) => void
+): Promise<FeatureProbeResult> {
+  try {
+    const tar = await fetchTarballText("@deepseek-ai/dsh", latest);
+    const manifestText = tarEntryText(tar, "package/package.json");
+    if (manifestText === null) throw new Error("main package tarball has no package/package.json");
+    const manifest = JSON.parse(manifestText) as { dependencies?: Record<string, unknown> };
+    const packages = Object.keys(manifest.dependencies ?? {}).filter((name) => name.startsWith("@deepseek-ai/dsh-"));
+    const unknown = packages.filter((name) => !KNOWN_FEATURE_SET.has(name));
+    if (unknown.length > 0) {
+      log(
+        `new-feature probe: ${latest} adds ${unknown.length} package(s) outside the ${FEATURE_BASELINE_VERSION} baseline: ${unknown.join(", ")}`
+      );
+    } else {
+      log(`new-feature probe: ${latest} feature package set matches the ${FEATURE_BASELINE_VERSION} baseline (${packages.length} packages)`);
+    }
+    return { verified: true, unknown };
+  } catch (error) {
+    const message = (error as Error).message;
+    log(`new-feature probe unavailable: ${message}`);
     return { verified: false, error: message };
   }
 }

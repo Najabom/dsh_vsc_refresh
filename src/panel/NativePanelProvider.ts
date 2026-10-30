@@ -540,6 +540,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
 
   /** Called by extension.ts when harness connectivity changes. */
   setClient(client: HarnessClient | null, version?: string): void {
+    const wasConnected = this.client !== null;
     this.client = client;
     this.connected = client !== null;
     this.version = version;
@@ -561,12 +562,23 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.post({ type: "balance", value: this.lastBalance });
       void this.refreshBalance(true);
     }
+    if (this.settingsPanel) {
+      // The settings tab can be open while the harness is still booting:
+      // report the connection state, and reload the page on the
+      // offline → online transition (coalesced, so repeated reconnects
+      // do not stack duplicate loads).
+      this.postSettingsConnection();
+      if (client && !wasConnected) this.scheduleSettingsReload();
+    }
   }
 
   /** Loading-phase hint from the extension (searching / starting). */
   setPhase(phase: "searching" | "starting" | "online" | "offline"): void {
     this.phase = phase;
     this.postState();
+    // Keep the open settings tab's connection banner in sync with the
+    // loading phase (searching / starting), not just with client attach.
+    if (this.settingsPanel) this.postSettingsConnection();
   }
 
   /**
@@ -790,6 +802,10 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
 
   /** Latest workspace/changes summary per session (diff coordinates). */
   private changesLatest = new Map<string, { seq: number; turn: number; files: ChangedFileView[] }>();
+  /** `sessionId:seq` pairs whose change summary was already reported gone
+   *  (DSH keeps summaries only while their session lives). Suppresses the
+   *  404 that every history replay of an old session would otherwise log. */
+  private changesSummaryWarned = new Set<string>();
   /** Latest deliverables/presented files per session (open coordinates). */
   private deliveriesLatest = new Map<string, { turn: number; files: PresentedFileView[] }>();
 
@@ -817,7 +833,23 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         deleted: summary.deleted,
       });
     } catch (error) {
-      this.log(`changes summary: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      if (/HTTP 404\b/.test(message)) {
+        // DSH keeps `changes.summary` in memory only, so after a harness
+        // restart an older session's tail workspace/changes event still asks
+        // for a summary that no longer exists. Expected, not a failure: log
+        // once per session+seq (history replay runs on every panel open) and
+        // leave the change overview empty.
+        const key = `${sessionId}:${seq}`;
+        if (!this.changesSummaryWarned.has(key)) {
+          this.changesSummaryWarned.add(key);
+          this.log(
+            `changes summary unavailable (${sessionId.slice(0, 8)}… seq ${seq}): ${message} — expected after a DSH restart; the change overview stays empty`
+          );
+        }
+        return;
+      }
+      this.log(`changes summary: ${message}`);
     }
   }
 
@@ -2949,6 +2981,12 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   /* ---------- settings panel (editor-area tab, opened by the ⚙ button) ---------- */
 
   private settingsPanel?: vscode.WebviewPanel;
+  /** Coalesced full settings reload: one sequence in flight + at most one rerun. */
+  private settingsResyncRunning = false;
+  private settingsResyncQueued = false;
+  /** Per-loader dedupe: in-flight promise + a single queued rerun per loader. */
+  private settingsLoads = new Map<string, Promise<void>>();
+  private settingsLoadReruns = new Set<string>();
   /** VSIX-shipped companion bundle status (owned by extension.ts). */
   private companionStatus: CompanionStatus | null = null;
 
@@ -2980,11 +3018,14 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       this.stopAccountPolling();
       this.settingsPanel = undefined;
     });
-    const settingsPath = vscode.Uri.joinPath(this.context.extensionUri, "dist", "media", "native", "settings.html");
-    panel.webview.html = fs.readFileSync(settingsPath.fsPath, "utf8");
+    // Register the message handler BEFORE loading the page: the page posts
+    // settingsReady/envDoctor as soon as its script runs, and a listener
+    // attached after `html` can miss that first request (the first-open race).
     panel.webview.onDidReceiveMessage((msg) => {
       void this.onSettingsMessage(msg as Record<string, unknown>);
     });
+    const settingsPath = vscode.Uri.joinPath(this.context.extensionUri, "dist", "media", "native", "settings.html");
+    panel.webview.html = fs.readFileSync(settingsPath.fsPath, "utf8");
   }
 
   private async onSettingsMessage(msg: Record<string, unknown>): Promise<void> {
@@ -3024,17 +3065,39 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       });
       this.postCapabilitiesToSettings();
     }
+    // Scoped failure: name the tab that owns an unconnected request so the
+    // page can show the error inline with a per-tab 重试 button. Requests
+    // without a tab keep the plain status-line error (backward compatible).
+    const scopeByRequest: Record<string, string | undefined> = {
+      settingsReady: "general",
+      generalReady: "general",
+      presetsReady: "presets",
+      pluginsReady: "plugins",
+      pluginMarketIndexes: "market",
+      providerKeys: "api",
+      workspacesReady: "workspaces",
+    };
     if (!this.client) {
-      this.postSettingsError("harness 未连接");
+      // The settings tab may already be open while the harness cold-starts
+      // (~1 min): report the connection state (page banner) and fail scoped.
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", scopeByRequest[updateType]);
       return;
     }
     switch (msg.type) {
       case "settingsReady":
+        this.postSettingsConnection();
+        this.scheduleSettingsReload();
+        break;
+      case "generalReady":
         await this.postSettingsData();
-        await this.postSettingsPresets();
         await this.postSettingsCatalog();
-        await this.postPlugins();
-        void this.postSettingsExtras();
+        break;
+      case "presetsReady":
+        await this.postSettingsPresets();
+        break;
+      case "workspacesReady":
+        await this.postSettingsExtras();
         break;
       case "openExternal": {
         try {
@@ -3166,7 +3229,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           const value = await this.client.marketIndexes();
           this.postSettingsMessage({ type: "pluginMarketIndexes", value });
         } catch (error) {
-          this.postSettingsError(describeHarnessFailure("读取插件市场索引失败", error));
+          this.postSettingsError(describeHarnessFailure("读取插件市场索引失败", error), "market");
         }
         break;
       }
@@ -3432,17 +3495,36 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     if (this.capabilities) this.settingsPanel?.webview.postMessage({ type: "capabilities", report: this.capabilities });
   }
 
-  private async postSettingsData(): Promise<void> {    if (!this.client) return;
+  /** Push the merged settings document (deduped). */
+  private async postSettingsData(): Promise<void> {
+    await this.coalesceSettingsLoad("data", () => this.loadSettingsData());
+  }
+
+  private async loadSettingsData(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "general");
+      return;
+    }
     try {
       const value = await this.client.settingsDescribe();
       this.settingsPanel?.webview.postMessage({ type: "settingsData", value });
     } catch (error) {
-      this.postSettingsError(describeHarnessFailure("读取配置失败", error));
+      this.postSettingsError(describeHarnessFailure("读取配置失败", error), "general");
     }
   }
 
-  /** Settings page extras: workspace registry + the account card. */
+  /** Settings page extras: workspace registry + the account card (deduped). */
   private async postSettingsExtras(): Promise<void> {
+    await this.coalesceSettingsLoad("extras", () => this.loadSettingsExtras());
+  }
+
+  private async loadSettingsExtras(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "workspaces");
+      return;
+    }
     this.postWorkspaces();
     await this.refreshAccountCard();
   }
@@ -3815,8 +3897,17 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** Agent presets for the settings 预设 tab (deduped). */
   private async postSettingsPresets(): Promise<void> {
-    if (!this.client) return;
+    await this.coalesceSettingsLoad("presets", () => this.loadSettingsPresets());
+  }
+
+  private async loadSettingsPresets(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "presets");
+      return;
+    }
     try {
       const { presets } = await this.client.agentPresetList();
       this.settingsPanel?.webview.postMessage({
@@ -3836,7 +3927,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         },
       });
     } catch (error) {
-      this.postSettingsError(describeHarnessFailure("读取预设失败", error));
+      this.postSettingsError(describeHarnessFailure("读取预设失败", error), "presets");
     }
   }
 
@@ -3844,7 +3935,15 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
    *  (provider → model → reasoning effort) and the permission presets — the
    *  same rosters the web GUI's pickers render from. */
   private async postSettingsCatalog(): Promise<void> {
-    if (!this.client) return;
+    await this.coalesceSettingsLoad("catalog", () => this.loadSettingsCatalog());
+  }
+
+  private async loadSettingsCatalog(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "general");
+      return;
+    }
     try {
       const [models, permissions] = await Promise.all([
         this.client.models(),
@@ -3863,7 +3962,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         permissions: { options: permissions.options, defaultPreset: permissions.defaultPreset },
       });
     } catch (error) {
-      this.postSettingsError(describeHarnessFailure("读取可选列表失败", error));
+      this.postSettingsError(describeHarnessFailure("读取可选列表失败", error), "general");
     }
   }
 
@@ -3900,9 +3999,17 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Full plugin-manager snapshot for the 插件 tab (bundles + entries + registries + exemptions + inventory). */
+  /** Full plugin-manager snapshot for the 插件 tab (deduped). */
   private async postPlugins(): Promise<void> {
-    if (!this.client) return;
+    await this.coalesceSettingsLoad("plugins", () => this.loadPlugins());
+  }
+
+  private async loadPlugins(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "plugins");
+      return;
+    }
     try {
       const [bundles, plugins, registries, exemptions, inventory] = await Promise.all([
         this.client.listBundles(),
@@ -3924,7 +4031,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         companion: this.companionStatus,
       });
     } catch (error) {
-      this.postSettingsError(describeHarnessFailure("读取插件列表失败", error));
+      this.postSettingsError(describeHarnessFailure("读取插件列表失败", error), "plugins");
     }
   }
 
@@ -4026,9 +4133,78 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private postSettingsError(message: string): void {
+  /** Tell the open settings page whether the harness is connected (drives
+   *  the top banner and the automatic reload on reconnect). */
+  private postSettingsConnection(): void {
+    this.postSettingsMessage({
+      type: "settingsConnection",
+      connected: this.client !== null,
+      phase: this.phase,
+      version: this.version ?? "",
+    });
+  }
+
+  /** Re-push the whole settings page, used when the harness (re)connects
+   *  while the settings tab is open. Coalesced: one sequence in flight, at
+   *  most one rerun queued, so a burst of reconnect events cannot stack
+   *  duplicate loads. */
+  private scheduleSettingsReload(): void {
+    if (!this.settingsPanel) return;
+    if (this.settingsResyncRunning) {
+      this.settingsResyncQueued = true;
+      return;
+    }
+    this.settingsResyncRunning = true;
+    void (async () => {
+      try {
+        do {
+          this.settingsResyncQueued = false;
+          await this.postSettingsData();
+          await this.postSettingsPresets();
+          await this.postSettingsCatalog();
+          await this.postPlugins();
+          await this.postProviderKeys();
+          void this.postSettingsExtras();
+        } while (this.settingsResyncQueued && this.settingsPanel);
+      } finally {
+        this.settingsResyncRunning = false;
+      }
+    })();
+  }
+
+  /** Run a settings loader at most once at a time. A trigger while it is in
+   *  flight queues exactly one rerun, so event bursts collapse into one
+   *  refresh instead of stacking parallel describe/list calls. */
+  private coalesceSettingsLoad(key: string, load: () => Promise<void>): Promise<void> {
+    const inflight = this.settingsLoads.get(key);
+    if (inflight) {
+      this.settingsLoadReruns.add(key);
+      return inflight;
+    }
+    const run = (async () => {
+      try {
+        await load();
+      } finally {
+        this.settingsLoads.delete(key);
+        if (this.settingsLoadReruns.delete(key) && this.settingsPanel) {
+          void this.coalesceSettingsLoad(key, load);
+        }
+      }
+    })();
+    this.settingsLoads.set(key, run);
+    return run;
+  }
+
+  /** Settings error. `scope` names the tab that owns the failure so the page
+   *  can render an inline error + 重试; the message text stays unchanged for
+   *  unscoped callers (backward compatible with older page builds). */
+  private postSettingsError(message: string, scope?: string): void {
     try {
-      void this.settingsPanel?.webview.postMessage({ type: "settingsError", message });
+      void this.settingsPanel?.webview.postMessage({
+        type: "settingsError",
+        message,
+        ...(scope ? { scope } : {}),
+      });
     } catch {
       /* panel disposed */
     }
@@ -4080,7 +4256,15 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
    *  official → the configurable-provider directory in declaration order),
    *  with its credential state, mirroring the official settings-models page. */
   private async postProviderKeys(): Promise<void> {
-    if (!this.client) return;
+    await this.coalesceSettingsLoad("providerKeys", () => this.loadProviderKeys());
+  }
+
+  private async loadProviderKeys(): Promise<void> {
+    if (!this.client) {
+      this.postSettingsConnection();
+      this.postSettingsError("harness 未连接", "api");
+      return;
+    }
     try {
       const [providers, configurable, settings] = await Promise.all([
         this.client.listLlmProviders(),
@@ -4106,7 +4290,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         writable: settings.writable !== false,
       });
     } catch (error) {
-      this.postSettingsError(describeHarnessFailure("读取供应商列表失败", error));
+      this.postSettingsError(describeHarnessFailure("读取供应商列表失败", error), "api");
     }
   }
 

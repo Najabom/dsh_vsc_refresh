@@ -219,7 +219,8 @@ DSH 更新很频繁，而每一次协议改动都可能让扩展失配。所以�
 2. **接口预检**（升级前）：
    - **通告扫描**：把官方 Release Notes 里当前版本 → 目标版本之间的说明抓下来（GitHub API，失败回退 atom），逐条扫本扩展用到的**接口标识**（79 个：全部 RPC 端点 + 事件流协议名 + 鉴权协议名）。
    - **包内核验**：把目标版本的 tarball 拉下来，**静态**检查这些接口是否真的存在于三个关键官方包里（`dsh-api-remotes` / `dsh-api-gateway` / `dsh-client-connection`）。
-   - **三分支**：有风险 → 警告并建议「先更新扩展，等适配」；通过 → 正常弹更新；预检不可用（断网等）→ 照常弹更新，但如实说明「预检未完成」。无论如何都保留逃生通道：*仍要更新（自检失败自动回滚）*。
+   - **新功能包比对**：拉取目标版本 `@deepseek-ai/dsh` 主包的依赖清单，与 `src/harness/featureBaseline.ts` 中「本扩展已适配」的功能包基线（0.2.2-alpha.2 快照）求差；新增包 = 插件从未见过的功能（其客户端入口无法在 VS Code 面板渲染），计入风险分支，文案写明「新功能暂不兼容，请等待插件更新」。
+   - **三分支**：有风险（接口缺失/通告提及/未适配新功能）→ 警告并建议「先更新扩展，等适配」；通过 → 正常弹更新；预检不可用（断网等）→ 照常弹更新，但如实说明「预检未完成」。无论如何都保留逃生通道：*仍要更新（自检失败自动回滚）*。
 3. **执行**：停掉从属 harness → `npm install -g` 目标版本（超时保护、输出留日志）。安装链路自带三层防护：
    - **依赖预检**（`src/harness/installability.ts`）：先按目标版本的 86 个精确依赖逐个探测 npmjs，上游「发了主包、缺配套包」的半成品版本直接跳过（稳定通道）或明确报错（next/alpha 通道），不必等 npm 装到一半才失败。
    - **失败重试**：peer 冲突（ERESOLVE）改用 `--force` 重试——注意不能用 `--legacy-peer-deps`，那会连 peer 依赖（`dsh-scope`/`dsh-attachment` 等）一起跳过，装出行不通的树；镜像未同步（ETARGET）则回退官方 registry 重试一次。
@@ -248,7 +249,7 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 插件的**开关语义完全交还官方**：实验性插件包（智能体团队、语音输入、自动评审、Inspector、会话搜索/标题、终端、ralph、徽章技能、思维链翻译、worktree、插件市场）在插件页单独成组，勾选即调用 `pluginManager/setBundleEnabled` ——官方管理器会从安装副本直接启用，扩展不重装、不改 profile；按需包（Codex / Claude Code 子代理）按其固定 spec 走 `installBundle`；已安装落后的包提供更新；`waitForInstall` 兜住响应丢失；`pluginInventory/list` 以只读清单呈现内置模块（按 Agent 预设分组）。**插件市场**同理：只有官方 market 包启用后才出现索引与检索 UI，扩展绝不自己维护市场源。
 
-智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。团队数据渲染进底栏独立的「团队」可展开条目（与「命令」「计划」「变更」同一套折叠卡片样式，复用 TODO 行样式）；有团队时才出现、无团队时自动隐藏，旧 harness 无感。
+智能体团队不是另起一套 UI，而是官方数据面的镜像：`session/control` 的 `agentTeam` 投影（成员/任务）加上 `session/follow` 的 `team/*` 事件实时刷新；成员 id 即子会话 id，点击成员用 `subagent` 地址（parent + child + continuable）打开 `session/page` 历史并 follow 其事件，发送走 `subagents/prompt`、停止走 `subagents/interruptByParent`——与官方 Web 团队对话框同语义（任务只读，状态由投影合成）。团队数据渲染进底栏独立的「团队」可展开条目（与「命令」「计划」「变更」同一套折叠卡片样式，复用 TODO 行样式）；只要团队还有活跃工作（成员运行中/启动中、有未完成的共享任务、或团队失败）就显示，团队结束或只剩队长时自动隐藏，旧 harness 无感。
 
 ### 5.7 作业、目标与每轮变更：只搬数据面，不搬页面
 
@@ -400,7 +401,7 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | **agent preset** | 一个「会话模式/工具组合」的标准模板（标准 / PTC / 极简 / cordis） |
 | **PTC 嵌套调用** | PTC 模式下 `run_code` 内部调用工具，经 `tool/ptc-dispatch` 事件暴露 |
 | **overlay** | 运行时内存补丁机制，唯一动官方处；当前只有 1 个 delta（浏览器鉴权 bypass） |
-| **接口预检** | 更新前扫描官方通告 + 静态核验新包接口的护栏流程 |
+| **接口预检** | 更新前扫描官方通告 + 静态核验新包接口 + 比对新增功能包的护栏流程 |
 | **原生桥** | 选中代码提问、改动文件跟踪等 VS Code 原生集成 |
 | **pure bridge（纯桥接）** | 只做协议对岸翻译、官方本体一行不改的设计原则 |
 
@@ -421,7 +422,8 @@ A：官方没有对外发布「独立客户端 SDK」；浏览器端的 client-r
 | `src/harness/npmFailure.ts` | npm 失败归类（ETARGET/ERESOLVE/EBUSY/网络/权限） | §5.2 |
 | `src/harness/updateChannel.ts` | 通道感知的版本比较（auto/stable/next/alpha，纯模块） | §5.2 |
 | `src/harness/pluginUpdater.ts` | 扩展自更新（GitHub Release VSIX → code CLI） | §5.2 |
-| `src/harness/updatePreflight.ts` | 接口预检（通告扫描 + 包内静态核验） | §5.2 |
+| `src/harness/updatePreflight.ts` | 接口预检（通告扫描 + 包内静态核验 + 新功能包比对） | §5.2 |
+| `src/harness/featureBaseline.ts` | 已适配 DSH 功能包基线（更新预检的对照表） | §5.2 |
 | `src/harness/workspaceAcl.ts` | Windows 沙箱工作区 ACL 自动修复 | §5.3 |
 | `src/editor/changeTracker.ts` | 每轮改动文件跟踪（含 PTC 嵌套） | §5.7 |
 | `src/extension.ts` | 激活/关闭逻辑（从属实例确定性关闭） | §5.1 |

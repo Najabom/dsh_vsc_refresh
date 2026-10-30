@@ -47,7 +47,7 @@ import {
   installPluginUpdate,
   restartHost,
 } from "./harness/pluginUpdater";
-import { fetchReleaseNotes, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
+import { fetchReleaseNotes, probeNewFeaturePackages, scanInterfaceAlerts, staticInterfaceCheck } from "./harness/updatePreflight";
 import { HarnessEventStream } from "./events/eventStream";
 import { ChangeTracker } from "./editor/changeTracker";
 import { ExternalChanges } from "./editor/externalChanges";
@@ -1050,9 +1050,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // a static identifier check of the new version's packages (see
     // harness/updatePreflight.ts). A missing signal only downgrades the dialog
     // copy — the runtime verification after an actual update stays the gate.
-    const [notesInfo, staticResult] = await Promise.all([
+    const [notesInfo, staticResult, featureResult] = await Promise.all([
       fetchReleaseNotes(installed, latest, makeLog),
       staticInterfaceCheck(latest, makeLog),
+      probeNewFeaturePackages(latest, makeLog),
     ]);
     if (shuttingDown) return;
     const alerts = notesInfo ? scanInterfaceAlerts(notesInfo.notes) : null;
@@ -1064,17 +1065,27 @@ export function activate(context: vscode.ExtensionContext): void {
         log.appendLine(`release note mention: ${hit.id} (v${hit.versions.join(", ")})`);
       }
     }
+    const newFeatures = featureResult.verified ? featureResult.unknown : [];
+    if (newFeatures.length > 0) {
+      log.appendLine(`new-feature probe: DSH v${latest} ships package(s) this extension has not adapted yet: ${newFeatures.join(", ")}`);
+    }
     const staticFailed = staticResult.verified && !staticResult.ok;
     const noteHits = alerts?.hits ?? [];
-    if (staticFailed || noteHits.length > 0) {
+    const newFeatureLabels = newFeatures.map((name) => name.replace("@deepseek-ai/dsh-", ""));
+    if (staticFailed || noteHits.length > 0 || newFeatureLabels.length > 0) {
       const parts: string[] = [];
       if (staticFailed) parts.push(`新版本包中缺少接口：${staticResult.missing.join("、")}`);
       if (noteHits.length > 0) {
         parts.push(`官方通告提及：${noteHits.map((h) => `${h.id}（v${h.versions.join(", ")}）`).join("、")}`);
       }
+      if (newFeatureLabels.length > 0) {
+        parts.push(`插件尚未适配的新功能：${newFeatureLabels.join("、")}`);
+      }
       const choice = await vscode.window.showWarningMessage(
-        `DSH 新版本 v${latest}（当前 v${installed}，通道 ${info.channel ?? channel}）接口预检未通过：${parts.join("；")}。` +
-          `建议先更新 dsh-vsc 插件适配该版本后再升级 DSH。`,
+        `DSH 新版本 v${latest}（当前 v${installed}，通道 ${info.channel ?? channel}）预检发现兼容性风险：${parts.join("；")}。` +
+          (newFeatureLabels.length > 0
+            ? "这些新功能在 dsh-vsc 插件适配前暂不可用，请等待插件更新后再升级 DSH。"
+            : "建议先更新 dsh-vsc 插件适配该版本后再升级 DSH。"),
         "暂不更新（等待插件适配）",
         "仍要更新（自检失败自动回滚）"
       );
@@ -1088,10 +1099,12 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
+    const featureNote = featureResult.verified ? "" : "（新功能包比对未能完成）";
     const preflightNote =
-      staticResult.verified && alerts !== null
+      (staticResult.verified && alerts !== null
         ? "接口预检通过（官方通告未提及本扩展所用接口，新版本包内接口核验存在）。"
-        : `接口预检未能完成（${staticResult.verified ? "未能获取官方通告" : "未能下载新版本包核验"}）。`;
+        : `接口预检未能完成（${staticResult.verified ? "未能获取官方通告" : "未能下载新版本包核验"}）。`) +
+      featureNote;
     const choice = await vscode.window.showInformationMessage(
       `DSH 有新版本 v${latest}（当前 v${installed}，通道 ${info.channel ?? channel}）。${preflightNote}更新后会自动验证通信兼容性，失败可一键回滚。`,
       "立即更新",

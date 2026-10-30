@@ -31,6 +31,13 @@
                  border: 1px solid var(--vscode-editorWarning-foreground, #e0b94a); border-radius: 4px;
                  color: var(--vscode-editorWarning-foreground, #e0b94a); white-space: pre-line; }
   #compat-note[hidden] { display: none; }
+  #conn-banner { font-size: 12px; line-height: 1.5; margin-bottom: 8px; padding: 6px 10px;
+                 border: 1px solid var(--vscode-editorWarning-foreground, #e0b94a); border-radius: 4px;
+                 color: var(--vscode-editorWarning-foreground, #e0b94a); }
+  #conn-banner[hidden] { display: none; }
+  .tab-retry { margin: 4px 0 8px; }
+  .tab-retry[hidden] { display: none; }
+  #pl-loading[hidden] { display: none; }
   #status.err { color: var(--err); }
   #status.ok { color: var(--ok); }
   h2 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
@@ -197,12 +204,14 @@
       <button class="tab" data-tab="advanced">高级</button>
     </nav>
   </header>
+  <div id="conn-banner" hidden>DSH 服务未连接，正在自动重连…</div>
   <div id="status"></div>
   <div id="compat-note" hidden></div>
 
   <!-- 通用设置 -->
   <section id="tab-general">
     <div class="tab-err" id="tab-err-general" hidden></div>
+    <div class="tab-retry" id="tab-retry-general" hidden><button class="save" type="button">重试</button></div>
     <div class="card" id="env-card">
       <h3>运行环境</h3>
       <div class="env-row"><span class="env-dot" id="env-node-dot">●</span><span class="env-name">Node.js</span><span class="env-state" id="env-node-state">检测中…</span></div>
@@ -296,6 +305,7 @@
   <!-- API 密钥 / 自定义供应商 -->
   <section id="tab-api" hidden>
     <div class="tab-err" id="tab-err-api" hidden></div>
+    <div class="tab-retry" id="tab-retry-api" hidden><button class="save" type="button">重试</button></div>
     <p class="hint">为供应商配置 API Key：值写入 harness 的 credentials 服务（加密存储、永不回读），与官方 web「模型」页同一机制。
     内置渠道 <span class="mono">deepseek-official</span> 用 Platform API Key；<span class="mono">deepseek-account</span> 由 DSH 登录管理、无需 Key；
     自定义/第三方供应商可在下方新建（端点 + 协议 + 模型，支持从端点一键发现模型）。</p>
@@ -345,6 +355,8 @@
   <!-- 插件 -->
   <section id="tab-plugins" hidden>
     <div class="tab-err" id="tab-err-plugins" hidden></div>
+    <div class="tab-retry" id="tab-retry-plugins" hidden><button class="save" type="button">重试</button></div>
+    <div id="pl-loading" class="hint">正在读取插件列表…</div>
     <p class="hint">插件包（bundle）管理走 harness 的 <span class="mono">pluginManager</span>，与官方 web 的插件面板同一机制：启停、按需安装、更新、市场检索都在这里。<br>
     spec 可以是 npm 包名、本地路径、git 地址或 tarball；安装由 harness 内嵌 pnpm 执行，进度实时刷新；遇到 <span class="mono">incompatible-version</span> 拒绝可按提示「授予版本豁免并重试」（等价 <span class="mono">dsh plugin allow-version</span>）。<br>
     说明：客户端 UI 类 bundle（如 <span class="mono">drop-caret</span>、<span class="mono">webview-clipboard</span>）只在浏览器 web GUI 里渲染，VS Code 面板里不生效；工具 / 模型 / 命令 / 预设 / 团队等其余插件与 web 共用同一个 harness，两边都生效。</p>
@@ -401,6 +413,7 @@
       </div>
       <div id="pl-market-results"></div>
       <div id="pl-market-error" class="hint err-text"></div>
+      <div class="row" id="pl-market-retry-row" hidden><button class="save" id="pl-market-retry" type="button">重试读取市场索引</button></div>
     </div>
     <div id="pl-market-off" class="hint">插件市场随 <span class="mono">dsh-experimental-plugin-market-bundle</span> 启用后出现。</div>
     <h2>其他插件包（bundle）</h2>
@@ -412,6 +425,7 @@
   <!-- Agent 预设 -->
   <section id="tab-presets" hidden>
     <div class="tab-err" id="tab-err-presets" hidden></div>
+    <div class="tab-retry" id="tab-retry-presets" hidden><button class="save" type="button">重试</button></div>
     <p class="hint">部署提供的预设（内置/自定义）；点「设为默认」切换新会话的默认模式（写入 <span class="mono">agent-preset-registry.selectedDefault</span>，与官方客户端同一机制）。</p>
     <div id="preset-list"></div>
   </section>
@@ -419,6 +433,7 @@
   <!-- 工作区 + 账户 -->
   <section id="tab-workspaces" hidden>
     <div class="tab-err" id="tab-err-workspaces" hidden></div>
+    <div class="tab-retry" id="tab-retry-workspaces" hidden><button class="save" type="button">重试</button></div>
     <div class="card">
       <h3>工作区</h3>
       <p class="hint">DSH 侧注册的工作区列表（与官方客户端同一份数据）。名称与顺序会影响官方侧栏；删除只移除注册，不动磁盘目录与会话。</p>
@@ -508,6 +523,8 @@
     if (!el) return;
     el.hidden = true;
     el.textContent = "";
+    var retry = $("tab-retry-" + tab);
+    if (retry) retry.hidden = true;
   }
   function addTabErr(tab, text) {
     var el = $("tab-err-" + tab);
@@ -561,16 +578,74 @@
         $("tab-" + name).hidden = name !== t.getAttribute("data-tab");
       });
       if (t.getAttribute("data-tab") === "plugins") {
+        if (!pluginLoaded) setPluginsLoading(true);
         vscode.postMessage({ type: "pluginsReady" });
       }
       if (t.getAttribute("data-tab") === "api") {
         vscode.postMessage({ type: "providerKeys" });
       }
+      if (t.getAttribute("data-tab") === "presets") {
+        vscode.postMessage({ type: "presetsReady" });
+      }
       if (t.getAttribute("data-tab") === "workspaces") {
-        vscode.postMessage({ type: "settingsReady" });
+        vscode.postMessage({ type: "workspacesReady" });
       }
     });
   });
+
+  /* Tab-owned load requests: a scoped settingsError shows the inline error
+     plus a 重试 button that re-posts the tab's request. Render errors (guard)
+     are data-shape problems, not load failures, and get no button. */
+  var TAB_RETRY_REQUESTS = {
+    general: function () { vscode.postMessage({ type: "generalReady" }); },
+    api: function () { vscode.postMessage({ type: "providerKeys" }); },
+    plugins: function () { vscode.postMessage({ type: "pluginsReady" }); },
+    presets: function () { vscode.postMessage({ type: "presetsReady" }); },
+    workspaces: function () { vscode.postMessage({ type: "workspacesReady" }); }
+  };
+  function setTabLoadError(tab, text) {
+    var el = $("tab-err-" + tab);
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = text || "读取失败";
+    var retry = $("tab-retry-" + tab);
+    if (retry) retry.hidden = false;
+  }
+  Object.keys(TAB_RETRY_REQUESTS).forEach(function (tab) {
+    var btn = document.querySelector("#tab-retry-" + tab + " button");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      clearTabErr(tab);
+      if (tab === "plugins") setPluginsLoading(true);
+      TAB_RETRY_REQUESTS[tab]();
+    });
+  });
+
+  /* Connection banner; while the harness cold-starts the settings page can
+     open before the client exists, so the first load legitimately fails.
+     On the offline → online transition ask for a fresh full page (the host
+     coalesces repeats). */
+  var connState = null;
+  function renderConnection(msg) {
+    var connected = !msg || msg.connected !== false;
+    var banner = $("conn-banner");
+    if (banner) banner.hidden = connected;
+    var reconnected = connected && connState === false;
+    connState = connected;
+    if (!connected) {
+      // A dropped connection invalidates the market latch: its indexes may
+      // have failed to load and must be requested again after reconnect.
+      marketLoaded = false;
+      setStatus("DSH 服务未连接，正在自动重连…", "err");
+      return;
+    }
+    if (reconnected) {
+      setStatus("已重新连接 DSH，正在重新加载设置…", "ok");
+      vscode.postMessage({ type: "settingsReady" });
+    } else if (statusEl.className === "err" && statusEl.textContent.indexOf("未连接") >= 0) {
+      setStatus("", "");
+    }
+  }
 
   function namespacesOf() {
     return data && Array.isArray(data.namespaces) ? data.namespaces : [];
@@ -1182,6 +1257,7 @@
   var pluginInventory = null;
   var marketIndexes = null;
   var marketLoaded = false;
+  var pluginLoaded = false;
   var moreOpen = false;
 
   function localizedText(value, fallback) {
@@ -1579,6 +1655,16 @@
     });
   }
 
+  function setPluginsLoading(show) {
+    var el = $("pl-loading");
+    if (!el) return;
+    el.hidden = !show;
+    if (show) {
+      var inv = $("pl-inventory");
+      if (inv) inv.textContent = "正在读取插件列表…";
+    }
+  }
+
   function renderPlugins() {
     renderPluginBundles();
     renderPluginEntries();
@@ -1729,6 +1815,15 @@
   $("pl-market-refresh").addEventListener("click", function () {
     vscode.postMessage({ type: "pluginMarketIndexes" });
     setStatus("刷新市场索引 …");
+  });
+  $("pl-market-retry").addEventListener("click", function () {
+    var btn = $("pl-market-retry");
+    if (btn) btn.hidden = true;
+    var err = $("pl-market-error");
+    if (err) err.textContent = "";
+    marketLoaded = false;
+    vscode.postMessage({ type: "pluginMarketIndexes" });
+    setStatus("重新读取市场索引 …");
   });
   $("pl-market-search").addEventListener("click", function () {
     var url = $("pl-market-url").value;
@@ -2333,7 +2428,9 @@
 
   /* ---------- 消息分发：每条消息按页签隔离异常，绝不让整页空白 ---------- */
   function handleMessage(msg) {
-    if (msg.type === "updateStatus") {
+    if (msg.type === "settingsConnection") {
+      renderConnection(msg);
+    } else if (msg.type === "updateStatus") {
       guard("general", "更新状态", function () { renderUpdateStatus(msg); });
     } else if (msg.type === "updateVersions") {
       guard("general", "版本信息", function () {
@@ -2355,6 +2452,7 @@
     } else if (msg.type === "settingsData") {
       guard("general", "设置数据", function () { applyData(msg.value); });
     } else if (msg.type === "settingsWorkspaces") {
+      clearTabErr("workspaces");
       guard("workspaces", "工作区列表", function () { renderWorkspaces(msg.workspaces, msg.pinnedSessionIds); });
     } else if (msg.type === "settingsAccount") {
       guard("workspaces", "账户卡片", function () {
@@ -2367,6 +2465,7 @@
         renderAccountSignOutPrompt(msg.running === true ? true : msg.running === false ? false : null);
       });
     } else if (msg.type === "settingsAgentPresets") {
+      clearTabErr("presets");
       guard("presets", "Agent 预设", function () { applyPresets(msg.value); });
     } else if (msg.type === "settingsCatalog") {
       guard("general", "模型目录", function () {
@@ -2382,6 +2481,22 @@
         renderAccount(acct.state, acct.profile, acct.balance);
       }
       setStatus(msg.message, "err");
+      var errScope = typeof msg.scope === "string" ? msg.scope : "";
+      if (errScope === "market") {
+        // The market latch must release so 重试 can re-request the indexes.
+        marketLoaded = false;
+        var marketErr = $("pl-market-error");
+        if (marketErr) marketErr.textContent = msg.message || "读取插件市场索引失败";
+        var marketRetry = $("pl-market-retry");
+        if (marketRetry) marketRetry.hidden = false;
+      } else if (errScope && TAB_RETRY_REQUESTS[errScope]) {
+        if (errScope === "plugins" && !pluginLoaded) {
+          setPluginsLoading(false);
+          var inv = $("pl-inventory");
+          if (inv) inv.textContent = "插件列表读取失败，可点上方「重试」重新读取。";
+        }
+        setTabLoadError(errScope, msg.message);
+      }
     } else if (msg.type === "settingsSaved") {
       setStatus(msg.message || "已保存", "ok");
     } else if (msg.type === "providerKeys") {
@@ -2414,6 +2529,8 @@
     } else if (msg.type === "settingsPlugins") {
       guard("plugins", "插件列表", function () {
         clearTabErr("plugins");
+        pluginLoaded = true;
+        setPluginsLoading(false);
         pluginBundles = Array.isArray(msg.bundles) ? msg.bundles.slice() : [];
         pluginEntries = Array.isArray(msg.plugins) ? msg.plugins.slice() : [];
         pluginExemptions = msg.exemptions && typeof msg.exemptions === "object" ? msg.exemptions : {};
@@ -2429,10 +2546,23 @@
       });
     } else if (msg.type === "pluginMarketIndexes") {
       guard("plugins", "插件市场索引", function () {
-        marketIndexes = Array.isArray(msg.indexes) ? msg.indexes : [];
+        var indexes = Array.isArray(msg.indexes) ? msg.indexes : (Array.isArray(msg.value) ? msg.value : null);
+        if (!indexes) {
+          // Absent payload: leave the latch open so a retry re-requests it.
+          marketLoaded = false;
+          var marketErr = $("pl-market-error");
+          if (marketErr) marketErr.textContent = "市场索引不可用（harness 未返回数据），可重试。";
+          var marketRetry = $("pl-market-retry");
+          if (marketRetry) marketRetry.hidden = false;
+          return;
+        }
+        marketIndexes = indexes;
         marketLoaded = true;
         renderMarketIndexes();
-        if ($("pl-market-error")) $("pl-market-error").textContent = "";
+        var err = $("pl-market-error");
+        if (err) err.textContent = "";
+        var retry = $("pl-market-retry");
+        if (retry) retry.hidden = true;
       });
     } else if (msg.type === "pluginMarketSearch") {
       guard("plugins", "插件市场检索", function () {

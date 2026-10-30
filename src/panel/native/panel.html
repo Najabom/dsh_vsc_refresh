@@ -2879,12 +2879,24 @@ body.ask-mode #fork-session { display: none !important; }
     return null;
   }
 
-  /** The agent-team bar follows the same auto-hide rule as 命令/计划/变更: a
-   *  lead-only session has no roster to list and ask-mode keeps the panel
-   *  minimal; otherwise the bar exists exactly while a team is present. */
+  /** The agent-team bar follows the same auto-hide rule as 命令/计划/变更:
+   *  ask-mode keeps the panel minimal, and a team with nothing live to show
+   *  (no running/provisioning teammate, no unfinished shared task and no
+   *  failure) auto-hides — a lead-only roster and a FINISHED team must not
+   *  pin an empty card in the footer forever. */
   function teamBarVisible() {
     var t = state.team;
-    return !!(t && t.members && t.members.length > 1 && state.mode !== "ask");
+    if (!t || !t.members || state.mode === "ask") return false;
+    if (t.failure) return true;
+    for (var i = 0; i < t.members.length; i++) {
+      var m = t.members[i];
+      if (m && m.role !== "lead" && (m.status === "running" || m.status === "provisioning")) return true;
+    }
+    var tasks = Array.isArray(t.tasks) ? t.tasks : [];
+    for (var j = 0; j < tasks.length; j++) {
+      if (tasks[j] && tasks[j].status !== "completed") return true;
+    }
+    return false;
   }
 
   /** Team card: header line (▸ 团队 · N 名成员 · M 运行中 · K 项未完成) plus
