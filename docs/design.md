@@ -265,7 +265,7 @@ DSH 的 `workspace-write` 沙箱在 Windows 上靠 ACL 实现：执行前要给�
 
 **休眠供应商目录**：`llm/listConfigurableProviders` 返回全部内置路由（含未注册的休眠项，带 `defaultBaseURL`）。设置页把它们并入供应商下拉（与已注册、自定义路由同列），为休眠供应商保存 Key 即写 `providers.<route>` 配置（官方端点 + 协议 + 派生 key ref），并用新 Key 调 `llm/discoverModels` 补全模型列表——与官方「模型」页添加供应商的写入完全一致。
 
-**会话搜索**用 `session/search`（`{request:{query}}`）得命中与 240 码点片段；部署可以在 session-query 索引上禁用搜索（`openAt: never`），此时 RPC 返回明确的 `gateway/internal` 原因，面板选择框灰显并原样展示——能力存在与否由服务端裁决，扩展不猜测。
+**会话搜索**用 `session/search`（`{request:{query}}`）得命中与 240 码点片段；部署可以在 session-query 索引上禁用搜索（`openAt: never`），此时 RPC 返回明确的 `gateway/internal` 原因，面板选择框灰显并原样展示，提示下方给出「设置 → 通用 → 会话搜索」入口——能力存在与否由服务端裁决，扩展不猜测；设置页卡片按用户点击向 profile 的 `cordis.patch.yml` 写入 `session-query-sqlite` 覆盖（`openAt: first-search`），重启 DSH 生效。
 
 **@ 引用**是两层拼合：`fileReferences/list {agentId, query}` 给工作区文件（相对路径，上限 20）；`sessionReferenceResolver/candidates` 给历史会话，并自带可直接插入 prompt 的 **mention 文本**（`@[标签](dsh-session:<base64>)`）。面板只做补全与插入，文本原样进输入框，解析交给 DSH。`skills/list` 同理：列出技能并插入 `/名称 `，触发由 DSH 处理。
 

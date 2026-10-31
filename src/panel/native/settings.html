@@ -227,6 +227,15 @@
       </div>
       <div class="hint">外部依赖由你自行安装（本扩展只检测、不下载）：Node.js ≥24.9、全局 <span class="mono">@deepseek-ai/dsh</span>、插件安装另需 <span class="mono">pnpm 11+</span>（<span class="mono">npm i -g pnpm@11</span>）。装好或升级后，点「重启 DSH 服务」让托管实例用新环境启动（手动启动的 <span class="mono">dsh web</span> 需你自己重启）。</div>
     </div>
+    <div class="card" id="search-card">
+      <h3>会话搜索</h3>
+      <p class="hint" style="margin-top:0">DSH 默认关闭会话全文搜索（<span class="mono">session-query-sqlite</span> 的 <span class="mono">openAt</span> 为 <span class="mono">never</span>）。启用后会写入 DSH profile 的 <span class="mono">cordis.patch.yml</span>：重启 DSH 服务后生效，首次搜索时才建立索引。</p>
+      <div class="row">
+        <button class="save" id="search-enable" type="button">启用会话搜索</button>
+        <span class="hint" id="search-state">检查中…</span>
+      </div>
+      <div class="hint" id="search-msg"></div>
+    </div>
     <div class="card" id="upd-plugin">
       <h3>扩展更新 <span class="mono">(dsh_vsc_refresh)</span></h3>
       <div class="row"><label>当前版本</label><span class="mono" id="ext-ver">—</span></div>
@@ -1239,6 +1248,57 @@
     });
   });
   renderCpModels();
+
+  /* ---------- 会话搜索 opt-in（写 profile 的 cordis.patch.yml） ---------- */
+  function setSearchMsg(text, kind) {
+    var el = $("search-msg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = kind === "err" ? "var(--err)" : (kind === "ok" ? "var(--ok)" : "");
+  }
+  function renderSessionSearchStatus(msg) {
+    var state = $("search-state");
+    var btn = $("search-enable");
+    if (!state || !btn) return;
+    var enabled = msg.enabled === true;
+    btn.disabled = enabled;
+    btn.textContent = enabled ? "已启用" : "启用会话搜索";
+    if (msg.error) {
+      state.textContent = "读取状态失败";
+      setSearchMsg(String(msg.error), "err");
+      return;
+    }
+    if (!enabled) {
+      state.textContent = "未启用（DSH 默认关闭全文索引）";
+      return;
+    }
+    var profiles = Array.isArray(msg.profiles) ? msg.profiles : [];
+    var where = profiles.length ? "（profile：" + profiles.join("、") + "）" : "";
+    state.textContent = msg.active === true
+      ? "已启用，全文索引可用" + where
+      : "配置已启用" + where + "，重启 DSH 服务后生效";
+    setSearchMsg("", "");
+  }
+  function applySessionSearchSetup(msg) {
+    var btn = $("search-enable");
+    if (btn) btn.disabled = false;
+    if (!msg || msg.ok !== true) {
+      setSearchMsg("启用失败：" + ((msg && msg.error) || "未知原因"), "err");
+      return;
+    }
+    var changed = Array.isArray(msg.profiles) ? msg.profiles : [];
+    var already = Array.isArray(msg.alreadyEnabled) ? msg.alreadyEnabled : [];
+    if (msg.changed === true) {
+      setSearchMsg("已写入配置" + (changed.length ? "（profile：" + changed.join("、") + "）" : "") + "；重启 DSH 服务后生效。", "ok");
+    } else {
+      setSearchMsg("配置已是启用状态" + (already.length ? "（profile：" + already.join("、") + "）" : "") + "；重启 DSH 服务后生效。", "ok");
+    }
+  }
+  $("search-enable").addEventListener("click", function () {
+    $("search-enable").disabled = true;
+    setSearchMsg("正在写入 DSH profile 配置 …", "");
+    vscode.postMessage({ type: "enableSessionSearch" });
+  });
 
   /* ---------- 插件 tab：pluginManager（检索 / 安装 / 开关 / 删除） ---------- */
   var pluginBundles = [];
@@ -2447,6 +2507,10 @@
           ? ("重启 DSH 服务失败：" + (v.message || "未知原因"))
           : "已请求重启 DSH 服务，稍等片刻后会自动重新检测。", v.ok === false ? "err" : "ok");
       });
+    } else if (msg.type === "sessionSearchStatus") {
+      guard("general", "会话搜索", function () { renderSessionSearchStatus(msg); });
+    } else if (msg.type === "sessionSearchSetup") {
+      guard("general", "会话搜索", function () { applySessionSearchSetup(msg); });
     } else if (msg.type === "capabilities") {
       guard("general", "兼容性提示", function () { renderCompatNote(msg.report); });
     } else if (msg.type === "settingsData") {

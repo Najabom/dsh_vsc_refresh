@@ -4,6 +4,13 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-10-31
+
+### 会话搜索一键启用
+
+- **设置页「会话搜索」卡片**：DSH 默认用 `openAt: never` 关闭会话全文搜索；在 设置 → 通用 → 会话搜索 点「启用会话搜索」，扩展会向 `~/.dsh/profiles/*/cordis.patch.yml` 追加（或把已有条目的 `openAt: never` 改写为 `first-search`）`session-query-sqlite` 覆盖，写入前留 `.dshbridge.bak` 备份；重启 DSH 服务后生效，首次搜索时才建立索引。
+- **面板提示**：会话搜索被部署禁用时，会话选择框的「搜索不可用」提示下方会写明可在「设置 → 通用 → 会话搜索」中一键启用，点击直接打开设置页。
+
 ## [1.5.8] - 2026-10-31
 
 ### 计划模式可彻底退出

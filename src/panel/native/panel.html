@@ -99,6 +99,8 @@ body.ask-mode #fork-session { display: none !important; }
   #session-menu .cp-hit .cp-snippet { color: var(--muted); font-size: 11px; }
   #session-menu .cp-off { color: var(--muted); cursor: default; white-space: normal; font-size: 11px; }
   #session-menu .cp-off:hover { background: transparent; }
+  #session-menu .cp-hint { color: var(--accent); cursor: pointer; white-space: normal; font-size: 11px; }
+  #session-menu .cp-hint:hover { background: transparent; text-decoration: underline; }
   #new-session { flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 2px;
                  background: transparent; color: var(--fg); cursor: pointer; }
   #new-session:hover { background: var(--input-bg); }
@@ -4232,6 +4234,16 @@ body.ask-mode #fork-session { display: none !important; }
       off.className = "cp-row cp-off";
       off.textContent = "搜索不可用：" + state.searchError;
       selMenuEl.appendChild(off);
+      if (/disable/i.test(String(state.searchError))) {
+        var optIn = document.createElement("div");
+        optIn.className = "cp-row cp-hint";
+        optIn.textContent = "可在「设置 → 通用 → 会话搜索」中一键启用（点击打开设置）";
+        optIn.addEventListener("click", function () {
+          selMenuEl.hidden = true;
+          post({ type: "openSettings" });
+        });
+        selMenuEl.appendChild(optIn);
+      }
       return;
     }
     var items = state.searchItems;
@@ -4293,6 +4305,14 @@ body.ask-mode #fork-session { display: none !important; }
       offRow.className = "cp-row cp-off";
       offRow.textContent = "搜索不可用：" + (state.searchError || "当前部署未启用会话索引");
       selMenuEl.appendChild(offRow);
+      var optIn = document.createElement("div");
+      optIn.className = "cp-row cp-hint";
+      optIn.textContent = "可在「设置 → 通用 → 会话搜索」中一键启用（点击打开设置）";
+      optIn.addEventListener("click", function () {
+        selMenuEl.hidden = true;
+        post({ type: "openSettings" });
+      });
+      selMenuEl.appendChild(optIn);
     }
     if (state.searchQuery) {
       renderSearchResults();

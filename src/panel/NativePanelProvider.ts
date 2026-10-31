@@ -16,6 +16,7 @@ import type { CompanionStatus } from "../harness/companion";
 import type { DshUpdateHooks } from "./protocol";
 import type { CompatibilityReport } from "../harness/capabilities";
 import { diagnoseDeps, invalidateDepsCache } from "../harness/deps";
+import { describeSessionSearchConfig, enableSessionSearchConfig } from "../harness/searchIndex";
 
 /** Normalize the settings-page channel picker value (free-form string on the
  *  wire) to a channel the updater understands; unknown → auto. */
@@ -541,6 +542,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   /** Called by extension.ts when harness connectivity changes. */
   setClient(client: HarnessClient | null, version?: string): void {
     const wasConnected = this.client !== null;
+    this.sessionSearchActive = null;
     this.client = client;
     this.connected = client !== null;
     this.version = version;
@@ -3108,6 +3110,8 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
   private settingsResyncQueued = false;
   /** Per-loader dedupe: in-flight promise + a single queued rerun per loader. */
   private settingsLoads = new Map<string, Promise<void>>();
+  /** Cached probe: does THIS harness deployment accept session/search? (null = unknown/not probed) */
+  private sessionSearchActive: boolean | null = null;
   private settingsLoadReruns = new Set<string>();
   /** VSIX-shipped companion bundle status (owned by extension.ts). */
   private companionStatus: CompanionStatus | null = null;
@@ -3166,6 +3170,15 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
       await this.restartHarnessFromSettings();
       return;
     }
+    // Session-search opt-in: edit the user's profile patch layer. This works
+    // without a harness connection (the page can enable it while DSH is down
+    // and then shows the restart-to-apply hint).
+    if (updateType === "enableSessionSearch") {
+      const result = enableSessionSearchConfig();
+      this.postSettingsMessage({ type: "sessionSearchSetup", ...result });
+      void this.postSessionSearchStatus();
+      return;
+    }
     if (
       updateType === "pluginUpdateCheck" ||
       updateType === "pluginUpdateInstall" ||
@@ -3186,6 +3199,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         dsh: dshVersion,
       });
       this.postCapabilitiesToSettings();
+      void this.postSessionSearchStatus();
     }
     // Scoped failure: name the tab that owns an unconnected request so the
     // page can show the error inline with a per-tab 重试 button. Requests
@@ -4287,6 +4301,7 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
           await this.postPlugins();
           await this.postProviderKeys();
           void this.postSettingsExtras();
+          void this.postSessionSearchStatus();
         } while (this.settingsResyncQueued && this.settingsPanel);
       } finally {
         this.settingsResyncRunning = false;
@@ -4348,6 +4363,47 @@ export class NativePanelProvider implements vscode.WebviewViewProvider {
         error: `环境自检不可用：${(error as Error).message}`,
       });
     }
+  }
+
+  /** Session-search card: local profile state (always available) plus one
+   *  synthetic probe per harness connection (does the running deployment
+   *  accept session/search?). The probe result is cached: a disabled index
+   *  never becomes enabled without a restart, so one probe per client is
+   *  enough and avoids rebuilding the index on every settings open. */
+  private async postSessionSearchStatus(): Promise<void> {
+    let state: ReturnType<typeof describeSessionSearchConfig> | null = null;
+    try {
+      state = describeSessionSearchConfig();
+    } catch (error) {
+      this.postSettingsMessage({
+        type: "sessionSearchStatus",
+        enabled: false,
+        profiles: [],
+        active: null,
+        error: "读取 DSH profile 配置失败：" + (error as Error).message,
+      });
+      return;
+    }
+    let active = this.sessionSearchActive;
+    if (active === null && this.client && state.enabled) {
+      try {
+        await this.client.sessionSearch("dsh");
+        active = true;
+      } catch (error) {
+        const rpc = error instanceof RpcErrorResult ? error.rpcError : null;
+        const code = rpc && typeof rpc.code === "string" ? rpc.code : "";
+        const message = error instanceof Error ? error.message : String(error);
+        active = code === "SESSION_QUERY_SEARCH_DISABLED" || /search is disabled|disabled/i.test(message) ? false : null;
+      }
+      this.sessionSearchActive = active;
+    }
+    this.postSettingsMessage({
+      type: "sessionSearchStatus",
+      enabled: state.enabled,
+      profiles: state.enabledProfiles,
+      active,
+      home: state.home,
+    });
   }
 
   /** Restart the managed harness so a user-installed toolchain update (or a
