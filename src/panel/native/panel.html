@@ -2809,14 +2809,14 @@ body.ask-mode #fork-session { display: none !important; }
         row.appendChild(txt);
       }
       if (it.placement === "queued") {
-        row.appendChild(qbtn("steer", "在下一个 LLM 回复后插入（打断）", function () {
+        row.appendChild(qbtn("插入", "在下一个 LLM 回复后插入（打断）", function () {
           // Optimistic flip: the row immediately reads 插入中; the next
           // session/queue snapshot is authoritative and keeps or corrects it.
           it.placement = "steering";
           renderQueue();
           post({ type: "queueSteer", itemId: it.id });
         }));
-        row.appendChild(qbtn("del", "撤回（从队列移除）", function () { post({ type: "queueRemove", itemId: it.id }); }, true));
+        row.appendChild(qbtn("删除", "撤回（从队列移除）", function () { post({ type: "queueRemove", itemId: it.id }); }, true));
       }
       queueEl.appendChild(row);
     });
@@ -4622,7 +4622,7 @@ body.ask-mode #fork-session { display: none !important; }
     planBtnEl.textContent = label;
     planBtnEl.classList.toggle("on", !!pm.active);
     planBtnEl.classList.toggle("pend", !!pm.pending);
-    planBtnEl.title = "计划模式：先探索并提交计划，评审批准后才执行（/plan）" +
+    planBtnEl.title = "计划模式：先探索并提交计划，评审批准后才执行；菜单中可选择「退出计划模式」（/plan off）" +
       (pm.pending ? "。切换将在下一步生效" : "");
     planBtnEl.hidden = false;
     if (!planMenuEl.hidden) renderPlanMenu();
@@ -4649,12 +4649,14 @@ body.ask-mode #fork-session { display: none !important; }
       }
       row.addEventListener("click", function () {
         planMenuEl.hidden = true;
+        if (action === "off" && !pm.active && !pm.pending) return; /* already off: nothing to do */
         post({ type: "planMode", action: action });
       });
       planMenuEl.appendChild(row);
     }
     addRow("计划模式（软引导）", "先规划 · 无硬限制", pm.active && pm.variant !== "hard", "soft");
     addRow("计划模式 + 强制只读", "权限锁为仅可查看", pm.active && pm.variant === "hard", "hard");
+    addRow("退出计划模式", "恢复正常执行 · /plan off", !pm.active && !pm.pending, "off");
   }
 
   /* ---------- account balance chip (right of the plan button) ---------- */

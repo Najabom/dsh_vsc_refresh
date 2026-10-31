@@ -4,6 +4,13 @@ All notable changes to **dsh-vsc (DSH Bridge)**.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-10-31
+
+### 计划模式可彻底退出
+
+- **计划菜单新增「退出计划模式」**：计划模式下打开底部计划开关的菜单，可直接选择「退出计划模式」（执行官方 `/plan off`），从软引导或强制只读模式一步回到默认执行模式；已退出时该行不再重复提交。计划开关的悬停提示与中英文 README 同步说明退出方式。
+- **排队消息按钮中文化**：排队行上的 `steer` / `del` 按钮改为「插入」/「删除」，与面板其它文案保持一致。
+
 ## [1.5.7-v2] - 2026-10-31
 
 ### 契约 CI 修复 · 旧 DSH 行优雅降级
