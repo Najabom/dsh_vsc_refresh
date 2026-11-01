@@ -170,7 +170,7 @@ body.ask-mode #fork-session { display: none !important; }
   #lightbox .lb-cap { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center;
                       color: var(--muted); font-size: 11px; }
 
-  #messages { flex: 1; overflow-y: auto; padding: 8px 10px; }
+  #messages { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; }
   #history-sentinel { height: 1px; }
   .turn-sep { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; color: var(--muted); font-size: 11px; }
   .turn-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
@@ -322,6 +322,11 @@ body.ask-mode #fork-session { display: none !important; }
   .body a:hover { text-decoration: underline; }
   .body a.md-img-link { color: var(--muted); font-size: 12px; }
   .body input[type="checkbox"] { vertical-align: middle; margin: 0 4px 0 0; }
+  /* Long URLs / paths in rendered markdown (bare links, tables) must wrap
+     instead of widening the whole transcript. */
+  .msg .body { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .msg .body img { max-width: 100%; height: auto; }
+  .md-table { max-width: 100%; }
 
   /* block-level copy buttons (markdown code blocks + tool args/result) */
   pre.md-code { position: relative; padding-right: 56px; }
@@ -330,8 +335,8 @@ body.ask-mode #fork-session { display: none !important; }
                 border-radius: 3px; font-size: 10px; padding: 1px 6px; cursor: pointer; opacity: .85; }
   .block-copy:hover { color: var(--fg); border-color: var(--accent); opacity: 1; }
 
-  .sys-err { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--err); color: var(--err); white-space: pre-wrap; font-size: 12px; }
-  .cmd-note { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--ok); color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+  .sys-err { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--err); color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+  .cmd-note { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--ok); color: var(--muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 12px; line-height: 2; }
   .empty.offline { color: var(--err); }
   .loading { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 72px; color: var(--muted); }
@@ -525,7 +530,7 @@ body.ask-mode #fork-session { display: none !important; }
   .t-item .tname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .t-item .tmeta { display: block; font-size: 10px; color: var(--muted);
                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .t-item .tdesc { display: none; font-size: 11px; color: var(--muted); white-space: pre-wrap;
+  .t-item .tdesc { display: none; font-size: 11px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
                    padding: 2px 0 0; }
   .t-item.open .tdesc { display: block; }
   .t-item .trole { flex: none; font-size: 10px; color: var(--muted); }
@@ -599,7 +604,7 @@ body.ask-mode #fork-session { display: none !important; }
   .in-q.skipped .in-skip { color: var(--ok); }
   .in-q .in-qheader { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px;
                       margin-bottom: 2px; }
-  .in-q .in-qdetail { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin-bottom: 6px; }
+  .in-q .in-qdetail { font-size: 11px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
   /* plan-review detail: rendered markdown (renderMd), scrollable */
   .in-q .in-qdetail.in-plan { font-size: 12px; color: var(--fg); white-space: normal;
                               max-height: 46vh; overflow-y: auto; }
@@ -741,7 +746,13 @@ body.ask-mode #fork-session { display: none !important; }
   .shot .u-image { border-radius: 6px; }
   .shot .u-image img { max-width: min(560px, 82vw); max-height: 420px; }
   .shot .u-image-ph { width: 320px; height: 180px; }
-  .shot-cap { margin-top: 2px; font-size: 11px; color: var(--muted); white-space: pre-wrap; }
+  /* The caption carries the screenshot URL and file path — one long token.
+     flex-start sizing and inherited overflow-wrap: normal used to let it
+     overflow the pane (horizontal scrollbar, intermittently). */
+  .shot { min-width: 0; max-width: 100%; }
+  .shot-cap { align-self: stretch; max-width: 100%; margin-top: 2px; font-size: 11px;
+              color: var(--muted); white-space: pre-wrap;
+              overflow-wrap: anywhere; word-break: break-word; }
   /* Tool-result images (page_screenshot, read_image, ...). */
   .tool-images { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px; }
   .tool-images .u-image img { max-width: min(420px, 78vw); max-height: 300px; }
@@ -933,7 +944,7 @@ body.ask-mode #fork-session { display: none !important; }
     workspace: null,         // effective workspace folder (provider-reported)
     capabilities: null,      // DSH compatibility ledger (version band + problems)
     mode: "main",            // "ask" = dedicated question-conversation window
-    items: [], seqs: new Set(), oldestSeq: Infinity,
+    items: [], seqs: new Set(), seenMessages: new Set(), oldestSeq: Infinity,
     running: false, lastTurn: -1,
     dirtySync: false,       // one unfrozen render right after turn/end
     curAssistant: null, openBlocks: [],
@@ -976,7 +987,7 @@ body.ask-mode #fork-session { display: none !important; }
     commands: [],            // slash-command catalog (commands/list)
     todos: [],               // todos projection for the active session
     todoDoneCarry: 0,        // cumulative completed count across "继续" rebuilds
-    todoPrevAll: false,      // previous snapshot fully completed (carry reset rule)
+    todoTaskContents: null,  // item texts of the current task list (carry identity)
     todoCache: null,         // { sessionId, items } — latest todos seen, survives session switches
     todoOpen: false,         // todo bar expanded?
     teamOpen: false,         // agent-team bar expanded?
@@ -1049,6 +1060,30 @@ body.ask-mode #fork-session { display: none !important; }
       var a = b.attachment;
       return { attachmentId: String(a.attachmentId), name: a.name ? String(a.name) : "文件", bytes: a.bytes };
     });
+  }
+
+  /** Caption for a screenshot row. The companion sends plain text; the
+   *  harness's tool-image messages (source.kind "ptc-mode") wrap the same
+   *  information in <path>/<type>/<content> tags. Keep the file path and the
+   *  size summary, drop the tags so the caption stays readable. */
+  /** Caption for a screenshot row. The companion sends plain text; the
+   *  harness's tool-image messages (source.kind "ptc-mode") wrap the same
+   *  information in <path>/<type>/<content> tags. Keep the file path and the
+   *  size summary, drop the tags so the caption stays readable. */
+  function shotCaption(text) {
+    var raw = String(text || "");
+    var open = raw.indexOf("<path>");
+    var close = raw.indexOf("</path>");
+    var path = (open >= 0 && close > open) ? raw.slice(open + 6, close).trim() : "";
+    var body = raw.split("<").map(function (s) {
+      var i = s.indexOf(">");
+      return i >= 0 ? s.slice(i + 1) : s;
+    }).join(" ");
+    var lines = body.split(String.fromCharCode(10)).map(function (s) { return s.trim(); })
+      .filter(function (s) { return !!s && s !== "image" && s !== "file"; });
+    var rest = lines.filter(function (s) { return !path || s.indexOf(path) < 0; }).join(" · ");
+    if (path) return rest ? path + " — " + rest : path;
+    return rest.length > 240 ? rest.slice(0, 237) + "…" : rest;
   }
   function contentBlocks(message) {
     return blocksOf(message).filter(function (b) {
@@ -1175,19 +1210,23 @@ body.ask-mode #fork-session { display: none !important; }
         // user/message carries content at data.content (assistant/message wraps
         // it under data.message) — accept either shape.
         var msg = d.message || d;
+        // Re-delivery guard: a reconnect replay or an overlapping history page
+        // must not fold the same durable message (id) twice.
+        var umid = msg && msg.id;
+        if (umid) { if (state.seenMessages.has(umid)) break; state.seenMessages.add(umid); }
         // The harness injects bookkeeping as user messages — runtime-context
-        // snapshots, model-changed notices, approval-policy changes. Only
-        // real turns (source.kind === "user") belong in the transcript.
-        // EXCEPTION: the companion plugin's deferred tool images (its
-        // exec.deferContext) ride a user-role message too — surface those as
-        // their own big screenshot row instead of dropping them.
+        // snapshots, model-changed notices, approval-policy changes. Those
+        // carry no image bytes and stay out of the transcript. A NON-user
+        // message that DOES carry images is content, not bookkeeping: the
+        // companion's deferred screenshots and the harness's tool-image
+        // messages (source.kind "ptc-mode", a tool's rendered image output)
+        // both ride user-role messages — render each as its own screenshot
+        // row instead of dropping it.
         if (msg.source && msg.source.kind && msg.source.kind !== "user") {
-          if (msg.source.kind === "companion") {
-            var simgs = imageBlocksOf(msg);
-            if (simgs.length) {
-              state.items.push({ kind: "shot", text: textBlocksOf(msg), turn: d.turn, images: simgs });
-              scheduleRender();
-            }
+          var simgs = imageBlocksOf(msg);
+          if (simgs.length) {
+            state.items.push({ kind: "shot", text: shotCaption(textBlocksOf(msg)), turn: d.turn, images: simgs });
+            scheduleRender();
           }
           break;
         }
@@ -1227,6 +1266,8 @@ body.ask-mode #fork-session { display: none !important; }
         break;
       }
       case "assistant/message": {
+        var amid = d.message && d.message.id;
+        if (amid) { if (state.seenMessages.has(amid)) break; state.seenMessages.add(amid); }
         ensureAssistant(ev.time);
         var finMsg = state.curAssistant;
         finMsg.blocks = contentBlocks(d.message);
@@ -1297,6 +1338,10 @@ body.ask-mode #fork-session { display: none !important; }
         }
         subTool.status = d.isError === true ? "error" : "ok";
         subTool.resultText = summarizeResult(d.content);
+        // Nested PTC calls can return images too (screenshots taken inside a
+        // run_code program): attach them so the sub-call card shows them.
+        var ptcImgs = imageBlocksOf({ content: d.content });
+        if (ptcImgs.length) subTool.images = (subTool.images || []).concat(ptcImgs);
         subTool.version = (subTool.version || 0) + 1;
         break;
       }
@@ -1425,14 +1470,13 @@ body.ask-mode #fork-session { display: none !important; }
         case "user/message": {
           var msg = d.message || d;
           var u = textBlocksOf(msg);
-          // Same as live rendering: bookkeeping user messages (runtime-context,
-          // model-selection, user-approval) stay out of the transcript — except
-          // companion tool images, which become their own screenshot row.
+          // Same as live rendering: text-only bookkeeping user messages
+          // (runtime-context, model-selection, user-approval) stay out of the
+          // transcript — image-bearing non-user messages (companion tool
+          // screenshots, tool-image "ptc-mode" messages) become screenshot rows.
           if (msg.source && msg.source.kind && msg.source.kind !== "user") {
-            if (msg.source.kind === "companion") {
-              var shimgs = imageBlocksOf(msg);
-              if (shimgs.length) out.push({ kind: "shot", text: u, turn: d.turn, images: shimgs });
-            }
+            var shimgs = imageBlocksOf(msg);
+            if (shimgs.length) out.push({ kind: "shot", text: shotCaption(u), turn: d.turn, images: shimgs });
             break;
           }
           var himgs = imageBlocksOf(msg);
@@ -1444,7 +1488,10 @@ body.ask-mode #fork-session { display: none !important; }
         }
         case "assistant/message": {
           var blocks = contentBlocks(d.message);
-          if (blocks.length) out.push({ kind: "assistant", blocks: blocks, done: true, streaming: false });
+          var lastOut = out[out.length - 1];
+          if (blocks.length && !(lastOut && lastOut.kind === "assistant" && sameBlocks(lastOut.blocks, blocks))) {
+            out.push({ kind: "assistant", blocks: blocks, done: true, streaming: false });
+          }
           break;
         }
         case "tool/call":
@@ -1671,6 +1718,10 @@ body.ask-mode #fork-session { display: none !important; }
   /** Key-based sync: keep every unchanged item's DOM node; only items whose
    *  version moved get re-rendered (assistant/tool get partial updates). Stable
    *  nodes never blink or vanish, so hover + click keep working mid-stream. */
+  /** Structural equality for two block lists (duplicate-reply guard). */
+  function sameBlocks(a, b) {
+    try { return JSON.stringify(a || []) === JSON.stringify(b || []); } catch (e) { return false; }
+  }
   function syncItems() {
     if (sentinelEl && sentinelEl.parentNode !== messagesEl) {
       messagesEl.insertBefore(sentinelEl, messagesEl.firstChild);
@@ -1721,11 +1772,13 @@ body.ask-mode #fork-session { display: none !important; }
     // group" — thinking/reasoning messages between the calls do NOT split it.
     var plan = [];
     var curGroup = null;
+    var prevAssistant = null;
     for (var i = 0; i < state.items.length; i++) {
       var it = state.items[i];
       if (!it.id) it.id = state.nextItemId++;
       var frozen = i <= frozenEnd && !state.dirtySync;
       if (it.kind === "tool") {
+        prevAssistant = null;
         // Merge only truly adjacent tool calls ("本来就挨着一起的就合并"):
         // one group per CONTIGUOUS run. A visible thinking/text message
         // between calls splits the run (each run keeps its own container at
@@ -1747,6 +1800,12 @@ body.ask-mode #fork-session { display: none !important; }
         if (it.kind === "assistant" && !it.streaming && (!it.blocks || it.blocks.length === 0)) {
           continue;
         }
+        // Same reply back-to-back (re-delivery / overlapping replay): render once.
+        if (it.kind === "assistant" && !it.streaming && prevAssistant &&
+            prevAssistant.turn === it.turn && sameBlocks(prevAssistant.blocks, it.blocks)) {
+          continue;
+        }
+        prevAssistant = it.kind === "assistant" ? it : null;
         curGroup = null;
         plan.push({ kind: it.kind, key: String(it.id), item: it, frozen: frozen });
       }
@@ -2889,13 +2948,24 @@ body.ask-mode #fork-session { display: none !important; }
         if (t.status === "in_progress") activeIdx.push((i + 1) + "#");
         else if (t.status === "completed") done++;
       });
-      // x accumulates across "继续": each turn resets the projection, and the
-      // rebuilt list must never read lower than what we already saw. Reset only
-      // for a brand-new task — a fresh list with nothing done arriving right
-      // after the previous list had finished.
-      if (done === 0 && state.todoPrevAll) state.todoDoneCarry = 0;
+      // x accumulates only inside ONE task list: a "继续" turn re-emits the
+      // same items, and the rebuilt list must never read lower than before.
+      // A brand-new task list (different item texts) starts from its own
+      // count — the old "reset only when nothing is done" rule leaked the
+      // previous task's progress into lists whose first snapshot already had
+      // items completed (e.g. previous 5/5 then new list showed 5/8, not 1/8).
+      var taskItems = state.todos.map(function (t) { return t.content; });
+      var prevTaskItems = state.todoTaskContents;
+      var sameTask = false;
+      if (prevTaskItems && prevTaskItems.length) {
+        sameTask = true;
+        for (var pi = 0; pi < prevTaskItems.length; pi++) {
+          if (taskItems.indexOf(prevTaskItems[pi]) < 0) { sameTask = false; break; }
+        }
+      }
+      if (!sameTask) state.todoDoneCarry = 0;
       state.todoDoneCarry = Math.max(state.todoDoneCarry || 0, done);
-      state.todoPrevAll = done === state.todos.length;
+      state.todoTaskContents = taskItems;
       var x = Math.min(state.todoDoneCarry, state.todos.length);
       todoCountEl.innerHTML = (activeIdx.length ? "<b>" + activeIdx.join(",") + " 进行中</b> · " : "") + x + "/" + state.todos.length;
     } else {
@@ -3427,13 +3497,13 @@ body.ask-mode #fork-session { display: none !important; }
             interactEl.hidden = true;
             unlockMainInput();
           }
-          state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.items = []; state.seqs = new Set(); state.seenMessages = new Set(); state.oldestSeq = Infinity;
           state.turnModels = {};
           state.planMode = null; renderPlanButton(); // host re-pushes for the new session
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
           state.queue = []; state.noticeOpen = false; renderQueue();
-          state.todos = []; state.todoDoneCarry = 0; state.todoPrevAll = false;
+          state.todos = []; state.todoDoneCarry = 0; state.todoTaskContents = null;
           state.team = null; // the roster belongs to the lead session; host re-pushes
           renderTaskBar(); renderTeamBar(); // host re-pushes via todos/team messages
           state.diffByCall = {}; state.activeRound = null;
@@ -3452,7 +3522,7 @@ body.ask-mode #fork-session { display: none !important; }
         var viewId = msg.viewSessionId || msg.activeSessionId || null;
         if (viewId !== state.lastViewId) {
           state.lastViewId = viewId;
-          state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.items = []; state.seqs = new Set(); state.seenMessages = new Set(); state.oldestSeq = Infinity;
           state.turnModels = {};
           state.curAssistant = null; state.openBlocks = [];
           state.hasMore = false; state.loadingOlder = false;
@@ -3626,7 +3696,7 @@ body.ask-mode #fork-session { display: none !important; }
         // events not yet seen are folded in. Full reset is kept for the
         // non-streaming cases (initial load, session switch).
         if (!state.running) {
-          state.items = []; state.seqs = new Set(); state.oldestSeq = Infinity;
+          state.items = []; state.seqs = new Set(); state.seenMessages = new Set(); state.oldestSeq = Infinity;
           state.turnModels = {};
           state.curAssistant = null; state.openBlocks = [];
           state.diffByCall = {}; state.activeRound = null;

@@ -22,3 +22,6 @@ internal/
 # Fork-local archive snapshot of the whole diff vs the upstream release
 # (redundant with git history).
 dsh-0.1.7-compat.patch
+# Local dev/debug artifacts
+.dsh-vsc/
+debug.log
