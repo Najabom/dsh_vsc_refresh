@@ -4,6 +4,16 @@
 
 Read this in: **English** · [简体中文](README.zh.md)
 
+> ## ⚠️ Project discontinued (2026-11-04)
+>
+> This project is **no longer maintained**. The maintainer's focus has moved to developing
+> plugins **natively for DSH**, instead of maintaining a VS Code–compatible DSH client.
+> The repository, README and all published releases stay online (last release **v1.5.10**);
+> no further fixes or feature work will be made. Compatibility as of the last release:
+> VS Code `^1.90.0`, Node.js `>= 24.9.0`, pnpm `>= 11.0.0`, DSH `0.1.7-rc.2` – `0.2.2-alpha.2`
+> (last verified; newer DSH versions are untested and may break).
+> **Details:** [STATUS.md](STATUS.md) · [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases)
+
 > **Fork notice** — This is a community fork of
 > [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc), maintained by
 > [Najabom](https://github.com/Najabom). It keeps the original "pure bridge"
@@ -17,7 +27,7 @@ Read this in: **English** · [简体中文](README.zh.md)
 
 ---
 
-![version](https://img.shields.io/badge/version-1.5.0-2ea44f)
+![version](https://img.shields.io/badge/version-1.5.10-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

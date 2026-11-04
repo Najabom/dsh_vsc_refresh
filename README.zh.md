@@ -4,6 +4,13 @@
 
 语言：**简体中文** · [English](README.md)
 
+> ## ⚠️ 项目已停止维护（2026-11-04）
+>
+> 本项目**不再维护**。维护者的精力已转向**直接针对 DSH 开发插件**，而不是继续维护一个针对 VS Code 的 DSH 兼容客户端。
+> 仓库、README 与全部历史发布均保留（最后版本 **v1.5.10**）；不会再有新功能或修复。
+> 截至最后版本的兼容性：VS Code `^1.90.0`、Node.js `>= 24.9.0`、pnpm `>= 11.0.0`、DSH `0.1.7-rc.2` – `0.2.2-alpha.2`（最后验证；更新的 DSH 版本未经验证，可能失效）。
+> **详细说明见 [STATUS.md](STATUS.md)**；安装包仍可从 [Releases](https://github.com/Najabom/dsh_vsc_refresh/releases) 下载。
+
 > **衍生说明** —— 本项目基于
 > [zhibailu/dsh-vsc](https://github.com/zhibailu/dsh-vsc) 二次开发，由
 > [Najabom](https://github.com/Najabom) 维护。保留原项目「纯桥接」设计，新增：
@@ -15,7 +22,7 @@
 
 ---
 
-![version](https://img.shields.io/badge/version-1.5.0-2ea44f)
+![version](https://img.shields.io/badge/version-1.5.10-2ea44f)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![vs code](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
